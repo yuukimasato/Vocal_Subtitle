@@ -1,0 +1,262 @@
+# ============================================================
+# Vocal Subtitle — 默认配置
+# ============================================================
+# 适用于通用场景的默认参数配置。
+# 可通过 --profile 参数选择不同的场景模板。
+
+pipeline:
+
+  # 运行模式: "offline" (完整批处理) | "streaming" (实时流式)
+  mode: "offline"
+
+  # 流式处理配置 (mode: "streaming" 时生效)
+  streaming:
+    chunk_duration: 2.0           # 每次处理的音频窗口（秒）
+    overlap_duration: 0.5         # 窗口重叠（秒）
+    max_latency: 3.0              # 最大允许延迟（秒）
+    llm_fallback: "local_nlp"     # 流式 LLM 降级策略: "local_nlp" | "rule_only"
+    vad_engine: "silero"          # 流式模式下只用 Silero（最快）
+
+  # Stage 1: 人声分离
+  separation:
+    engine: "uvr"                              # spleeter | openunmix | uvr
+    uvr_model: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+    output:
+      sample_rate: 16000
+      channels: 1
+      format: "wav"
+      bit_depth: 16
+
+  # Stage 2: VAD 语音检测
+  vad:
+    engine: "silero"                           # silero | ten | webrtc
+    threshold: 0.40                            # 更敏感，减少语尾渐弱漏检
+    min_speech_duration_ms: 150              # 150ms 捕获短回应（Yeah/OK/Got it）
+    min_silence_duration_ms: 350
+    # 方案一：ffmpeg silencedetect 并行检测
+    ffmpeg_enabled: true
+    ffmpeg_noise_db: -35.0
+    ffmpeg_weight: 0.4
+
+  # 方案一独立配置：ffmpeg silencedetect VAD
+  ffmpeg_vad:
+    enabled: true
+    noise_db: -35.0
+    min_speech_duration_ms: 250
+    min_silence_duration_ms: 400
+
+  # 方案二：三方法边界融合 (Silero+ffmpeg+RMS)
+  fusion:
+    enabled: false                              # Phase 4 启用
+    grid_resolution: 0.01                       # 10ms 网格
+    min_consensus: 2                            # 2/3 多数决
+    high_conf_padding: 0.03
+    low_conf_padding: 0.12
+    min_speech_duration: 0.25
+
+  # Stage 3: 片段合并
+  merging:
+    min_silence_gap: 0.4
+    max_segment_length: 20.0        # 30→20，更短更精确
+    padding: 0.10                   # 基础填充
+    adaptive_padding: true          # 新增：边界能量梯度自适应
+    padding_min: 0.05               # 清晰边界最小填充
+    padding_max: 0.20               # 模糊边界最大填充
+    pre_split_silence: true         # 新增：段内静音预切分
+    pre_split_threshold: 0.55       # 内部静音>0.55s则切分（降低敏感度，减少碎片）
+    min_fragment_duration: 0.25     # 最小片段250ms保护（减少孤立词字幕）
+    protect_single_word: true       # 新增：禁止在单词中间切分
+    min_word_gap_ms: 80             # 新增：单词内部允许的最大静音（清辅音间隔）
+    min_segment_length: 0.15       # ★ 最小段长（150ms），保留短发声，避免字幕缺漏
+
+  # 方案四：ASR 边界双向精修
+  boundary_refinement:
+    enabled: true
+    max_shrink_ms: 80               # ★ 最多向内收缩（从200降至80，减少过度收缩60%）
+    max_extend_ms: 100              # 最多向外扩展
+    check_frames: 3                 # 三帧能量斜率校验
+    frame_ms: 10
+    min_boundary_confidence: 0.5    # ★ 提高精修门槛（0.3→0.5），低置信度词不触发收缩
+    shrink_end_enabled: false       # 能量扫描对语尾低能量不可靠，默认关闭
+
+  # Stage 4.6：边界滑动窗口冗余识别（方案八）
+  # ── 针对语速快、词间静音不清晰的场景 ──
+  #   对低置信度边界做偏移窗口多次 ASR + LLM 语义仲裁，
+  #   修正因边界粘连导致的单词分裂（如 "unbearably." | "hot"）。
+  #   仅在检测到低置信度边界时触发，不影响正常边界的处理速度。
+  boundary_redundancy:
+    enabled: true
+
+    # 置信度评估：哪些边界需要冗余处理
+    confidence:
+      min_gap_trigger: 0.05            # gap < 50ms 触发（几乎紧贴）
+      max_energy_slope_trigger: 3.0    # 能量斜率 < 3.0 触发（渐变边界）
+      confidence_threshold: 0.5        # 综合分 < 0.5 需要冗余
+
+    # 滑动窗口参数
+    sliding_window:
+      base_overlap_ms: 500             # 基础重叠量（正常语速 ~2-3词）
+      fast_speech_wps: 4.0             # 快速语速阈值（词/秒）
+      fast_overlap_ms: 750             # 快速语速重叠量
+      very_fast_overlap_ms: 1000       # 极快语速重叠量
+      fusion_window_sec: 1.0           # 融合窗半宽（覆盖边界两侧）
+      max_workers: 3                   # 并行 ASR 线程数
+
+    # LLM 语义仲裁
+    arbitration:
+      llm_model: "deepseek-v4-pro"
+      # llm_base_url: "https://api.deepseek.com"  # 取消注释并填入
+      # llm_api_key: "sk-..."                      # 取消注释并填入
+      llm_temperature: 0.1
+      llm_timeout: 15.0
+      auto_apply_confidence: 0.8       # LLM 置信度 > 80% 自动应用
+      review_threshold: 0.5            # 50-80% 标记人工复核
+      fallback_to_rules: true          # 无 LLM 时降级到纯规则
+
+  # 方案五：LLM 语义合并决策
+  # ── 三层级联（无 GPU 要求）──
+  #   gap < 200ms          → 快路径：规则强制合并（<1ms，纯 CPU）
+  #   gap 200-600ms        → 本地 NLP：sentence-transformers 语义判断（~30ms，CPU）
+  #   gap 600-1200ms       → 云端 LLM：API 调用裁决（~1s，网络）
+  #   gap > 1200ms         → 硬规则：强制不合并
+  #   本地 NLP 无法裁决的   → 自动升级到云端 LLM
+  #  云端 LLM 不可用时       → 自动降级到规则模式
+  merge_decision:
+    fast_merge_max_gap: 0.20        # <200ms: 规则强制合并
+    llm_decision_min_gap: 0.20      # 200-1200ms: LLM 决策区间
+    llm_decision_max_gap: 1.20
+    hard_split_min_gap: 1.20        # >1200ms: 强制不合并
+    max_combined_duration: 5.0
+    min_fragment_duration: 0.15
+    # 渐进降级间隙范围（降本策略，无需本地 GPU）
+    local_nlp_gap_range: [0.15, 0.60]  # [0.15, 0.60]：本地 NLP 优先（CPU，零成本）
+    cloud_llm_gap_range: [0.60, 1.20]  # [0.60, 1.20]：云端 LLM 裁决（仅此范围走 API）
+    llm_tier: "cascading"           # cascading(推荐) | all_llm | rule_only
+    llm_model: "deepseek-v4-pro"    # 云端模型（需配置 base_url + api_key）
+    # llm_base_url: "https://api.deepseek.com"  # 取消注释并填入
+    # llm_api_key: "sk-..."                      # 取消注释并填入
+    llm_temperature: 0.1
+    llm_timeout: 15.0
+    llm_fallback_to_rules: true     # 云端不可用时自动回退到规则
+
+  # 方案〇：宏观静音切块（长音频适用）
+  macro_chunking:
+    enabled: true
+    auto_enable_threshold: 180.0    # >3分钟自动启用
+    silence_threshold_db: -30
+    min_silence_duration: 2.0
+    target_chunk_duration: 60.0
+    max_chunk_duration: 180.0
+    overlap_ms: 200
+    recursive: true
+
+  # 方案七：全局声学标尺校验
+  acoustic_validation:
+    enabled: true
+    skeleton_noise_db: -40.0        # 骨架提取阈值（敏感模式）
+    skeleton_min_silence: 0.1
+    skeleton_min_speech: 0.05
+    max_snap_distance: 0.15         # ★ 吸附距离从250ms降至150ms
+    snap_start_margin: 0.03        # start 吸附后保留 30ms 前导余量
+    snap_end_margin: 0.003         # ★ 吸附余量从10ms降至3ms
+    confidence_threshold: 0.6
+    rms_override_threshold: 0.15
+    generate_report: true
+    flag_threshold_ms: 200          # >200ms 偏差标记为需复核
+    unified_ffmpeg_pass: true       # 与方案一共用 ffmpeg 调用
+    skeleton_mode: true             # 骨架分段独立处理模式（默认开启）
+    allow_end_shorten: true         # ★ 允许声学标尺缩短结束时间（双向修正）
+    allow_start_pull_earlier: true  # ★ 允许声学标尺将 start 向前吸附
+
+  # Stage 3.5: 说话人分离
+  diarization:
+    enabled: true
+    engine: "agglomerative"
+    distance_threshold: 0.5
+    min_speakers: 1
+    max_speakers: 10
+    use_pca: true
+    pca_variance: 0.95
+    text_fallback: true                     # 声学聚类失败时启用文本模式降级
+
+  # Stage 4: ASR 识别
+  asr:
+    engine: "faster-whisper"                   # faster-whisper | whisper-cpp | funasr
+    model: "large-v3"
+    device: "auto"
+    compute_type: "float16"
+    # language: "zh"                           # 语言锁定，null = 自动检测
+    beam_size: 5
+    word_timestamps: true
+    condition_on_previous_text: false          # 每段独立，防止跨段幻觉
+    vad_filter: false                          # 关闭内置 VAD，使用 Stage 2
+
+  # Stage 4.5: LLM 说话人角色标注（可选）
+  speaker_role:
+    enabled: false
+    model: "deepseek-v4-pro"
+    temperature: 0.2
+    context_hint: null
+
+  # 说话人嵌入模型（提升声学聚类精度）
+  # 默认使用 speechbrain/ecapa (Apache 2.0, 无需签署协议, 开箱即用)
+  # 如需更高精度，可切换至 pyannote/embedding (需在 huggingface.co 签署协议)
+  speaker_embedding:
+    enabled: true                       # 默认启用
+    engine: "pyannote"                  # pyannote | dummy
+    model_ref: "speechbrain/spkrec-ecapa-voxceleb"  # 默认 Apache 2.0 模型
+    hf_token: ""                        # speechbrain 无需 token；切换 pyannote 时需填写
+    cache_dir: ""                       # 留空 = cache/speaker_models/
+
+  # Stage 5: 字幕构建
+  subtitle:
+    min_duration: 0.8
+    max_duration: 5.0
+    max_chars_cjk: 20
+    max_chars_latin: 42
+    max_lines: 2
+    gap_handling:
+      seamless_threshold: 0.2
+      natural_pause_max: 1.0
+    # 帧级无缝衔接（消除字幕闪烁）
+    frame_seamless: true           # 非句尾字幕自动衔接到下一句
+    max_stitch_gap: 0.12           # 最多衔接 120ms 的间隙
+
+  # 可选: LLM 后处理（默认关闭，需配置 API 密钥后手动开启）
+  llm_optimize:
+    enabled: false                          # 默认关闭（避免 LLM 意外翻译、改动语义）
+    model: "deepseek-v4-pro"
+    batch_num: 10
+    thread_num: 4
+    temperature: 0.2
+
+# 噪声抑制 / 环境底噪自适应（可选）
+# 也支持以 "noise_adaptation" 键名配置（向下兼容文档命名）
+noise_reduction:
+  enabled: false                 # 默认关闭，纯净录音不需要
+  engine: "spectral_gate"        # spectral_gate | rnnoise | deepfilternet
+  spectral_noise_reduction_db: 12.0
+  spectral_noise_estimation_frames: 10
+  burst_noise_protection: true
+  burst_noise_threshold_db: 15.0
+  burst_noise_max_duration_ms: 200
+
+# 缓存
+cache:
+  enabled: true
+  directory: "./cache"
+  ttl_separation: 86400       # 24 小时
+  ttl_transcription: 604800   # 7 天
+
+  # 降级模式控制
+  degradation:
+    mode: "full"                   # "full" | "degraded" | "minimal"
+    per_module_timeout: 60         # 每个模块最大执行秒数
+    ffmpeg_timeout: 30
+    llm_api_timeout: 15
+
+# 日志
+logging:
+  level: "INFO"
+  format: "json"              # json | console
+  file: "logs/pipeline.log"

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>说话人嵌入模型配置指南 — Vocal Subtitle</title>
+<style>
+  :root {
+    --bg: #0d1117; --bg2: #161b22; --border: #30363d;
+    --text: #e6edf3; --text2: #8b949e; --accent: #58a6ff;
+    --radius: 8px; --font: system-ui, -apple-system, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font); background: var(--bg); color: var(--text);
+    line-height: 1.7; max-width: 860px; margin: 0 auto; padding: 40px 24px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 1.8rem; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 24px; }
+  h2 { font-size: 1.35rem; margin-top: 36px; margin-bottom: 12px; color: var(--accent); }
+  h3 { font-size: 1.1rem; margin-top: 24px; margin-bottom: 8px; }
+  p, li { color: var(--text2); margin-bottom: 8px; }
+  ul, ol { padding-left: 24px; margin-bottom: 16px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: var(--bg2); font-weight: 600; }
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85rem;
+    background: var(--bg2); padding: 2px 6px; border-radius: 4px; color: #d2a8ff;
+  }
+  pre {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 16px; overflow-x: auto; margin: 12px 0;
+  }
+  pre code { background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #d29922; margin: 12px 0; padding: 6px 16px;
+    background: rgba(210,153,34,0.05); border-radius: 0 var(--radius) var(--radius) 0;
+  }
+  .step-num {
+    display: inline-block; width: 22px; height: 22px; line-height: 22px;
+    text-align: center; background: var(--accent); color: #fff; border-radius: 50%;
+    font-size: 0.75rem; font-weight: 700; margin-right: 6px;
+  }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; }
+  .badge-warn { background: rgba(210,153,34,0.15); color: #d29922; }
+  .badge-ok { background: rgba(63,185,80,0.15); color: #3fb950; }
+  .card {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 20px; margin: 16px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>🧬 说话人嵌入模型 — 配置指南</h1>
+
+<h2>为什么需要说话人嵌入模型？</h2>
+
+<p>Vocal Subtitle 默认使用<strong>间隙交替方案</strong>，能将交替对话中的语句分配给两个说话人。但对于以下场景，需要更精确的声学模型：</p>
+<ul>
+  <li><strong>2 人以上对话</strong>：间隙交替方案仅支持二元分配</li>
+  <li><strong>说话人音色相近</strong>：基于间隙无法区分谁在说话</li>
+  <li><strong>非严格交替对话</strong>：一人连续多句后换人，间隙模式会出错</li>
+</ul>
+<p><strong>说话人嵌入模型</strong>通过深度学习分析声纹特征，从任意长度的音频中提取说话人身份向量，实现更精确的聚类。</p>
+
+<hr>
+
+<h2>支持的模型</h2>
+
+<h3>默认方案：speechbrain/spkrec-ecapa-voxceleb <span class="badge badge-ok">推荐</span></h3>
+<table>
+  <tr><td>模型</td><td>ECAPA-TDNN on VoxCeleb</td></tr>
+  <tr><td>嵌入维度</td><td>192</td></tr>
+  <tr><td>协议</td><td>Apache 2.0（无需签署任何协议）</td></tr>
+  <tr><td>文件大小</td><td>~80 MB</td></tr>
+  <tr><td>HF Token</td><td>❌ 不需要</td></tr>
+  <tr><td>安装命令</td><td><code>pip install speechbrain</code></td></tr>
+</table>
+
+<h3>高精度方案：pyannote/embedding</h3>
+<table>
+  <tr><td>模型</td><td>ECAPA-TDNN</td></tr>
+  <tr><td>嵌入维度</td><td>512</td></tr>
+  <tr><td>代码协议</td><td>MIT</td></tr>
+  <tr><td>模型协议</td><td><span class="badge badge-warn">需签署 pyannote-eula</span></td></tr>
+  <tr><td>文件大小</td><td>~100 MB</td></tr>
+  <tr><td>HF Token</td><td>✅ 必须</td></tr>
+  <tr><td>安装命令</td><td><code>pip install pyannote.audio</code></td></tr>
+</table>
+
+<hr>
+
+<h2>pyannote/embedding 配置步骤</h2>
+
+<h3><span class="step-num">1</span> 签署模型使用协议</h3>
+<ol>
+  <li>打开 <a href="https://huggingface.co/pyannote/embedding" target="_blank">huggingface.co/pyannote/embedding</a></li>
+  <li>登录你的 HuggingFace 账号（没有则注册）</li>
+  <li>在模型页面点击 <strong>「Agree and access repository」</strong> 按钮</li>
+  <li>填写使用用途（如 "personal research" 或 "speaker diarization for subtitle generation"）</li>
+  <li>提交后等待页面刷新，确认显示 <strong>"You have been granted access to this model"</strong></li>
+</ol>
+
+<h3><span class="step-num">2</span> 获取 HF Token</h3>
+<ol>
+  <li>打开 <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a></li>
+  <li>点击 <strong>「Create new token」</strong></li>
+  <li>Token 类型选择 <code>Read</code>（只需读取权限）</li>
+  <li>Token 名称填写 <code>vocal-subtitle</code>（便于识别）</li>
+  <li>点击 <strong>「Create token」</strong></li>
+  <li><strong>立即复制</strong>生成的 token（格式：<code>hf_xxxxxxxxxxxxxxxxxxxxxxxxxx</code>）</li>
+</ol>
+<blockquote>⚠️ Token 只显示一次，关闭页面后无法再次查看</blockquote>
+
+<h3><span class="step-num">3</span> 在 Vocal Subtitle 中配置</h3>
+<ol>
+  <li>打开 Web GUI → 左侧设置面板</li>
+  <li>找到 <strong>「🧬 说话人嵌入模型」</strong> 设置组</li>
+  <li>勾选 <strong>「启用嵌入模型」</strong></li>
+  <li>模型选择切换为 <code>pyannote/embedding (512维)</code></li>
+  <li>在 <strong>「HF Token」</strong> 输入框中粘贴刚才复制的 token</li>
+  <li>（可选）也可设置环境变量 <code>HF_TOKEN</code> 替代 UI 输入</li>
+</ol>
+
+<h3><span class="step-num">4</span> 运行验证</h3>
+<ol>
+  <li>上传音频文件，点击「开始处理」</li>
+  <li>首次运行将自动下载模型（~100 MB），网络良好时约 1-2 分钟</li>
+  <li>下载完成后，模型缓存于 <code>cache/speaker_models/</code>，后续无需重新下载</li>
+  <li>观察运行日志：应出现 <code>Speaker embedding engine loaded: pyannote (dim=512)</code></li>
+  <li>检查输出字幕：说话人数量应正确检测，同一说话人标注一致</li>
+</ol>
+
+<hr>
+
+<h2>speechbrain/ecapa 配置步骤（无需签署协议）</h2>
+
+<div class="card">
+  <p style="margin:0;">✅ <strong>这是默认方案，开箱即用。</strong>只需安装依赖即可：</p>
+  <pre><code>pip install speechbrain</code></pre>
+</div>
+
+<ol>
+  <li>找到 <strong>「🧬 说话人嵌入模型」</strong> 设置组</li>
+  <li>确认 <strong>「启用嵌入模型」</strong> 已勾选（默认开启）</li>
+  <li>模型选择保持 <code>speechbrain/ecapa (192维)</code></li>
+  <li>HF Token <strong>留空</strong></li>
+  <li>运行即可，首次自动下载模型</li>
+</ol>
+
+<hr>
+
+<h2>环境变量（可选）</h2>
+<p>若不希望在 UI 中输入 Token，可设置环境变量：</p>
+<pre><code>export HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxxxxxxx"</code></pre>
+<p>程序会按以下优先级查找 Token：</p>
+<ol>
+  <li>前端 UI 输入 (<code>speaker_embedding.hf_token</code>)</li>
+  <li>环境变量 <code>HF_TOKEN</code></li>
+  <li>环境变量 <code>HUGGING_FACE_HUB_TOKEN</code></li>
+</ol>
+
+<hr>
+
+<h2>常见问题</h2>
+
+<h3>Q: 模型下载失败怎么办？</h3>
+<p>A: 检查网络是否可访问 huggingface.co。可手动下载模型文件放到 <code>cache/speaker_models/</code> 目录。</p>
+
+<h3>Q: 如何确认嵌入模型正在工作？</h3>
+<p>A: 查看运行日志，应包含 <code>Speaker embedding engine loaded: speechbrain (dim=192)</code>。如果是 <code>Gap-based alternation</code>，说明降级到了间隙方案。</p>
+
+<h3>Q: pyannote 协议会影响商用吗？</h3>
+<p>A: pyannote/embedding 模型采用 pyannote-eula 协议，商业使用需确认协议条款。如担心合规问题，使用默认的 speechbrain/ecapa（Apache 2.0）即可。</p>
+
+<h3>Q: 嵌入模型对 GPU 有要求吗？</h3>
+<p>A: CPU 即可运行。GPU 会更快，但不是必须。</p>
+
+<h3>Q: 能用自己的模型吗？</h3>
+<p>A: 可以。<code>speaker_embedding.model_ref</code> 支持任何 HuggingFace 上的 speaker embedding 模型，或本地路径。</p>
+
+</body>
+</html>

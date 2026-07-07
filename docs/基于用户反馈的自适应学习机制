@@ -1,0 +1,144 @@
+这是一个非常超前且极具工程价值的想法！引入基于用户反馈的自适应学习机制，能让系统从“固定规则驱动”进化为“数据驱动”，不断贴合特定用户或特定场景的偏好。
+
+结合之前的方案架构，我们可以设计一个**“自适应反馈与参数调优引擎”**。以下是对该功能的详细设计方案补充：
+
+六、新增模块：自适应反馈与学习引擎
+1. 核心工作流
+用户修改字幕 (60.ass / 修改版.srt)
+        │
+        ▼
+┌───────────────────────────┐
+│ 1. 智能对齐与解析          │ ← 动态时间规整 (DTW) + 文本模糊匹配
+│ (将自动版与修改版逐行对齐) │
+└───────────┬───────────────┘
+            │
+            ▼
+┌───────────────────────────┐
+│ 2. 差异分类与归因分析      │ ← 提取特征：时间偏移量、合并/拆分动作、标点修改
+└───────────┬───────────────┘
+            │
+            ▼
+┌───────────────────────────┐
+│ 3. 参数自适应更新          │ ← 更新用户配置文件 或 生成少样本学习数据
+└───────────┬───────────────┘
+            │
+            ▼
+    下次处理同一类型音频时，自动应用更新后的策略
+python
+
+复制代码
+2. 智能对齐与解析
+由于用户可能会合并、拆分或删除字幕行，简单的按行号对比是无效的。需要引入**动态时间规整（DTW）**或基于时间戳重叠的贪心匹配算法。
+
+def align_subtitles(
+    auto_events: List[SubtitleEvent],
+    manual_events: List[SubtitleEvent],
+    overlap_threshold: float = 0.5,
+) -> List[tuple]:
+    """将自动生成的字幕与人工修改的字幕进行对齐
+    
+    匹配策略：
+    1. 计算每对 (auto, manual) 的时间轴交并比
+    2. 结合文本相似度
+    3. 处理 1:N (拆分) 和 N:1 (合并) 的情况
+    
+    Returns:
+        [(auto_event_or_list, manual_event_or_list), ...]
+    """
+    # 使用基于时间重叠的贪心匹配或 DTW 算法
+    # ...
+python
+
+复制代码
+3. 差异分类与归因分析
+对齐后，分析用户“为什么这么改”。将修改行为分类，并映射到前述方案的各项参数中：
+
+修改行为类型	检测特征	归因映射（系统应该学到什么）
+时间轴整体平移	delta_start 和 delta_end 同方向且差值相似	调整 VADConfig 或 MergeConfig 的全局 padding
+句尾被截断（延后结束）	manual.end > auto.end，且文本末尾多出字词	调大 end_padding；或调低段内 RMS 阈值（防止语尾渐弱被切）
+句首被截断（提前开始）	manual.start < auto.start，且文本开头多出字词	调大 start_padding；或放宽宏观切块的重叠区
+本该合并却被拆分	1个 manual 对应多个 auto	调大 fast_merge_max_gap 或放宽 LLM 合并阈值
+本该拆分却被合并	1个 auto 对应多个 manual	调小 llm_decision_max_gap，或增加硬性断句规则
+标点/格式修改	文本相似度>0.9，仅标点/大小写不同	记录为 LLM Prompt 的少样本示例
+4. 参数自适应更新
+采用**“用户配置文件”**机制，不破坏系统默认配置，而是生成一份针对当前用户/场景的增量配置：
+
+class FeedbackLearner:
+    def __init__(self, user_profile_path: Path):
+        self.profile = self._load_profile(user_profile_path)
+    
+    def learn_from_diff(self, diffs: List[dict]):
+        """根据差异分析结果更新用户配置"""
+        
+        # 统计时间轴修改模式
+        end_extends = [d["delta_end"] for d in diffs if d["type"] == "end_truncated"]
+        start_extends = [d["delta_start"] for d in diffs if d["type"] == "start_truncated"]
+        
+        # 如果用户系统性地将结束时间延后，说明我们的 padding 不够
+        if len(end_extends) > 3:
+            avg_extend = np.mean(end_extends)
+            # 动态调整 padding 参数
+            current_pad = self.profile.get("merging.padding", 0.10)
+            # 采用滑动平均更新，避免过拟合单次修改
+            new_pad = current_pad + (avg_extend - current_pad) * 0.3 
+            self.profile["merging.padding"] = min(new_pad, 0.30) # 限制上限
+            
+            logger.info(f"自适应学习: end_padding {current_pad:.2f} -> {new_pad:.2f}")
+        
+        # 统计合并/拆分倾向
+        merge_breaks = sum(1 for d in diffs if d["type"] == "should_split")
+        if merge_breaks > 2:
+            # 用户频繁拆分我们合并的句子，说明阈值太宽
+            current_gap = self.profile.get("merge_decision.hard_split_gap", 1.20)
+            self.profile["merge_decision.hard_split_gap"] = max(0.8, current_gap - 0.1)
+            
+        self._save_profile()
+python
+
+复制代码
+5. LLM 少样本学习
+对于 LLM 语义合并模块，用户的修改是最好的 Prompt 示例。我们可以将用户的合并/拆分动作提取为 JSON 格式，动态注入到下次的 Prompt 中：
+
+def build_dynamic_prompt_with_feedback(
+    base_prompt: str,
+    historical_feedback: List[dict],
+    max_examples: int = 3
+) -> str:
+    """将用户历史修改作为 Few-shot 示例注入 Prompt"""
+    
+    if not historical_feedback:
+        return base_prompt
+    
+    # 筛选最具代表性的修改案例
+    examples = []
+    for fb in historical_feedback[:max_examples]:
+        if fb["type"] == "should_merge":
+            examples.append(
+                f'Example (User Preference):\n'
+                f'Fragments: {fb["fragments"]}\n'
+                f'User Decision: MERGE\n'
+                f'Reason: User prefers combining closely spaced clauses.'
+            )
+        elif fb["type"] == "should_split":
+            examples.append(
+                f'Example (User Preference):\n'
+                f'Fragment: {fb["fragment"]}\n'
+                f'User Decision: SPLIT at "{fb["split_word"]}"\n'
+                f'Reason: User prefers shorter subtitle lines for readability.'
+            )
+    
+    few_shot_block = "\n\n".join(examples)
+    return f"{base_prompt}\n\n--- Historical User Preferences ---\n{few_shot_block}\n--- End Preferences ---"
+
+复制代码
+6. 工程落地建议与安全机制
+回滚机制：每次更新 user_profile.yaml 前，备份上一版。如果下一次处理导致字幕质量断崖式下降（如通过内置的评分逻辑检测到时间轴冲突），自动回滚配置。
+置信度衰减：较早的修改记录权重应随时间衰减，以保证系统能适应用户最新的偏好变化。
+交互式确认（可选）：在 CLI 或 Web 界面中，系统分析完修改版后，输出报告：“检测到您系统性地将结束时间延后了 150ms，已为您调整默认 padding 参数。下次处理音频将应用此设置。”，让用户有感知。
+7. 实施优先级建议
+建议将此功能放在 Phase 5 (进阶功能) 实现：
+
+先完善 Phase 1-4 的基础流水线，确保默认表现达到 80 分。
+收集足够多的人工校正 .ass 文件作为离线测试集。
+开发对齐与归因模块，离线分析这些测试集，验证参数调整方向的合理性。
+最后上线在线自适应学习功能。

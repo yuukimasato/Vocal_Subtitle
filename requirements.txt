@@ -1,0 +1,75 @@
+# ============================================================
+# Vocal Subtitle — 核心依赖（最小安装，CPU 可用）
+# ============================================================
+# 安装: pip install -r requirements.txt
+#
+# 这是最小功能集：CLI + WebRTC VAD + 规则字幕生成。
+# 完整功能需要安装对应的可选依赖。
+#
+# 可选扩展:
+#   pip install -e ".[faster-whisper]"       # ASR 语音识别 (faster-whisper)
+#   pip install -e ".[silero-vad]"           # Silero VAD (需 torch ~2GB)
+#   pip install -e ".[llm]"                  # LLM 字幕优化
+#   pip install -e ".[local-nlp]"            # 本地 NLP 语义合并 (CPU, ~120MB)
+#   pip install -e ".[uvr]"                  # UVR 高品质人声分离 (BS-RoFormer)
+#   pip install -e ".[webui]"                # Web 图形界面
+#   pip install -e ".[diarization]"          # 说话人分离
+#
+# 一键部署:
+#   bash install.sh                          # 交互式安装 (自动检测 GPU)
+#   bash install.sh --cpu                    # 强制 CPU 模式
+#   bash install.sh --gui                    # CLI + Web GUI
+#   pip install -r requirements-all.txt     # 全量依赖
+#
+# 说明:
+#   - torch / torchaudio 已从核心依赖中移除，改为 [silero-vad] 可选附加
+#   - 不加任何可选附加时仅含 webrtcvad，纯 CPU 可运行
+#   - faster-whisper 是 ASR 引擎，分开发布以避免强制安装 torch
+# ============================================================
+
+# ---- 核心数值计算 ----
+numpy>=1.24
+
+# ---- 音频处理 ----
+pydub>=0.25
+
+# ---- 字幕构建与导出 (SRT / VTT / ASS) ----
+pysubs2>=1.7
+
+# ---- CLI 框架 ----
+click>=8.0
+
+# ---- 进度显示 ----
+tqdm>=4.65
+
+# ---- 结构化日志 ----
+structlog>=23.0
+
+# ---- 配置管理 ----
+pyyaml>=6.0
+
+# ---- 磁盘缓存 ----
+diskcache>=5.6
+
+# ---- 可选：GPU 显存监控 (Python < 3.12; 缺失时自动降级) ----
+# GPUtil>=1.4; python_version < '3.12'
+
+# ---- 可选：ASR 引擎 (取消注释以安装) ----
+# faster-whisper>=1.0
+
+# ---- 可选：Silero VAD (取消注释以安装, 需 torch ~2GB) ----
+# torch>=2.0
+# torchaudio>=2.0
+
+# ---- 可选：本地语义合并 (取消注释以安装, CPU 推理 ~120MB) ----
+# sentence-transformers>=3.0
+
+# ---- 可选：UVR 高品质人声分离 (BS-RoFormer, 默认推荐) ----
+# audio-separator>=0.18
+
+# ---- 可选：Open-Unmix 分离引擎 ----
+# openunmix
+# soundfile>=0.12
+
+# ---- 可选：Spleeter 分离引擎 (已停维, 仅 Python < 3.12) ----
+# spleeter>=2.3; python_version < '3.12'

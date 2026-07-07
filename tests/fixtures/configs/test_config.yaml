@@ -1,0 +1,45 @@
+# 测试用配置
+pipeline:
+  separation:
+    engine: "spleeter"
+    output:
+      sample_rate: 16000
+      channels: 1
+      format: "wav"
+      bit_depth: 16
+  vad:
+    engine: "silero"
+    threshold: 0.5
+    min_speech_duration_ms: 250
+    min_silence_duration_ms: 400
+  merging:
+    min_silence_gap: 0.4
+    max_segment_length: 30.0
+    padding: 0.1
+    min_segment_length: 0.5
+  asr:
+    engine: "faster-whisper"
+    model: "tiny"
+    device: "cpu"
+    compute_type: "int8"
+    beam_size: 5
+    word_timestamps: true
+    condition_on_previous_text: false
+    vad_filter: false
+  subtitle:
+    min_duration: 0.8
+    max_duration: 5.0
+    max_chars_cjk: 20
+    max_chars_latin: 42
+    gap_handling:
+      seamless_threshold: 0.2
+      natural_pause_max: 1.0
+  llm_optimize:
+    enabled: false
+
+cache:
+  enabled: false
+
+logging:
+  level: "WARNING"
+  format: "console"

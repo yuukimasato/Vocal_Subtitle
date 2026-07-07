@@ -1,0 +1,145 @@
+[project]
+name = "vocal-subtitle"
+version = "0.1.0"
+description = "人声分离 + 字幕生成全链路工具"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "vocal-subtitle contributors"},
+]
+keywords = ["audio", "vocal-separation", "subtitle", "asr", "whisper"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+dependencies = [
+    "numpy>=1.24",
+    "pydub>=0.25",
+    "pysubs2>=1.7",
+    "pyyaml>=6.0",
+    "click>=8.0",
+    "tqdm>=4.65",
+    "diskcache>=5.6",
+    "structlog>=23.0",
+]
+
+# GPU 显存监控 (Python 3.10-3.11; 3.12+ 需 GPUtil>=1.5 或跳过)
+# GPUtil 在 Python 3.12 上因移除 distutils 而不可用，改为可选导入
+
+[project.optional-dependencies]
+# GPU 显存监控 (可选, Python < 3.12)
+gpu-monitor = [
+    "GPUtil>=1.4; python_version < '3.12'",
+]
+# 开发与测试
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1",
+    "mypy>=1.0",
+]
+# GPU 推理加速 (CTranslate2)
+gpu = [
+    "ctranslate2>=4.0",
+]
+# Silero VAD 引擎 (需要 PyTorch, ~2GB)
+silero-vad = [
+    "torch>=2.0",
+    "torchaudio>=2.0",
+]
+# LLM 字幕优化 / 云端合并裁决
+llm = [
+    "openai>=1.0",
+    "tenacity>=8.0",
+    "json-repair>=0.25",
+]
+# 本地 NLP 语义合并引擎 (方案五 Fast-Slow Path, CPU 推理, ~120MB)
+local-nlp = [
+    "sentence-transformers>=3.0",
+]
+# UVR 高品质分离 (BS-RoFormer)
+uvr = [
+    "audio-separator>=0.18",
+]
+# Spleeter 分离引擎 (已停维, 仅 Python < 3.12)
+spleeter = [
+    "spleeter>=2.3; python_version < '3.12'",
+]
+# Open-Unmix 分离引擎
+openunmix = [
+    "openunmix",
+    "soundfile>=0.12",
+]
+# WebRTC VAD 引擎 (轻量, 无需 GPU; Python 3.12 需 setuptools<82)
+webrtcvad = [
+    "webrtcvad>=2.0",
+    "setuptools<82; python_version >= '3.12'",
+]
+# ASR 引擎
+faster-whisper = [
+    "faster-whisper>=1.0",
+]
+# Web GUI 图形界面
+webui = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+    "websockets>=12.0",
+]
+# 说话人分离 (含声学特征提取 + 凝聚聚类 + LLM 角色标注)
+# 默认使用 speechbrain ECAPA 模型，若仅需基础聚类可手动排除 speaker-embedding
+diarization = [
+    "librosa>=0.10",
+    "scikit-learn>=1.3",
+    "scipy>=1.11",
+    "vocal-subtitle[speaker-embedding]",
+]
+# 说话人嵌入模型 — 提升声学聚类精度
+speaker-embedding = [
+    "speechbrain>=1.0",      # 默认模型 (Apache 2.0, 无需签署协议)
+    # "pyannote.audio>=3.0",  # 高精度模型 (需签署协议)
+]
+# 全量安装 (含所有可选依赖)
+all = [
+    "vocal-subtitle[gpu,silero-vad,llm,local-nlp,uvr,spleeter,openunmix,webrtcvad,faster-whisper,webui,diarization,speaker-embedding]",
+]
+
+[project.scripts]
+vocal-subtitle = "vocal_subtitle.cli:main"
+vocal-subtitle-gui = "vocal_subtitle.webui.cli_runner:main"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["vocal_subtitle*", "llm_subtitle_optimizer*"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+warn_return_any = true
+warn_unused_configs = true

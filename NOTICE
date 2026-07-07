@@ -1,0 +1,84 @@
+# 第三方依赖协议声明 (Third-Party Notices)
+
+本项目 (vocal-subtitle) 依赖于以下第三方开源组件。各组件均采用与其原始许可协议相符的
+方式分发。本文件列出了所有直接依赖及其许可协议，确保使用者可放心商用。
+
+---
+
+## Python 包依赖
+
+| 包名 | 版本范围 | 协议 | 用途 |
+|------|----------|------|------|
+| numpy | >=1.24 | BSD-3-Clause | 数值计算 |
+| torch | >=2.0 | BSD-3-Clause | 深度学习框架 |
+| torchaudio | >=2.0 | BSD-2-Clause | 音频处理 |
+| pydub | >=0.25 | MIT | 音频格式转换/处理 |
+| pysubs2 | >=1.7 | MIT | 字幕格式读写 |
+| pyyaml | >=6.0 | MIT | YAML 配置解析 |
+| click | >=8.0 | BSD-3-Clause | CLI 框架 |
+| tqdm | >=4.65 | MIT | 进度条显示 |
+| diskcache | >=5.6 | Apache 2.0 | 磁盘缓存 |
+| psutil | >=5.9 | BSD-3-Clause | 系统资源监控 |
+| GPUtil | >=1.4 | MIT | GPU 检测 |
+| structlog | >=23.0 | MIT / Apache 2.0 | 结构化日志 |
+
+## 可选依赖
+
+| 包名 | 版本范围 | 协议 | 用途 |
+|------|----------|------|------|
+| spleeter | >=2.3 | MIT | 人声分离（Spleeter 引擎） |
+| faster-whisper | >=1.0 | MIT | 语音识别（faster-whisper 引擎） |
+| audio-separator | >=0.18 | MIT | 人声分离（UVR 引擎） |
+| onnxruntime-gpu | >=1.16 | MIT | GPU 推理加速 |
+| ctranslate2 | >=4.0 | MIT | CTranslate2 推理加速 |
+| openai | >=1.0 | Apache 2.0 | LLM API 客户端 |
+| tenacity | >=8.0 | Apache 2.0 | API 重试机制 |
+| json-repair | >=0.25 | MIT | JSON 修复 |
+| webrtcvad | 任意 | MIT | WebRTC VAD 引擎 |
+| funasr | 任意 | Apache 2.0 | Fun-ASR 语音识别 |
+| openunmix | 任意 | MIT | Open-Unmix 分离引擎 |
+
+## 系统依赖
+
+| 软件 | 协议 | 用途 | 备注 |
+|------|------|------|------|
+| ffmpeg | LGPL / GPL | 音频编解码 | 通过 CLI 子进程调用，非库链接方式使用 |
+
+## 模型权重协议
+
+本项目的默认配置不会自动下载任何模型权重。用户选择使用某个引擎时，
+由对应库按需下载模型。各模型权重的许可协议如下：
+
+| 模型 | 协议 | 来源 |
+|------|------|------|
+| Spleeter (2stems/4stems/5stems) | MIT | Deezer |
+| Open-Unmix (umxhq/umx/umxl) | MIT | SIGSEP |
+| UVR 自训模型 (BS-Roformer 等) | MIT | UVR Community |
+| Silero VAD | MIT | snakers4 |
+| TEN VAD | Apache 2.0 | TEN Framework |
+| faster-whisper / Whisper (tiny~large-v3) | MIT | OpenAI / SYSTRAN |
+| whisper.cpp (GGML/GGUF) | MIT | ggerganov |
+| Fun-ASR-Nano | Apache 2.0 | 阿里达摩院 |
+
+## 完整协议文本
+
+各依赖的完整协议文本可在以下位置找到：
+
+- MIT: https://opensource.org/licenses/MIT
+- Apache 2.0: https://www.apache.org/licenses/LICENSE-2.0
+- BSD-2-Clause: https://opensource.org/licenses/BSD-2-Clause
+- BSD-3-Clause: https://opensource.org/licenses/BSD-3-Clause
+- LGPL: https://www.gnu.org/licenses/lgpl-3.0.html
+- GPL: https://www.gnu.org/licenses/gpl-3.0.html
+
+---
+
+> **重要提示**：
+> - 本项目采用 MIT 协议分发。
+> - 通过 CLI 子进程调用 ffmpeg 属于"独立进程间通信"，
+>   不构成 GPL 的"衍生作品"定义，不影响本项目的 MIT 许可。
+> - 所有模型权重均可商用，但建议在实际使用前独立验证各模型的
+>   具体许可条款，因为模型协议可能随版本更新而变化。
+> - 本文件会随项目依赖更新而持续维护。
+
+最后更新：2026-07-03

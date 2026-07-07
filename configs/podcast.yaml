@@ -1,0 +1,137 @@
+# ============================================================
+# Vocal Subtitle — 播客/访谈场景模板
+# ============================================================
+# 适用于 1-3 小时播客、访谈、对话类音频。
+# 特点: 语音清晰，背景音少，说话人 1-3 人，中文为主。
+
+pipeline:
+
+  separation:
+    engine: "uvr"                              # 播客追求高品质分离
+    uvr_model: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+    output:
+      sample_rate: 16000
+      channels: 1
+      format: "wav"
+      bit_depth: 16
+
+  vad:
+    engine: "silero"
+    threshold: 0.4                             # 稍低的阈值，捕获更多语音
+    min_speech_duration_ms: 250
+    min_silence_duration_ms: 400
+
+  merging:
+    min_silence_gap: 0.4
+    max_segment_length: 30.0
+    padding: 0.08                              # 播客场景较小的 padding
+    adaptive_padding: true
+    padding_min: 0.05
+    padding_max: 0.18
+    pre_split_silence: true
+    pre_split_threshold: 0.5
+    min_fragment_duration: 0.15
+    min_segment_length: 0.5
+
+  # 方案一：ffmpeg VAD
+  ffmpeg_vad:
+    enabled: true
+    noise_db: -35.0
+    min_speech_duration_ms: 250
+    min_silence_duration_ms: 400
+
+  # 方案二：三方法边界融合（Phase 4 启用）
+  fusion:
+    enabled: false
+
+  # 方案四：ASR 边界精修
+  boundary_refinement:
+    enabled: true
+    max_shrink_ms: 200
+    max_extend_ms: 100
+
+  # 方案五：LLM 语义合并
+  merge_decision:
+    fast_merge_max_gap: 0.20
+    llm_decision_min_gap: 0.20
+    llm_decision_max_gap: 1.20
+    hard_split_min_gap: 1.20
+    llm_tier: "cascading"
+    llm_model: "deepseek-v4-pro"
+    llm_fallback_to_rules: true
+
+  # 方案〇：宏观切块（播客通常较长，推荐启用）
+  macro_chunking:
+    enabled: true
+    auto_enable_threshold: 180.0
+    target_chunk_duration: 60.0
+    max_chunk_duration: 180.0
+
+  # 方案七：声学校验
+  acoustic_validation:
+    enabled: true
+    max_snap_distance: 0.15
+    generate_report: true
+
+  # 降级模式
+  degradation:
+    mode: "full"
+
+  # Stage 3.5: 说话人分离（可选）
+  diarization:
+    enabled: true
+    engine: "agglomerative"
+    distance_threshold: 0.5
+    min_speakers: 1
+    max_speakers: 10
+    use_pca: true
+    pca_variance: 0.95
+
+  asr:
+    engine: "faster-whisper"
+    model: "large-v3"                          # 播客使用最高精度模型
+    device: "auto"
+    compute_type: "float16"
+    # language: "zh"                           # 语言锁定，null = 自动检测
+    beam_size: 5
+    word_timestamps: true
+    condition_on_previous_text: false
+    vad_filter: false
+
+  # Stage 4.5: LLM 说话人角色标注（可选）
+  speaker_role:
+    enabled: true
+    model: "deepseek-v4-pro"
+    temperature: 0.2
+    context_hint: null
+
+  subtitle:
+    min_duration: 0.8
+    max_duration: 5.0
+    max_chars_cjk: 18                          # 播客字幕偏紧凑
+    max_chars_latin: 42
+    max_lines: 2
+    gap_handling:
+      seamless_threshold: 0.2
+      natural_pause_max: 1.0
+
+  llm_optimize:
+    enabled: true
+    model: "deepseek-v4-pro"
+    batch_num: 10
+    thread_num: 4
+    temperature: 0.2
+
+noise_reduction:
+  enabled: false
+
+cache:
+  enabled: true
+  directory: "./cache"
+  ttl_separation: 86400
+  ttl_transcription: 604800
+
+logging:
+  level: "INFO"
+  format: "json"
+  file: "logs/pipeline.log"

@@ -1,0 +1,135 @@
+# ============================================================
+# Vocal Subtitle — 教学/演讲场景模板
+# ============================================================
+# 适用于课程录播、学术演讲、TED 风格讲座。
+# 特点: 单一说话人为主，语速适中，需要高精度文字转录。
+
+pipeline:
+
+  separation:
+    engine: "uvr"                              # BS-RoFormer 高品质分离
+    uvr_model: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+    output:
+      sample_rate: 16000
+      channels: 1
+      format: "wav"
+      bit_depth: 16
+
+  vad:
+    engine: "silero"
+    threshold: 0.5
+    min_speech_duration_ms: 250
+    min_silence_duration_ms: 600              # 教学节奏较慢，静音间隔较长
+
+  merging:
+    min_silence_gap: 0.6                      # 较大的合并阈值，适合慢语速
+    max_segment_length: 30.0
+    padding: 0.10
+    adaptive_padding: true
+    padding_min: 0.05
+    padding_max: 0.20
+    pre_split_silence: true
+    pre_split_threshold: 0.6                  # 教学语速慢，较长静音才切分
+    min_fragment_duration: 0.15
+    min_segment_length: 1.0                   # 过滤掉更短的片段
+
+  # 方案一：ffmpeg VAD
+  ffmpeg_vad:
+    enabled: true
+    noise_db: -35.0
+
+  # 方案二：三方法边界融合（Phase 4 启用）
+  fusion:
+    enabled: false
+
+  # 方案四：ASR 边界精修
+  boundary_refinement:
+    enabled: true
+    max_shrink_ms: 200
+    max_extend_ms: 100
+
+  # 方案五：LLM 语义合并
+  merge_decision:
+    fast_merge_max_gap: 0.20
+    llm_decision_min_gap: 0.20
+    llm_decision_max_gap: 1.20
+    hard_split_min_gap: 1.20
+    llm_tier: "cascading"
+    llm_model: "deepseek-v4-pro"
+    llm_fallback_to_rules: true
+
+  # 方案〇：宏观切块（教学视频通常较长）
+  macro_chunking:
+    enabled: true
+    auto_enable_threshold: 180.0
+    target_chunk_duration: 90.0             # 教学场景可用更长块
+    max_chunk_duration: 180.0
+
+  # 方案七：声学校验
+  acoustic_validation:
+    enabled: true
+    max_snap_distance: 0.12                  # 教学场景较保守的吸附距离
+    generate_report: true
+
+  # 降级模式
+  degradation:
+    mode: "full"
+
+  # Stage 3.5: 说话人分离
+  diarization:
+    enabled: true
+    engine: "agglomerative"
+    distance_threshold: 0.5
+    min_speakers: 1
+    max_speakers: 10
+    use_pca: true
+    pca_variance: 0.95
+
+  asr:
+    engine: "faster-whisper"
+    model: "large-v3"                         # 教学需要最高准确率
+    device: "auto"
+    compute_type: "float16"
+    # language: "zh"                          # 不锁定，支持中英混合课程
+    beam_size: 5
+    word_timestamps: true
+    condition_on_previous_text: false
+    vad_filter: false
+
+  # Stage 4.5: LLM 说话人角色标注（可选）
+  speaker_role:
+    enabled: false
+    model: "deepseek-v4-pro"
+    temperature: 0.2
+    context_hint: null
+
+  subtitle:
+    min_duration: 1.0                         # 教学字幕可以略长
+    max_duration: 6.0
+    max_chars_cjk: 24                         # 教学字幕可容纳更多文字
+    max_chars_latin: 50
+    max_lines: 2
+    gap_handling:
+      seamless_threshold: 0.3                 # 稍大的无缝衔接阈值
+      natural_pause_max: 1.5
+
+  llm_optimize:
+    enabled: false
+    model: "deepseek-v4-pro"
+    batch_num: 10
+    thread_num: 4
+    temperature: 0.2
+
+noise_reduction:
+  enabled: false
+
+cache:
+  enabled: true
+  directory: "./cache"
+  ttl_separation: 86400
+  ttl_transcription: 604800
+
+logging:
+  level: "INFO"
+  format: "json"
+  file: "logs/pipeline.log"
