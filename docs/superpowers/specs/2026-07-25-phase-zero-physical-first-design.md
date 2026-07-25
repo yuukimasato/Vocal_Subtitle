@@ -85,6 +85,9 @@ ASR 的首词和末词时间仍保留在 `event.words`，但不改写事件的�
 - 没有词级时间：仍使用物理边界；ASR 段时间仅参与内部事件的降级切分。
 - 任意后处理（最小时长、帧衔接、LLM、声学校验）都不能突破该物理区间。
 
+为让约束跨越后处理阶段，阶段零在 `SubtitleEvent` 末尾追加可选的
+`physical_start` / `physical_end` 内部包络字段。它们是当前阶段的过渡契约；阶段二建立 `physical_spans` 后再统一迁移，不把完整 `PhysicalClip` 数据模型提前引入。
+
 这取代当前“最后一条 ASR 事件无条件把 `end` 设为声学边界”的特殊逻辑：新的行为是所有事件都遵循 physical-first，而不是只对末条做特殊覆盖。
 
 ## 5. 说话人数量与 canonicalization
