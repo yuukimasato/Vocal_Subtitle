@@ -107,7 +107,7 @@ allocate_words(
 
 事件由按全局时间排序的已分配词构成，包含：
 
-- `start`、`end`：来源词时间包络；不超出对应 physical clip；
+- `start`、`end`：来源词的音频相对时间包络；正常情况下不超出对应 physical clip；
 - `text` 和词列表；
 - `speaker_id` 或 unknown/mixed 状态；
 - `physical_spans`：一个或多个物理归属范围；
@@ -115,7 +115,27 @@ allocate_words(
 - `logical_sentence_id`：稳定的逻辑句编号；
 - `alignment_warning`：跨物理边界、证据缺失、speaker 冲突等诊断。
 
-阶段三只按硬约束拆分：不同 speaker、不同不连续 physical clip、被拒绝的词不能进入同一事件。静音/换气优先断句的完整策略留给阶段四；同 speaker 的短间隙是否合并也不能覆盖 physical clip 边界。
+`PhysicalClip` 是合法范围包络，不是按固定时长灌装字幕的容器。阶段三禁止按 clip 边界切割字符或词，也不能因为 clip 边界而丢弃 ASR 原始词时间。
+
+跨边界词采用以下保守策略：
+
+- 词完全位于一个 clip 内时，事件时间使用词时间并受 clip 包络校验。
+- 词跨越相邻 clip 时，保留完整词，不生成半词文本；事件可保留多个连续 `physical_spans`，并记录 `cross_physical_boundary`。
+- 词跨越真实静音或不连续物理范围时，不强行拼接为两个事件；保留完整词作为待复识别候选，或在严格模式中拒绝并记录诊断。
+- 事件只在词边界上拆分，不在字符中间拆分。不同 speaker、不同不连续 physical clip、被拒绝的词不能进入同一事件。
+
+静音/换气优先断句的完整策略留给阶段四；同 speaker 的短间隙是否合并也不能覆盖 physical clip 边界。
+
+### 3.5 时间语义与校正层
+
+阶段三区分四种时间语义，禁止用后者无条件覆盖前者：
+
+1. `raw_*`：ASR 输出的音频相对时间，来自全局窗口归一化后的绝对坐标。
+2. `aligned_*`：WhisperX/forced alignment 或可靠声学锚点校正后的时间，可选。
+3. `physical_*`：PhysicalClip 和 PhysicalSpan 提供的合法范围，不是字幕显示时间。
+4. `display_*`：阶段四及之后的字幕排版结果。
+
+离线 ASR 的模型计算延迟不会自动形成时间戳漂移，因此阶段三不执行按处理时钟累积的动态补偿。只有检测到可靠的窗口 offset 或对齐锚点时，才允许执行有界、单调的校正；校正必须保留原始时间、记录修正原因，并再次通过物理范围校验。不得承诺固定的 5ms 残差，验收应以固定素材上的越界率、词级覆盖率和边界误差分布为准。
 
 事件模型提供到现有 `SubtitleEvent` 的显式适配，新增字段使用默认值保持旧调用方兼容。适配过程不修改 `PhysicalTimeline`。
 
@@ -166,6 +186,8 @@ asr:
 
 统计至少包含窗口数、原始词数、去重词数、拒绝词数、跨边界词数、无证据词数、speaker fallback 数、事件数、降级原因和耗时。
 
+声学吸附、微间隙合并、字幕构建和 LLM 后处理都必须在阶段三事件字段存在时同步维护 `words`、`physical_spans`、`source_word_ids` 和 warning，并拒绝跨不连续 physical clip 的隐式合并。
+
 ## 6. 错误处理与不变量
 
 - 所有时间使用有限的绝对秒数；全局结果不允许再次叠加 offset。
@@ -189,6 +211,9 @@ asr:
 8. 事件保留全部 `physical_spans`、`source_word_ids`、逻辑句 ID 和 warning。
 9. 全局 Pipeline 成功路径、依赖缺失降级路径和 fallback 关闭错误路径可测试。
 10. 默认配置下现有 Pipeline 测试和流式行为保持不变。
+11. 单个 ASR 段包含词时不回退为整个 PhysicalClip；无词时才使用物理包络并记录 warning。
+12. 相邻 clip 的跨边界词保持完整文本和多个连续 physical spans，不生成半词。
+13. 后处理尝试扩展、合并或吸附到物理范围外时被拒绝或钳制并产生诊断。
 
 ## 8. 完成定义
 
