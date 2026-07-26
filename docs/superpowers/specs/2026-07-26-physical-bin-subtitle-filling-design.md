@@ -119,7 +119,37 @@ LLM 只能改文本，不能改仓、时间、词、speaker 或 source word ID�
 
 “毫秒级”表示输出、边界搜索和误差统计均以毫秒为单位；`<=5ms` 作为理想残差观察项，不在缺乏同等精度人工标注和强制对齐证据时作为发布硬门。
 
-## 7. 测试计划
+## 7. ASR 路径策略
+
+离线默认路径使用 `auto`，但路由契约固定为：
+
+```text
+auto
+  -> global ASR
+  -> global 成功：asr_path=global
+  -> global 失败：仅在可恢复错误下进入 segmented
+                 asr_path=legacy_degraded
+```
+
+路径行为：
+
+- `global`：强制 global，失败直接报错，不降级；
+- `segmented`：保留为内部灾备、回归和故障排查入口，不作为生产推荐路径；
+- `streaming`：继续使用 segmented，因为实时任务没有完整音频上下文，结果明确标记为 `legacy`；
+- global 失败分类继续使用 `dependency_unavailable`、`resource_unavailable`、`execution_failed` 和 `invalid_result`；
+- fallback 结果不得进入 global 质量门，报告必须标记为 `legacy_degraded`；
+- 缓存身份区分 global、legacy 和 legacy_degraded，禁止跨路径复用。
+
+对外入口收敛为 global 优先：
+
+- WebUI 移除 segmented 选择项，任务提交默认发送 `auto`；
+- CLI 帮助和 README 说明 global 优先与失败降级，不把 `--asr-path segmented` 作为常规用法；
+- 兼容参数解析继续保留，但标记 deprecated，仅用于测试和故障恢复，并输出明确警告；
+- 质量 benchmark 默认运行 `auto --require-global` 或 `global`，segmented 仅作为单独的历史对照命令；
+- API 保留旧请求兼容，但不把 segmented 当作默认值；结果始终返回 `asr_path`、`global_attempted`、`fallback_category` 和 `fallback_reason`；
+- streaming 页面和接口单独标记为实时 legacy 路径，不与离线 global 质量指标混合。
+
+## 8. 测试计划
 
 新增无模型单元测试：
 
@@ -138,7 +168,7 @@ LLM 只能改文本，不能改仓、时间、词、speaker 或 source word ID�
 - 再运行中文双人、英文多人回归；
 - 每次同时比较 global 原始词时间、物理仓时间和最终显示时间，确认误差改善来自边界来源而非 benchmark 匹配放宽。
 
-## 8. 完成定义
+## 9. 完成定义
 
 - 融合 VAD/声学证据能生成可追溯的物理字幕仓；
 - global 词流完整灌装，跨仓词不被截断，覆盖守恒可审计；
@@ -147,3 +177,5 @@ LLM 只能改文本，不能改仓、时间、词、speaker 或 source word ID�
 - 四类目标素材的事件完整性和毫秒级统计门可重复运行；
 - legacy、中文双人和英文多人回归通过；
 - 真实素材报告清楚区分物理仓、ASR 词时间和最终字幕时间。
+- 离线默认只把 global 作为生产路径，segmented 仅作为明确标记的灾备/回归路径。
+- WebUI、CLI、API、缓存和 benchmark 对 global 主路径与 legacy 降级状态保持一致。
