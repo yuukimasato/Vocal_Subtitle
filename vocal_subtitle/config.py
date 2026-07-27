@@ -1157,6 +1157,18 @@ def validate_config_consistency(config: PipelineConfig) -> List[str]:
             f"重叠区内可能无法找到合适的缝合点。"
         )
 
+    # 检查5: 幻觉过滤阈值应在合理范围
+    if config.asr.no_speech_threshold < 0:
+        warnings.append(
+            f"no_speech_threshold ({config.asr.no_speech_threshold}) "
+            f"must be >= 0 (range 0.0–1.0)"
+        )
+    if config.asr.no_speech_threshold > 1.0:
+        warnings.append(
+            f"no_speech_threshold ({config.asr.no_speech_threshold}) "
+            f"must be <= 1.0"
+        )
+
     # 检查5: LLM tier 但未配置 API
     # 注意：未配置 llm_base_url 时，云端 LLM 路径自动跳过，仅使用
     # 本地 NLP（CPU 推理）+ 规则降级。如需云端裁决，

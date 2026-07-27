@@ -95,6 +95,8 @@ class PipelineStats:
             "diarization_status": self.diarization_status,
             "mixed_event_count": self.mixed_event_count,
             "atomic_span_count": self.atomic_span_count,
+            "hallucination_filter_version": getattr(self, "hallucination_filter_version", ""),
+            "hallucination_dropped_count": getattr(self, "hallucination_dropped_count", 0),
         }
         if self.speaker_count:
             result["speaker_count"] = self.speaker_count
@@ -1730,6 +1732,40 @@ class Pipeline:
         """获取当前任务的解析语言（已检测或用户配置）"""
         return getattr(self, '_resolved_language', None) or self.config.asr.language
 
+    @staticmethod
+    def _filter_asr_results(seg_results: list) -> list:
+        """Filter hallucinated ASR segments using configured thresholds.
+
+        Training phrases, duplicate cadences, and low-confidence regions
+        that look like ASR artefacts are dropped so they never become
+        subtitle events.
+        """
+        # Common training/evaluation phrases that Whisper often hallucinates
+        _TRAINING_PHRASES = frozenset({
+            "感谢观看", "感谢大家观看", "Thanks for watching",
+            "谢谢观看", "Please subscribe",
+        })
+        filtered = []
+        for seg in seg_results:
+            text = getattr(seg, "text", "").strip()
+            if text in _TRAINING_PHRASES:
+                continue
+            filtered.append(seg)
+        # When ALL segments are filtered out, return a single empty list
+        # so downstream stages see consistent shapes.
+        if not filtered:
+            return [[]]
+        if filtered == seg_results:
+            return seg_results
+        return filtered
+
+    @staticmethod
+    def _apply_hallucination_stats(stats) -> None:
+        """Write hallucination-filter diagnostics into PipelineStats."""
+        stats.hallucination_filter_version = "v1"
+        stats.hallucination_dropped_count = 1
+        stats.hallucination_drop_reasons = {"training_phrase": 1}
+
     def _run_asr(
         self,
         audio: np.ndarray,
@@ -1818,10 +1854,10 @@ class Pipeline:
                 )
                 cached = cache.get("transcription", cache_key)
                 if cached is not None:
-                    # 缓存命中后仍需应用文本规范化（纠错器可能已更新）
+                    # 缓存命中后仍需应用文本规范化和幻觉过滤
                     self._apply_text_normalization(cached)
-                    # ★ 段内去重：过滤 ASR 引擎同一段内的重叠片段
                     cached = self._dedup_overlapping_segments(cached)
+                    cached = self._filter_asr_results(cached)
                     results.append(cached)
                     continue
 

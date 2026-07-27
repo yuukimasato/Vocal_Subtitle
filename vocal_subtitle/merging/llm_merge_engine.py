@@ -127,6 +127,39 @@ Output:
 """
 
 
+def _physical_owner_compatible(left: dict, right: dict) -> bool:
+    """Two fragments belong to the same physical clip and can be merged."""
+    left_spans = left.get("physical_spans", []) or []
+    right_spans = right.get("physical_spans", []) or []
+    if not left_spans or not right_spans:
+        return True  # no physical ownership data — allow merge
+    left_clips = {
+        (s.get("physical_clip_id") or s.get("clip_id"))
+        for s in left_spans
+    }
+    right_clips = {
+        (s.get("physical_clip_id") or s.get("clip_id"))
+        for s in right_spans
+    }
+    # Only allow merge when they share at least one physical clip
+    return bool(left_clips & right_clips)
+
+
+def _physical_owner_compatible_for_events(left, right) -> bool:
+    """Two SubtitleEvents belong to the same physical clip."""
+    left_spans = list(getattr(left, "physical_spans", []) or [])
+    right_spans = list(getattr(right, "physical_spans", []) or [])
+    if not left_spans or not right_spans:
+        return True
+    def _clip_id(span):
+        if isinstance(span, dict):
+            return span.get("physical_clip_id") or span.get("clip_id")
+        return getattr(span, "clip_id", None) or getattr(span, "physical_clip_id", None)
+    left_clips = {_clip_id(s) for s in left_spans}
+    right_clips = {_clip_id(s) for s in right_spans}
+    return bool(left_clips & right_clips)
+
+
 # ------------------------------------------------------------------
 # 配置
 # ------------------------------------------------------------------
@@ -304,6 +337,10 @@ class LLMMergeEngine:
 
                 # 重叠保护：负间隙（重叠事件）绝不合并
                 if gap < -0.02:
+                    break
+
+                # 物理所有权保护：不同 physical clip 的片段不合并
+                if not _physical_owner_compatible(prev_frag, curr_frag):
                     break
 
                 # 快路径合并条件
@@ -898,6 +935,10 @@ def apply_frame_seamless_stitching(
             curr_spk = getattr(curr, "speaker_id", None)
             next_spk = getattr(nxt, "speaker_id", None)
             if curr_spk is not None and next_spk is not None and curr_spk != next_spk:
+                continue
+
+            # ★ 不同物理片段 → 不衔接（不同录音源的边界不可跨）
+            if not _physical_owner_compatible_for_events(curr, nxt):
                 continue
 
             # 当前字幕的文本

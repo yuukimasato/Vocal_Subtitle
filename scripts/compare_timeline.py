@@ -230,17 +230,13 @@ def _ass_time_to_seconds(time_str: str) -> Optional[float]:
     if not match:
         return None
     h, m, s, cs = match.groups()
-    centiseconds = float(cs or "0")
-    # 处理可能的 centiseconds (2位) vs milliseconds (3位)
-    if len(cs) <= 2:
-        centiseconds = centiseconds / (10 ** len(cs)) if cs else 0
-        # centiseconds → seconds
-        seconds = int(h) * 3600 + int(m) * 60 + int(s) + centiseconds / 100
+    if cs:
+        # Normalize to seconds: "01" (centiseconds) → 0.01, "001" (milliseconds) → 0.001
+        frac = float(cs) / (10 ** len(cs))
     else:
-        # 三位是毫秒
-        ms = float(cs)
-        seconds = int(h) * 3600 + int(m) * 60 + int(s) + ms / (10 ** len(cs))
-    return seconds
+        frac = 0.0
+    # 如果是两位小数 (centiseconds)，frac 已经是 0.01 的形式
+    return int(h) * 3600 + int(m) * 60 + int(s) + frac
 
 
 # ------------------------------------------------------------------
@@ -270,9 +266,14 @@ def match_events(
     matches = []
 
     if len(auto_events) == len(gt_events):
-        # 数量相同：按索引直接匹配
+        # Same count: validate by-index pairing with text+time scores
+        from difflib import SequenceMatcher as _SM
         for a, g in zip(auto_events, gt_events):
-            matches.append((a, g))
+            text_sim = _SM(None, a.text, g.text).ratio()
+            time_diff = abs(a.start - g.start) + abs(a.end - g.end)
+            time_score = max(0, 1 - time_diff / (max_time_diff * 2))
+            if text_sim * 0.6 + time_score * 0.4 > 0.5:
+                matches.append((a, g))
         return matches
 
     # 数量不同：贪心匹配
@@ -300,7 +301,8 @@ def match_events(
                 best_score = total_score
                 best_match = g
 
-        if best_match and best_score > 0.3:
+        # Only match when similarity is high enough to be a real match
+        if best_match and best_score > 0.5:
             matches.append((a, best_match))
             gt_used.add(best_match.index)
 
