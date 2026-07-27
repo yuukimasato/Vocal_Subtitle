@@ -1,6 +1,7 @@
 """Tests for constrained word-level boundary alignment."""
 
 import pytest
+import numpy as np
 
 from vocal_subtitle.physical.allocator import (
     AllocationResult,
@@ -9,8 +10,10 @@ from vocal_subtitle.physical.allocator import (
 )
 from vocal_subtitle.physical.ir import GlobalWord
 from vocal_subtitle.physical.subtitle_bins import PhysicalSubtitleBin
+from vocal_subtitle.physical.boundary_arbiter import BoundaryDecision
+from vocal_subtitle.physical.noise_profile import LocalNoiseProfile, NoiseInterval
+from vocal_subtitle.vad.base import SpeechSegment
 from vocal_subtitle.physical.word_alignment import (
-    BoundaryDecision,
     _asr_confidence_tier,
     _search_window_for_tier,
     _score_start_candidate,
@@ -165,6 +168,12 @@ class TestAlignWords:
         assert hasattr(aligned, "aligned_end")
         assert 0.4 <= aligned.aligned_start <= 0.55
         assert 0.75 <= aligned.aligned_end <= 0.9
+        assert aligned.physical_bin_id == "bin-1"
+        assert aligned.start_boundary_decision is not None
+        assert aligned.end_boundary_decision is not None
+        payload = aligned.to_dict()
+        assert payload["alignment_status"] == "aligned"
+        assert payload["start_boundary_decision"]["accepted"] is True
 
     def test_last_word_not_stretched_to_bin_end(self):
         word = _make_word("w1", "test", 0.5, 0.7, confidence=0.8)
@@ -189,3 +198,41 @@ class TestAlignWords:
         aligned = result[0]
         # Even without legal candidates, we get times (from raw ASR)
         assert aligned.aligned_start >= 0
+
+    def test_alignment_injects_all_acoustic_candidate_features(self):
+        sample_rate = 1000
+        audio = np.concatenate([
+            np.zeros(350, dtype=np.float32),
+            np.full(500, 0.25, dtype=np.float32),
+            np.zeros(350, dtype=np.float32),
+        ])
+        profile = LocalNoiseProfile(
+            intervals=[NoiseInterval(0.0, 1.2, 0.01, 0.001, -40.0, True, 10)]
+        )
+        word = _make_word("w1", "hello", 0.4, 0.8, confidence=0.8)
+        allocation = _make_alloc(word)
+        result = align_words_to_physical(
+            [allocation],
+            [_make_bin("bin-1", 0.3, 0.9)],
+            timeline=None,
+            audio=audio,
+            sample_rate=sample_rate,
+            vad_segments=[SpeechSegment(0.35, 0.9, confidence=0.85)],
+            ffmpeg_result={
+                "raw_silence_intervals": [(0.0, 0.35), (0.9, 1.2)],
+                "skeleton": [(0.35, 0.9)],
+                "coarse_speech": [(0.35, 0.9)],
+            },
+            noise_profile=profile,
+        )
+
+        for decision in (
+            result[0].start_boundary_decision,
+            result[0].end_boundary_decision,
+        ):
+            assert decision is not None
+            details = decision.candidate_diagnostics
+            assert details
+            keys = set(details[0]["features"])
+            assert {"rms_gradient", "vad_probability", "ffmpeg_boundary_distance"} <= keys
+            assert {"noise_db", "noise_stability"} <= keys

@@ -7,6 +7,7 @@
 - 中文每行最多 20 字，英文每行最多 42 字符
 - 单条字幕最多 2 行
 """
+import copy
 import math
 
 import logging
@@ -15,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from .time_mapper import SubtitleEvent, TimeMapper
+from .time_mapper import SubtitleEvent
 
 logger = logging.getLogger(__name__)
 
@@ -79,19 +80,12 @@ class SubtitleBuilder:
         Returns:
             输出文件路径
         """
-        # ★ 兜底去重：上游管线可能残留重叠重复事件，写入前最终扫描
-        events = TimeMapper._deduplicate_overlapping(list(events))
+        # Events reaching the builder have already passed the finalizer.  The
+        # builder may format text for a target container, but it must not alter
+        # logical cue count, timing, numbering, or caller-owned objects.
+        wrapped = self._apply_line_wrapping(copy.deepcopy(list(events)))
 
-        # Step 1: 合并过短的相邻字幕
-        merged = self._merge_short_events(events)
-
-        # Step 2: 拆分过长的字幕行
-        split = self._split_long_events(merged)
-
-        # Step 3: 自动换行处理
-        wrapped = self._apply_line_wrapping(split)
-
-        # Step 4: 使用 pysubs2 导出
+        # 使用 pysubs2 导出
         output_path.parent.mkdir(parents=True, exist_ok=True)
         subs = self._to_ssa(wrapped, fmt=fmt)
         subs.save(str(output_path), format_=fmt)
@@ -118,11 +112,7 @@ class SubtitleBuilder:
         Returns:
             字幕文件内容字符串
         """
-        events = TimeMapper._deduplicate_overlapping(list(events))
-
-        merged = self._merge_short_events(events)
-        split = self._split_long_events(merged)
-        wrapped = self._apply_line_wrapping(split)
+        wrapped = self._apply_line_wrapping(copy.deepcopy(list(events)))
         subs = self._to_ssa(wrapped, fmt=fmt)
         return subs.to_string(fmt)
 

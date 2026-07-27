@@ -1,30 +1,59 @@
 scenes:
-  - name: "中文单人-巧乐兹"
-    audio: test/简单三步就能复刻巧乐兹？-人声.wav
-    ground_truth: test/181-人工修正.ass
-    category: single_speaker
+  - name: "中文双人-QS"
+    audio: test/QS-0-1-2-2-人声.wav
+    ground_truth: test/QS-0-1-2-2-人工.ass
+    category: multi_speaker
+    language: zh
+    speaker_count: 2
+    tags: [overlap_or_interruption]
 
   - name: "中文单人-181"
     audio: test/181人声.wav
     ground_truth: test/181-人工修正.ass
     category: single_speaker
+    language: zh
+    speaker_count: 2
 
   - name: "中文双人-培训测试"
     audio: test/培训测试-双人.wav
     ground_truth: test/培训测试-双人-人工修正.ass
     category: multi_speaker
+    language: zh
+    speaker_count: 2
 
   - name: "中文多人"
     audio: test/中文多人员测试音频.wav
     ground_truth: test/中文多人员测试音频字幕-人工修正.ass
     category: multi_speaker
+    language: zh
+    speaker_count: 3
 
   - name: "英文多人"
     audio: test/英文多人员测试音频.wav
     ground_truth: test/英文多人员测试音频-人工修正.ass
     category: multi_speaker
+    language: en
+    speaker_count: 3
 
   - name: "英国老头测评"
     audio: test/video_英国老头评测中国美的移动空调_1MIN_real-人声.wav
     ground_truth: test/video_英国老头评测中国美的移动空调_手动人工字幕.ass
     category: single_speaker
+    language: en
+    speaker_count: 1
+
+  - name: "中文朗读双人"
+    audio: test/中文朗读测试-双人.wav
+    ground_truth: null
+    category: multi_speaker
+    language: zh
+    speaker_count: 2
+    tags: [no_manual_reference]
+
+  - name: "巧乐兹"
+    audio: test/简单三步就能复刻巧乐兹？-人声.wav
+    ground_truth: null
+    category: single_speaker
+    language: zh
+    speaker_count: 1
+    tags: [no_manual_reference]

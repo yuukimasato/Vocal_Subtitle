@@ -43,10 +43,15 @@ def load_manifest(path: Path, repo_root: Path | None = None) -> list[dict[str, A
         if not name or name in names:
             raise ValueError(f"duplicate or empty scene name: {name!r}")
         audio = root / str(item.get("audio", ""))
-        ground_truth = root / str(item.get("ground_truth", ""))
+        ground_truth_value = item.get("ground_truth")
+        ground_truth = (
+            root / str(ground_truth_value)
+            if ground_truth_value
+            else None
+        )
         if not audio.is_file():
             raise FileNotFoundError(f"{name}: audio not found: {audio}")
-        if not ground_truth.is_file():
+        if ground_truth is not None and not ground_truth.is_file():
             raise FileNotFoundError(
                 f"{name}: ground truth not found: {ground_truth}"
             )
@@ -132,6 +137,7 @@ def _run_scene(
     skip_separation: bool,
     no_cache: bool,
     asr_model: str | None,
+    reuse_existing: bool = False,
 ) -> dict[str, Any]:
     from vocal_subtitle.config import ConfigLoader
     from vocal_subtitle.pipeline import Pipeline
@@ -145,7 +151,10 @@ def _run_scene(
         "scene": name,
         "requested_asr_path": asr_path,
         "audio": str(scene["audio_path"].relative_to(repo_root)),
-        "ground_truth": str(scene["ground_truth_path"].relative_to(repo_root)),
+        "ground_truth": (
+            str(scene["ground_truth_path"].relative_to(repo_root))
+            if scene["ground_truth_path"] is not None else None
+        ),
         "category": scene["category"],
         "expected_speaker_count": scene.get("speaker_count"),
         "success": False,
@@ -161,34 +170,42 @@ def _run_scene(
         config = loader.merge_with_overrides(config, **overrides)
         if no_cache:
             config.cache.enabled = False
-        pipeline_result = Pipeline(config).run(
-            input_path=scene["audio_path"],
-            output_path=subtitle_path,
-            output_format="ass",
-            skip_separation=skip_separation,
-        )
-        stats = pipeline_result["stats"]
-        stats_dict = stats.to_dict()
-        produced = Path(pipeline_result.get("subtitle_path", subtitle_path))
+        existing_diagnostics = scene_dir / "diagnostic_report.json"
+        if reuse_existing and subtitle_path.is_file() and existing_diagnostics.is_file():
+            stats_dict = json.loads(existing_diagnostics.read_text(encoding="utf-8"))
+            produced = subtitle_path
+            result["reused_existing_output"] = True
+        else:
+            pipeline_result = Pipeline(config).run(
+                input_path=scene["audio_path"],
+                output_path=subtitle_path,
+                output_format="ass",
+                skip_separation=skip_separation,
+            )
+            stats = pipeline_result["stats"]
+            stats_dict = stats.to_dict()
+            produced = Path(pipeline_result.get("subtitle_path", subtitle_path))
         if not produced.is_file():
             produced = subtitle_path
-        comparison_path = scene_dir / "comparison_report.json"
-        from scripts.compare_timeline import compare
+        comparison_payload = None
+        if scene["ground_truth_path"] is not None:
+            comparison_path = scene_dir / "comparison_report.json"
+            from scripts.compare_timeline import compare
 
-        comparison = compare(
-            parse_subtitle(produced),
-            parse_subtitle(scene["ground_truth_path"]),
-            auto_file=str(produced),
-            gt_file=str(scene["ground_truth_path"]),
-        )
-        comparison_payload = report_to_dict(comparison)
-        comparison_payload["text_metrics"] = _text_metrics(
-            produced, scene["ground_truth_path"]
-        )
-        comparison_path.write_text(
-            json.dumps(comparison_payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+            comparison = compare(
+                parse_subtitle(produced),
+                parse_subtitle(scene["ground_truth_path"]),
+                auto_file=str(produced),
+                gt_file=str(scene["ground_truth_path"]),
+            )
+            comparison_payload = report_to_dict(comparison)
+            comparison_payload["text_metrics"] = _text_metrics(
+                produced, scene["ground_truth_path"]
+            )
+            comparison_path.write_text(
+                json.dumps(comparison_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
         (scene_dir / "diagnostic_report.json").write_text(
             json.dumps(stats_dict, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -196,7 +213,9 @@ def _run_scene(
         result.update(
             {
                 "success": True,
-                "actual_asr_path": stats_dict.get("asr_path"),
+                "actual_asr_path": stats_dict.get("asr_path") or (
+                    "global" if stats_dict.get("global_attempted") else "segmented"
+                ),
                 "global_attempted": stats_dict.get("global_attempted", False),
                 "fallback_category": stats_dict.get("fallback_category"),
                 "fallback_reason": stats_dict.get("fallback_reason"),
@@ -263,6 +282,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="忽略已有缓存，强制重新执行流水线",
     )
+    parser.add_argument(
+        "--reuse-existing",
+        action="store_true",
+        help="复用已有输出和诊断，仅重建汇总报告",
+    )
     parser.add_argument("--ci", action="store_true", help="质量门失败时返回非零")
     parser.add_argument(
         "--require-global",
@@ -306,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
             skip_separation=not args.with_separation,
             no_cache=args.no_cache,
             asr_model=args.asr_model,
+            reuse_existing=args.reuse_existing,
         )
         for scene in scenes
     ]
@@ -324,6 +349,9 @@ def main(argv: list[str] | None = None) -> int:
         reasons.append("no_scenes")
     if len(successful) != len(results):
         reasons.append("scene_failure")
+    if any(scene.get("ground_truth_path") is None for scene in scenes):
+        reasons.append("missing_ground_truth_for_one_or_more_scenes")
+    reasons.append("acoustic_gold_not_available")
     categories = {str(scene["category"]) for scene in scenes}
     for scene in scenes:
         categories.update(str(tag) for tag in scene.get("tags", []))
@@ -349,11 +377,12 @@ def main(argv: list[str] | None = None) -> int:
         diagnostic = item.get("diagnostic", {})
         if diagnostic.get("physical_violation_count", 0):
             reasons.append(f"physical_violation:{item['scene']}")
-        coverage = item.get("comparison", {}).get("text_metrics", {}).get(
-            "reference_content_coverage", 0.0
-        )
-        if coverage < 0.99:
-            reasons.append(f"reference_content_coverage:{item['scene']}")
+        if item.get("comparison"):
+            coverage = item["comparison"].get("text_metrics", {}).get(
+                "reference_content_coverage", 0.0
+            )
+            if coverage < 0.99:
+                reasons.append(f"reference_content_coverage:{item['scene']}")
 
     summary = {
         "manifest": str(manifest_path.relative_to(repo_root)),

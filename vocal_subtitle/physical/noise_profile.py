@@ -52,6 +52,33 @@ class LocalNoiseProfile:
     warnings: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def interval_at(self, time: float) -> NoiseInterval | None:
+        """Return the stable interval containing ``time``."""
+        for interval in self.intervals:
+            if interval.start <= time <= interval.end:
+                return interval
+        if self.intervals:
+            return min(
+                self.intervals,
+                key=lambda item: min(abs(time - item.start), abs(time - item.end)),
+            )
+        return None
+
+    def candidate_features(self, time: float) -> dict[str, float]:
+        """Expose normalized noise features for boundary candidate auditing."""
+        interval = self.interval_at(time)
+        if interval is None:
+            return {
+                "noise_db": self.fallback_db,
+                "noise_stability": 0.0,
+                "noise_fallback": 1.0,
+            }
+        return {
+            "noise_db": float(interval.noise_db),
+            "noise_stability": 1.0 if interval.stable else 0.0,
+            "noise_fallback": 0.0 if interval.stable else 1.0,
+        }
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "intervals": [

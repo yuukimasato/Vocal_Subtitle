@@ -1,0 +1,1102 @@
+{
+  "meta": {
+    "auto_file": "/home/hope/Tools/Vocal_Subtitle/test/benchmark_results/real_material-20260727/auto/中文双人-培训测试/subtitle.ass",
+    "ground_truth_file": "/home/hope/Tools/Vocal_Subtitle/test/培训测试-双人-人工修正.ass",
+    "total_events": 49,
+    "matched_events": 44
+  },
+  "statistics": {
+    "start": {
+      "mean_error_ms": 50.7,
+      "mae_ms": 218.9,
+      "std_ms": 520.2,
+      "max_error_ms": 2240.0,
+      "gt_300ms_pct": 18.2,
+      "gt_500ms_pct": 18.2
+    },
+    "end": {
+      "mean_error_ms": -146.1,
+      "mae_ms": 322.0,
+      "std_ms": 599.1,
+      "max_error_ms": 2500.0,
+      "gt_300ms_pct": 29.5,
+      "gt_500ms_pct": 27.3
+    }
+  },
+  "health_score": null,
+  "flagged_events": [
+    {
+      "id": 1,
+      "issues": [
+        "end_error_680ms"
+      ],
+      "auto_start": 8.77,
+      "auto_end": 9.37,
+      "gt_start": 8.7,
+      "gt_end": 10.05,
+      "text_preview": "phone.",
+      "start_error_ms": 70.0,
+      "end_error_ms": -680.0
+    },
+    {
+      "id": 6,
+      "issues": [
+        "start_error_1050ms"
+      ],
+      "auto_start": 20.58,
+      "auto_end": 22.7,
+      "gt_start": 21.63,
+      "gt_end": 22.72,
+      "text_preview": "This is Susie. How may I assist you?",
+      "start_error_ms": -1050.0,
+      "end_error_ms": -20.0
+    },
+    {
+      "id": 10,
+      "issues": [
+        "end_error_2500ms",
+        "start_error_790ms"
+      ],
+      "auto_start": 32.56,
+      "auto_end": 33.61,
+      "gt_start": 31.77,
+      "gt_end": 36.11,
+      "text_preview": "Identify yourself.",
+      "start_error_ms": 790.0,
+      "end_error_ms": -2500.0
+    },
+    {
+      "id": 16,
+      "issues": [
+        "end_error_730ms",
+        "start_error_1260ms"
+      ],
+      "auto_start": 44.56,
+      "auto_end": 47.2,
+      "gt_start": 45.82,
+      "gt_end": 47.93,
+      "text_preview": "This is Xiao Xi. Effective communication.",
+      "start_error_ms": -1260.0,
+      "end_error_ms": -730.0
+    },
+    {
+      "id": 17,
+      "issues": [
+        "end_error_570ms"
+      ],
+      "auto_start": 48.16,
+      "auto_end": 48.73,
+      "gt_start": 48.14,
+      "gt_end": 49.3,
+      "text_preview": "Yeah.",
+      "start_error_ms": 20.0,
+      "end_error_ms": -570.0
+    },
+    {
+      "id": 19,
+      "issues": [
+        "start_error_820ms"
+      ],
+      "auto_start": 54.15,
+      "auto_end": 55.28,
+      "gt_start": 53.33,
+      "gt_end": 55.31,
+      "text_preview": "Listen attentively.",
+      "start_error_ms": 820.0,
+      "end_error_ms": -30.0
+    },
+    {
+      "id": 22,
+      "issues": [
+        "end_error_660ms",
+        "start_error_1370ms"
+      ],
+      "auto_start": 57.45,
+      "auto_end": 61.9,
+      "gt_start": 58.82,
+      "gt_end": 61.24,
+      "text_preview": "Let guests finish. Use verbal cues to show you are",
+      "start_error_ms": -1370.0,
+      "end_error_ms": 660.0
+    },
+    {
+      "id": 23,
+      "issues": [
+        "start_error_570ms"
+      ],
+      "auto_start": 62.02,
+      "auto_end": 62.89,
+      "gt_start": 61.45,
+      "gt_end": 62.92,
+      "text_preview": "Never interrupt.",
+      "start_error_ms": 570.0,
+      "end_error_ms": -30.0
+    },
+    {
+      "id": 25,
+      "issues": [
+        "end_error_1160ms"
+      ],
+      "auto_start": 67.53,
+      "auto_end": 68.31,
+      "gt_start": 67.52,
+      "gt_end": 69.47,
+      "text_preview": "Show respect.",
+      "start_error_ms": 10.0,
+      "end_error_ms": -1160.0
+    },
+    {
+      "id": 28,
+      "issues": [
+        "end_error_1050ms"
+      ],
+      "auto_start": 74.85,
+      "auto_end": 76.84,
+      "gt_start": 74.85,
+      "gt_end": 77.89,
+      "text_preview": "Before ending the call, Repeat.",
+      "start_error_ms": 0.0,
+      "end_error_ms": -1050.0
+    },
+    {
+      "id": 30,
+      "issues": [
+        "end_error_960ms"
+      ],
+      "auto_start": 82.58,
+      "auto_end": 85.22,
+      "gt_start": 82.58,
+      "gt_end": 86.18,
+      "text_preview": "So I have you down for a non-smoking king room tom",
+      "start_error_ms": 0.0,
+      "end_error_ms": -960.0
+    },
+    {
+      "id": 33,
+      "issues": [
+        "end_error_1260ms"
+      ],
+      "auto_start": 89.73,
+      "auto_end": 92.45,
+      "gt_start": 89.73,
+      "gt_end": 91.19,
+      "text_preview": "Your reservation is all set. Anything else I can h",
+      "start_error_ms": 0.0,
+      "end_error_ms": 1260.0
+    },
+    {
+      "id": 35,
+      "issues": [
+        "end_error_1180ms"
+      ],
+      "auto_start": 94.56,
+      "auto_end": 97.13,
+      "gt_start": 94.51,
+      "gt_end": 95.95,
+      "text_preview": "My pleasure, Mr. Wallace. Thank you for calling.",
+      "start_error_ms": 50.0,
+      "end_error_ms": 1180.0
+    },
+    {
+      "id": 38,
+      "issues": [
+        "end_error_550ms"
+      ],
+      "auto_start": 100.22,
+      "auto_end": 101.39,
+      "gt_start": 100.2,
+      "gt_end": 101.94,
+      "text_preview": "1. guest hangs up.",
+      "start_error_ms": 20.0,
+      "end_error_ms": -550.0
+    },
+    {
+      "id": 44,
+      "issues": [
+        "end_error_1330ms"
+      ],
+      "auto_start": 114.77,
+      "auto_end": 115.38,
+      "gt_start": 114.74,
+      "gt_end": 116.71,
+      "text_preview": "Example.",
+      "start_error_ms": 30.0,
+      "end_error_ms": -1330.0
+    },
+    {
+      "id": 48,
+      "issues": [
+        "end_error_450ms",
+        "start_error_2240ms"
+      ],
+      "auto_start": 124.93,
+      "auto_end": 126.54,
+      "gt_start": 122.69,
+      "gt_end": 126.09,
+      "text_preview": "and confirm details hang up.",
+      "start_error_ms": 2240.0,
+      "end_error_ms": 450.0
+    },
+    {
+      "id": 49,
+      "issues": [
+        "start_error_890ms"
+      ],
+      "auto_start": 127.05,
+      "auto_end": 129.02,
+      "gt_start": 126.16,
+      "gt_end": 129.05,
+      "text_preview": "Guest first and replace gently.",
+      "start_error_ms": 890.0,
+      "end_error_ms": -30.0
+    }
+  ],
+  "detail": [
+    {
+      "index": 1,
+      "auto": {
+        "start": 8.77,
+        "end": 9.37
+      },
+      "ground_truth": {
+        "start": 8.7,
+        "end": 10.05
+      },
+      "error_ms": {
+        "start": 70.0,
+        "end": -680.0
+      },
+      "text": {
+        "auto": "phone.",
+        "ground_truth": "Phone Etiquette"
+      }
+    },
+    {
+      "index": 2,
+      "auto": {
+        "start": 11.31,
+        "end": 12.36
+      },
+      "ground_truth": {
+        "start": 11.29,
+        "end": 12.37
+      },
+      "error_ms": {
+        "start": 20.0,
+        "end": -10.0
+      },
+      "text": {
+        "auto": "Rapid response.",
+        "ground_truth": "Rapid Response"
+      }
+    },
+    {
+      "index": 3,
+      "auto": {
+        "start": 15.6,
+        "end": 17.94
+      },
+      "ground_truth": {
+        "start": 15.6,
+        "end": 17.86
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 80.0
+      },
+      "text": {
+        "auto": "Good afternoon. Mehood Lestie Hotel.",
+        "ground_truth": "Good afternoon."
+      }
+    },
+    {
+      "index": 4,
+      "auto": {
+        "start": 18.1,
+        "end": 20.27
+      },
+      "ground_truth": {
+        "start": 18.09,
+        "end": 20.29
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "Wuhan HK Central Flagship Store.",
+        "ground_truth": "Mehood Lestie Hotel, Wuhan HK Central Flagship Store."
+      }
+    },
+    {
+      "index": 6,
+      "auto": {
+        "start": 20.58,
+        "end": 22.7
+      },
+      "ground_truth": {
+        "start": 21.63,
+        "end": 22.72
+      },
+      "error_ms": {
+        "start": -1050.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "This is Susie. How may I assist you?",
+        "ground_truth": "How may I assist you?"
+      }
+    },
+    {
+      "index": 7,
+      "auto": {
+        "start": 23.46,
+        "end": 25.14
+      },
+      "ground_truth": {
+        "start": 23.45,
+        "end": 25.16
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "1. answer within three rings.",
+        "ground_truth": "1. Answer within 3 rings:"
+      }
+    },
+    {
+      "index": 8,
+      "auto": {
+        "start": 25.5,
+        "end": 26.97
+      },
+      "ground_truth": {
+        "start": 25.47,
+        "end": 26.97
+      },
+      "error_ms": {
+        "start": 30.0,
+        "end": 0.0
+      },
+      "text": {
+        "auto": "Answer before the. third ring.",
+        "ground_truth": "Answer before the third ring."
+      }
+    },
+    {
+      "index": 9,
+      "auto": {
+        "start": 27.73,
+        "end": 31.16
+      },
+      "ground_truth": {
+        "start": 27.74,
+        "end": 31.16
+      },
+      "error_ms": {
+        "start": -10.0,
+        "end": 0.0
+      },
+      "text": {
+        "auto": "Greet with good morning, afternoon, evening based on the time.",
+        "ground_truth": "Greet with \"Good morning/afternoon/evening\" based on the time."
+      }
+    },
+    {
+      "index": 10,
+      "auto": {
+        "start": 32.56,
+        "end": 33.61
+      },
+      "ground_truth": {
+        "start": 31.77,
+        "end": 36.11
+      },
+      "error_ms": {
+        "start": 790.0,
+        "end": -2500.0
+      },
+      "text": {
+        "auto": "Identify yourself.",
+        "ground_truth": "2. Identify yourself:"
+      }
+    },
+    {
+      "index": 11,
+      "auto": {
+        "start": 36.37,
+        "end": 37.44
+      },
+      "ground_truth": {
+        "start": 36.37,
+        "end": 37.49
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": -50.0
+      },
+      "text": {
+        "auto": "and your name clearly.",
+        "ground_truth": "State the hotel name, department, and your name clearly."
+      }
+    },
+    {
+      "index": 12,
+      "auto": {
+        "start": 37.9,
+        "end": 38.5
+      },
+      "ground_truth": {
+        "start": 37.89,
+        "end": 38.51
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -10.0
+      },
+      "text": {
+        "auto": "Example.",
+        "ground_truth": "Example:"
+      }
+    },
+    {
+      "index": 13,
+      "auto": {
+        "start": 38.8,
+        "end": 40.92
+      },
+      "ground_truth": {
+        "start": 38.79,
+        "end": 40.93
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -10.0
+      },
+      "text": {
+        "auto": "Good afternoon, Mehood Lestie Hotel.",
+        "ground_truth": "Good afternoon, Mehood Lestie Hotel,"
+      }
+    },
+    {
+      "index": 14,
+      "auto": {
+        "start": 41.27,
+        "end": 44.19
+      },
+      "ground_truth": {
+        "start": 41.25,
+        "end": 44.21
+      },
+      "error_ms": {
+        "start": 20.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "Wuhan HK Central flagship store front desk.",
+        "ground_truth": "Wuhan HK Central Flagship Store front desk,"
+      }
+    },
+    {
+      "index": 16,
+      "auto": {
+        "start": 44.56,
+        "end": 47.2
+      },
+      "ground_truth": {
+        "start": 45.82,
+        "end": 47.93
+      },
+      "error_ms": {
+        "start": -1260.0,
+        "end": -730.0
+      },
+      "text": {
+        "auto": "This is Xiao Xi. Effective communication.",
+        "ground_truth": "Effective Communication & Listening"
+      }
+    },
+    {
+      "index": 17,
+      "auto": {
+        "start": 48.16,
+        "end": 48.73
+      },
+      "ground_truth": {
+        "start": 48.14,
+        "end": 49.3
+      },
+      "error_ms": {
+        "start": 20.0,
+        "end": -570.0
+      },
+      "text": {
+        "auto": "Yeah.",
+        "ground_truth": "Yeah, okay."
+      }
+    },
+    {
+      "index": 18,
+      "auto": {
+        "start": 52.6,
+        "end": 53.2
+      },
+      "ground_truth": {
+        "start": 52.59,
+        "end": 52.98
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": 220.0
+      },
+      "text": {
+        "auto": "Got it.",
+        "ground_truth": "Got it."
+      }
+    },
+    {
+      "index": 19,
+      "auto": {
+        "start": 54.15,
+        "end": 55.28
+      },
+      "ground_truth": {
+        "start": 53.33,
+        "end": 55.31
+      },
+      "error_ms": {
+        "start": 820.0,
+        "end": -30.0
+      },
+      "text": {
+        "auto": "Listen attentively.",
+        "ground_truth": "1. Listen attentively:"
+      }
+    },
+    {
+      "index": 20,
+      "auto": {
+        "start": 55.8,
+        "end": 56.86
+      },
+      "ground_truth": {
+        "start": 55.78,
+        "end": 56.9
+      },
+      "error_ms": {
+        "start": 20.0,
+        "end": -40.0
+      },
+      "text": {
+        "auto": "Focus on the guest.",
+        "ground_truth": "Focus on the guest."
+      }
+    },
+    {
+      "index": 22,
+      "auto": {
+        "start": 57.45,
+        "end": 61.9
+      },
+      "ground_truth": {
+        "start": 58.82,
+        "end": 61.24
+      },
+      "error_ms": {
+        "start": -1370.0,
+        "end": 660.0
+      },
+      "text": {
+        "auto": "Let guests finish. Use verbal cues to show you are listening. 2.",
+        "ground_truth": "Use verbal cues to show you are listening."
+      }
+    },
+    {
+      "index": 23,
+      "auto": {
+        "start": 62.02,
+        "end": 62.89
+      },
+      "ground_truth": {
+        "start": 61.45,
+        "end": 62.92
+      },
+      "error_ms": {
+        "start": 570.0,
+        "end": -30.0
+      },
+      "text": {
+        "auto": "Never interrupt.",
+        "ground_truth": "2. Never interrupt:"
+      }
+    },
+    {
+      "index": 24,
+      "auto": {
+        "start": 63.44,
+        "end": 67.02
+      },
+      "ground_truth": {
+        "start": 63.38,
+        "end": 67.07
+      },
+      "error_ms": {
+        "start": 60.0,
+        "end": -50.0
+      },
+      "text": {
+        "auto": "Wait for the guest to finish speaking before responding, no matter how urgent.",
+        "ground_truth": "Wait for the guest to finish speaking before responding, no matter how urgent."
+      }
+    },
+    {
+      "index": 25,
+      "auto": {
+        "start": 67.53,
+        "end": 68.31
+      },
+      "ground_truth": {
+        "start": 67.52,
+        "end": 69.47
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -1160.0
+      },
+      "text": {
+        "auto": "Show respect.",
+        "ground_truth": "Show respect and professionalism."
+      }
+    },
+    {
+      "index": 26,
+      "auto": {
+        "start": 70.48,
+        "end": 72.14
+      },
+      "ground_truth": {
+        "start": 70.47,
+        "end": 72.17
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -30.0
+      },
+      "text": {
+        "auto": "Mr. Wallace, if I may confirm.",
+        "ground_truth": "Mr. Wallace, if I may confirm."
+      }
+    },
+    {
+      "index": 27,
+      "auto": {
+        "start": 72.7,
+        "end": 74.2
+      },
+      "ground_truth": {
+        "start": 72.69,
+        "end": 74.22
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "Three, repeat to confirm.",
+        "ground_truth": "3. Repeat to confirm:"
+      }
+    },
+    {
+      "index": 28,
+      "auto": {
+        "start": 74.85,
+        "end": 76.84
+      },
+      "ground_truth": {
+        "start": 74.85,
+        "end": 77.89
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": -1050.0
+      },
+      "text": {
+        "auto": "Before ending the call, Repeat.",
+        "ground_truth": "Before ending the call, repeat key details"
+      }
+    },
+    {
+      "index": 29,
+      "auto": {
+        "start": 78.31,
+        "end": 81.96
+      },
+      "ground_truth": {
+        "start": 78.31,
+        "end": 81.98
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "Room number, time requests. to ensure zero errors.",
+        "ground_truth": "(room number, time, requests)to ensure zero errors."
+      }
+    },
+    {
+      "index": 30,
+      "auto": {
+        "start": 82.58,
+        "end": 85.22
+      },
+      "ground_truth": {
+        "start": 82.58,
+        "end": 86.18
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": -960.0
+      },
+      "text": {
+        "auto": "So I have you down for a non-smoking king room tomorrow.",
+        "ground_truth": "So I have you down for a non-smoking king room tomorrow, is that right?"
+      }
+    },
+    {
+      "index": 31,
+      "auto": {
+        "start": 86.79,
+        "end": 87.88
+      },
+      "ground_truth": {
+        "start": 86.74,
+        "end": 87.87
+      },
+      "error_ms": {
+        "start": 50.0,
+        "end": 10.0
+      },
+      "text": {
+        "auto": "End with courtesy.",
+        "ground_truth": "End with courtesy."
+      }
+    },
+    {
+      "index": 32,
+      "auto": {
+        "start": 88.14,
+        "end": 89.15
+      },
+      "ground_truth": {
+        "start": 88.11,
+        "end": 89.17
+      },
+      "error_ms": {
+        "start": 30.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "All right, Mr. Wallace.",
+        "ground_truth": "Alright, Mr. Wallace."
+      }
+    },
+    {
+      "index": 33,
+      "auto": {
+        "start": 89.73,
+        "end": 92.45
+      },
+      "ground_truth": {
+        "start": 89.73,
+        "end": 91.19
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 1260.0
+      },
+      "text": {
+        "auto": "Your reservation is all set. Anything else I can help?",
+        "ground_truth": "Your reservation is all set."
+      }
+    },
+    {
+      "index": 35,
+      "auto": {
+        "start": 94.56,
+        "end": 97.13
+      },
+      "ground_truth": {
+        "start": 94.51,
+        "end": 95.95
+      },
+      "error_ms": {
+        "start": 50.0,
+        "end": 1180.0
+      },
+      "text": {
+        "auto": "My pleasure, Mr. Wallace. Thank you for calling.",
+        "ground_truth": "My pleasure, Mr. Wallace."
+      }
+    },
+    {
+      "index": 37,
+      "auto": {
+        "start": 97.69,
+        "end": 99.14
+      },
+      "ground_truth": {
+        "start": 97.69,
+        "end": 99.13
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 10.0
+      },
+      "text": {
+        "auto": "See you soon. Goodbye.",
+        "ground_truth": "See you soon. Goodbye."
+      }
+    },
+    {
+      "index": 38,
+      "auto": {
+        "start": 100.22,
+        "end": 101.39
+      },
+      "ground_truth": {
+        "start": 100.2,
+        "end": 101.94
+      },
+      "error_ms": {
+        "start": 20.0,
+        "end": -550.0
+      },
+      "text": {
+        "auto": "1. guest hangs up.",
+        "ground_truth": "1. Guest hangs up first:"
+      }
+    },
+    {
+      "index": 39,
+      "auto": {
+        "start": 102.29,
+        "end": 105.93
+      },
+      "ground_truth": {
+        "start": 102.29,
+        "end": 105.95
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "Wait for the guest to end the call before gently replacing the receiver.",
+        "ground_truth": "Wait for the guest to end the call before gently replacing the receiver."
+      }
+    },
+    {
+      "index": 40,
+      "auto": {
+        "start": 106.1,
+        "end": 106.99
+      },
+      "ground_truth": {
+        "start": 106.11,
+        "end": 107.07
+      },
+      "error_ms": {
+        "start": -10.0,
+        "end": -80.0
+      },
+      "text": {
+        "auto": "Sign of Respect.",
+        "ground_truth": "Sign of respect."
+      }
+    },
+    {
+      "index": 41,
+      "auto": {
+        "start": 107.44,
+        "end": 109.55
+      },
+      "ground_truth": {
+        "start": 107.42,
+        "end": 109.55
+      },
+      "error_ms": {
+        "start": 20.0,
+        "end": 0.0
+      },
+      "text": {
+        "auto": "Use Please and Thank You.",
+        "ground_truth": "2. Use \"Please\" and \"Thank You\":"
+      }
+    },
+    {
+      "index": 42,
+      "auto": {
+        "start": 109.97,
+        "end": 111.86
+      },
+      "ground_truth": {
+        "start": 109.91,
+        "end": 112.02
+      },
+      "error_ms": {
+        "start": 60.0,
+        "end": -160.0
+      },
+      "text": {
+        "auto": "Always lead with pleas for respect.",
+        "ground_truth": "Always lead with \"Please\" for respect,"
+      }
+    },
+    {
+      "index": 43,
+      "auto": {
+        "start": 112.33,
+        "end": 114.37
+      },
+      "ground_truth": {
+        "start": 112.32,
+        "end": 114.39
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "and end with thank you for appreciation.",
+        "ground_truth": "and end with \"Thank you\" for appreciation,"
+      }
+    },
+    {
+      "index": 44,
+      "auto": {
+        "start": 114.77,
+        "end": 115.38
+      },
+      "ground_truth": {
+        "start": 114.74,
+        "end": 116.71
+      },
+      "error_ms": {
+        "start": 30.0,
+        "end": -1330.0
+      },
+      "text": {
+        "auto": "Example.",
+        "ground_truth": "example: \"Thank you for calling.\""
+      }
+    },
+    {
+      "index": 45,
+      "auto": {
+        "start": 116.98,
+        "end": 118.67
+      },
+      "ground_truth": {
+        "start": 116.97,
+        "end": 118.69
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "Summary. and review.",
+        "ground_truth": "Summary and review."
+      }
+    },
+    {
+      "index": 46,
+      "auto": {
+        "start": 118.94,
+        "end": 120.75
+      },
+      "ground_truth": {
+        "start": 118.93,
+        "end": 120.76
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -10.0
+      },
+      "text": {
+        "auto": "Answer within three rings.",
+        "ground_truth": "Answer: Within 3 rings & identify yourself"
+      }
+    },
+    {
+      "index": 47,
+      "auto": {
+        "start": 120.88,
+        "end": 121.9
+      },
+      "ground_truth": {
+        "start": 120.87,
+        "end": 121.93
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -30.0
+      },
+      "text": {
+        "auto": "and identify yourself.",
+        "ground_truth": "Listen: Focus without interruptions"
+      }
+    },
+    {
+      "index": 48,
+      "auto": {
+        "start": 124.93,
+        "end": 126.54
+      },
+      "ground_truth": {
+        "start": 122.69,
+        "end": 126.09
+      },
+      "error_ms": {
+        "start": 2240.0,
+        "end": 450.0
+      },
+      "text": {
+        "auto": "and confirm details hang up.",
+        "ground_truth": "and confirm details"
+      }
+    },
+    {
+      "index": 49,
+      "auto": {
+        "start": 127.05,
+        "end": 129.02
+      },
+      "ground_truth": {
+        "start": 126.16,
+        "end": 129.05
+      },
+      "error_ms": {
+        "start": 890.0,
+        "end": -30.0
+      },
+      "text": {
+        "auto": "Guest first and replace gently.",
+        "ground_truth": "Hang up: Guest first & replace gently."
+      }
+    }
+  ],
+  "text_metrics": {
+    "auto_event_count": 58,
+    "ground_truth_event_count": 49,
+    "matched_event_count": 44,
+    "unmatched_auto_event_count": 14,
+    "unmatched_ground_truth_event_count": 5,
+    "mean_text_similarity": 0.8226,
+    "char_error_rate_proxy": 0.1774,
+    "reference_content_coverage": 0.96
+  }
+}

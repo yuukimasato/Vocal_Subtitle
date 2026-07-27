@@ -1,0 +1,480 @@
+{
+  "meta": {
+    "auto_file": "/home/hope/Tools/Vocal_Subtitle/test/benchmark_results/real_material-20260727/auto/中文单人-181/subtitle.ass",
+    "ground_truth_file": "/home/hope/Tools/Vocal_Subtitle/test/181-人工修正.ass",
+    "total_events": 24,
+    "matched_events": 19
+  },
+  "statistics": {
+    "start": {
+      "mean_error_ms": -70.0,
+      "mae_ms": 84.7,
+      "std_ms": 282.2,
+      "max_error_ms": 1260.0,
+      "gt_300ms_pct": 5.3,
+      "gt_500ms_pct": 5.3
+    },
+    "end": {
+      "mean_error_ms": 281.6,
+      "mae_ms": 281.6,
+      "std_ms": 379.5,
+      "max_error_ms": 1460.0,
+      "gt_300ms_pct": 26.3,
+      "gt_500ms_pct": 10.5
+    }
+  },
+  "health_score": null,
+  "flagged_events": [
+    {
+      "id": 2,
+      "issues": [
+        "end_error_310ms"
+      ],
+      "auto_start": 3.92,
+      "auto_end": 6.11,
+      "gt_start": 3.92,
+      "gt_end": 5.8,
+      "text_preview": "你说若是师父他老人家还在.",
+      "start_error_ms": 0.0,
+      "end_error_ms": 310.0
+    },
+    {
+      "id": 8,
+      "issues": [
+        "end_error_1210ms"
+      ],
+      "auto_start": 17.5,
+      "auto_end": 20.64,
+      "gt_start": 17.5,
+      "gt_end": 19.43,
+      "text_preview": "借此机会与画一门联盟扩大势力.",
+      "start_error_ms": 0.0,
+      "end_error_ms": 1210.0
+    },
+    {
+      "id": 11,
+      "issues": [
+        "end_error_340ms"
+      ],
+      "auto_start": 22.82,
+      "auto_end": 23.76,
+      "gt_start": 22.82,
+      "gt_end": 23.42,
+      "text_preview": "演越宗.",
+      "start_error_ms": 0.0,
+      "end_error_ms": 340.0
+    },
+    {
+      "id": 16,
+      "issues": [
+        "end_error_390ms"
+      ],
+      "auto_start": 38.03,
+      "auto_end": 39.12,
+      "gt_start": 38.03,
+      "gt_end": 38.73,
+      "text_preview": "你可知.",
+      "start_error_ms": 0.0,
+      "end_error_ms": 390.0
+    },
+    {
+      "id": 21,
+      "issues": [
+        "end_error_1460ms"
+      ],
+      "auto_start": 49.9,
+      "auto_end": 53.23,
+      "gt_start": 49.9,
+      "gt_end": 51.77,
+      "text_preview": "既然你這麼喜歡那個登徒子. 自己下去啊.",
+      "start_error_ms": 0.0,
+      "end_error_ms": 1460.0
+    },
+    {
+      "id": 23,
+      "issues": [
+        "start_error_1260ms"
+      ],
+      "auto_start": 53.45,
+      "auto_end": 55.83,
+      "gt_start": 54.71,
+      "gt_end": 55.83,
+      "text_preview": "我知你心中不平. 娃.",
+      "start_error_ms": -1260.0,
+      "end_error_ms": 0.0
+    }
+  ],
+  "detail": [
+    {
+      "index": 1,
+      "auto": {
+        "start": 2.08,
+        "end": 2.97
+      },
+      "ground_truth": {
+        "start": 2.08,
+        "end": 2.71
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 260.0
+      },
+      "text": {
+        "auto": "师姐.",
+        "ground_truth": "师姐"
+      }
+    },
+    {
+      "index": 2,
+      "auto": {
+        "start": 3.92,
+        "end": 6.11
+      },
+      "ground_truth": {
+        "start": 3.92,
+        "end": 5.8
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 310.0
+      },
+      "text": {
+        "auto": "你说若是师父他老人家还在.",
+        "ground_truth": "你说若是师父他老人家还在,"
+      }
+    },
+    {
+      "index": 3,
+      "auto": {
+        "start": 6.49,
+        "end": 7.44
+      },
+      "ground_truth": {
+        "start": 6.49,
+        "end": 7.39
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 50.0
+      },
+      "text": {
+        "auto": "会怎么想呢?",
+        "ground_truth": "会怎么想呢?"
+      }
+    },
+    {
+      "index": 5,
+      "auto": {
+        "start": 12.27,
+        "end": 13.82
+      },
+      "ground_truth": {
+        "start": 12.27,
+        "end": 13.63
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 190.0
+      },
+      "text": {
+        "auto": "眼下这大战将行。",
+        "ground_truth": "眼下这大战将起。"
+      }
+    },
+    {
+      "index": 6,
+      "auto": {
+        "start": 14.34,
+        "end": 15.97
+      },
+      "ground_truth": {
+        "start": 14.31,
+        "end": 15.82
+      },
+      "error_ms": {
+        "start": 30.0,
+        "end": 150.0
+      },
+      "text": {
+        "auto": "九国盟急需援手.",
+        "ground_truth": "九国盟急需援手"
+      }
+    },
+    {
+      "index": 8,
+      "auto": {
+        "start": 17.5,
+        "end": 20.64
+      },
+      "ground_truth": {
+        "start": 17.5,
+        "end": 19.43
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 1210.0
+      },
+      "text": {
+        "auto": "借此机会与画一门联盟扩大势力.",
+        "ground_truth": "借此机会与化意门联盟"
+      }
+    },
+    {
+      "index": 10,
+      "auto": {
+        "start": 20.96,
+        "end": 22.07
+      },
+      "ground_truth": {
+        "start": 21.01,
+        "end": 21.99
+      },
+      "error_ms": {
+        "start": -50.0,
+        "end": 80.0
+      },
+      "text": {
+        "auto": "我答应过师父.",
+        "ground_truth": "我答应过师父"
+      }
+    },
+    {
+      "index": 11,
+      "auto": {
+        "start": 22.82,
+        "end": 23.76
+      },
+      "ground_truth": {
+        "start": 22.82,
+        "end": 23.42
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 340.0
+      },
+      "text": {
+        "auto": "演越宗.",
+        "ground_truth": "掩月宗"
+      }
+    },
+    {
+      "index": 12,
+      "auto": {
+        "start": 24.15,
+        "end": 25.88
+      },
+      "ground_truth": {
+        "start": 24.18,
+        "end": 25.77
+      },
+      "error_ms": {
+        "start": -30.0,
+        "end": 110.0
+      },
+      "text": {
+        "auto": "勢必要實現復興.",
+        "ground_truth": "勢必要实现复兴"
+      }
+    },
+    {
+      "index": 14,
+      "auto": {
+        "start": 30.43,
+        "end": 32.47
+      },
+      "ground_truth": {
+        "start": 30.39,
+        "end": 32.41
+      },
+      "error_ms": {
+        "start": 40.0,
+        "end": 60.0
+      },
+      "text": {
+        "auto": "所以就要我來付這個代價.",
+        "ground_truth": "所以就要我來付这个代价"
+      }
+    },
+    {
+      "index": 15,
+      "auto": {
+        "start": 35.08,
+        "end": 37.61
+      },
+      "ground_truth": {
+        "start": 35.02,
+        "end": 37.52
+      },
+      "error_ms": {
+        "start": 60.0,
+        "end": 90.0
+      },
+      "text": {
+        "auto": "别耍性子了. 玩玩.",
+        "ground_truth": "婉儿 别耍性子了"
+      }
+    },
+    {
+      "index": 16,
+      "auto": {
+        "start": 38.03,
+        "end": 39.12
+      },
+      "ground_truth": {
+        "start": 38.03,
+        "end": 38.73
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 390.0
+      },
+      "text": {
+        "auto": "你可知.",
+        "ground_truth": "你可知"
+      }
+    },
+    {
+      "index": 17,
+      "auto": {
+        "start": 39.71,
+        "end": 42.67
+      },
+      "ground_truth": {
+        "start": 39.79,
+        "end": 42.39
+      },
+      "error_ms": {
+        "start": -80.0,
+        "end": 280.0
+      },
+      "text": {
+        "auto": "这魏长老对你可是用情至深呢.",
+        "ground_truth": "这魏长老对你可是用情至深呢"
+      }
+    },
+    {
+      "index": 18,
+      "auto": {
+        "start": 43.49,
+        "end": 44.27
+      },
+      "ground_truth": {
+        "start": 43.54,
+        "end": 44.21
+      },
+      "error_ms": {
+        "start": -50.0,
+        "end": 60.0
+      },
+      "text": {
+        "auto": "可悲了你.",
+        "ground_truth": "他为了你"
+      }
+    },
+    {
+      "index": 19,
+      "auto": {
+        "start": 44.87,
+        "end": 46.65
+      },
+      "ground_truth": {
+        "start": 44.87,
+        "end": 46.49
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 160.0
+      },
+      "text": {
+        "auto": "甚至愿意加入演乐综.",
+        "ground_truth": "甚至愿意加入掩月宗"
+      }
+    },
+    {
+      "index": 20,
+      "auto": {
+        "start": 47.96,
+        "end": 48.62
+      },
+      "ground_truth": {
+        "start": 47.95,
+        "end": 48.6
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": 20.0
+      },
+      "text": {
+        "auto": "好.",
+        "ground_truth": "好"
+      }
+    },
+    {
+      "index": 21,
+      "auto": {
+        "start": 49.9,
+        "end": 53.23
+      },
+      "ground_truth": {
+        "start": 49.9,
+        "end": 51.77
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 1460.0
+      },
+      "text": {
+        "auto": "既然你這麼喜歡那個登徒子. 自己下去啊.",
+        "ground_truth": "既然你这么喜欢那个登徒子"
+      }
+    },
+    {
+      "index": 23,
+      "auto": {
+        "start": 53.45,
+        "end": 55.83
+      },
+      "ground_truth": {
+        "start": 54.71,
+        "end": 55.83
+      },
+      "error_ms": {
+        "start": -1260.0,
+        "end": 0.0
+      },
+      "text": {
+        "auto": "我知你心中不平. 娃.",
+        "ground_truth": "婉儿 我知你心中不平"
+      }
+    },
+    {
+      "index": 24,
+      "auto": {
+        "start": 56.01,
+        "end": 58.33
+      },
+      "ground_truth": {
+        "start": 56.01,
+        "end": 58.2
+      },
+      "error_ms": {
+        "start": 0.0,
+        "end": 130.0
+      },
+      "text": {
+        "auto": "但此事已昭告天下, 没得商量。",
+        "ground_truth": "但此事已昭告天下, 没得商量。"
+      }
+    }
+  ],
+  "text_metrics": {
+    "auto_event_count": 21,
+    "ground_truth_event_count": 24,
+    "matched_event_count": 19,
+    "unmatched_auto_event_count": 2,
+    "unmatched_ground_truth_event_count": 5,
+    "mean_text_similarity": 0.7325,
+    "char_error_rate_proxy": 0.2675,
+    "reference_content_coverage": 0.805
+  }
+}

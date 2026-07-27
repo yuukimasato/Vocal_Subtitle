@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -86,8 +87,12 @@ def finalize_subtitle_events(
         "step": [],
     }
 
+    # Work on detached events so cache, WebUI and diagnostic consumers cannot
+    # observe display mapping or numbering mutations through shared objects.
+    detached_events = copy.deepcopy(list(events))
+
     # Step 1: 验证输入事件
-    valid_events = _validate_input_events(events, diagnostics)
+    valid_events = _validate_input_events(detached_events, diagnostics)
 
     # Step 2: 转换为语义组格式
     semantic_groups = _events_to_semantic_groups(valid_events)

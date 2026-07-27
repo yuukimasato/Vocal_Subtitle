@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vocal-subtitle.local/schemas/acoustic-gold-v1.schema.json",
+  "title": "Vocal Subtitle acoustic word boundary gold",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "words"],
+  "properties": {
+    "schema_version": {
+      "const": "acoustic-gold-v1"
+    },
+    "media_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "audio_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sample_rate": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "words": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/word"
+      }
+    }
+  },
+  "$defs": {
+    "word": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "text", "speaker", "onset", "offset"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "speaker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "onset": {
+          "type": "number",
+          "minimum": 0
+        },
+        "offset": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["onset", "offset"]
+          },
+          "then": {
+            "properties": {
+              "offset": {
+                "exclusiveMinimum": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

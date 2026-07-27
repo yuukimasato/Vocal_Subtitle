@@ -1,0 +1,181 @@
+{
+  "meta": {
+    "auto_file": "/home/hope/Tools/Vocal_Subtitle/test/benchmark_results/real_material-20260727/auto/中文多人/subtitle.ass",
+    "ground_truth_file": "/home/hope/Tools/Vocal_Subtitle/test/中文多人员测试音频字幕-人工修正.ass",
+    "total_events": 7,
+    "matched_events": 6
+  },
+  "statistics": {
+    "start": {
+      "mean_error_ms": 83.3,
+      "mae_ms": 120.0,
+      "std_ms": 209.6,
+      "max_error_ms": 540.0,
+      "gt_300ms_pct": 16.7,
+      "gt_500ms_pct": 16.7
+    },
+    "end": {
+      "mean_error_ms": 200.0,
+      "mae_ms": 243.3,
+      "std_ms": 497.1,
+      "max_error_ms": 1310.0,
+      "gt_300ms_pct": 16.7,
+      "gt_500ms_pct": 16.7
+    }
+  },
+  "health_score": null,
+  "flagged_events": [
+    {
+      "id": 1,
+      "issues": [
+        "end_error_1310ms"
+      ],
+      "auto_start": 0.24,
+      "auto_end": 4.0,
+      "gt_start": 0.21,
+      "gt_end": 2.69,
+      "text_preview": "立即重临附近的安全出口楼梯. 酒店火警请立即离开.",
+      "start_error_ms": 30.0,
+      "end_error_ms": 1310.0
+    },
+    {
+      "id": 3,
+      "issues": [
+        "start_error_540ms"
+      ],
+      "auto_start": 4.74,
+      "auto_end": 5.77,
+      "gt_start": 4.2,
+      "gt_end": 5.79,
+      "text_preview": "火势很大.",
+      "start_error_ms": 540.0,
+      "end_error_ms": -20.0
+    }
+  ],
+  "detail": [
+    {
+      "index": 1,
+      "auto": {
+        "start": 0.24,
+        "end": 4.0
+      },
+      "ground_truth": {
+        "start": 0.21,
+        "end": 2.69
+      },
+      "error_ms": {
+        "start": 30.0,
+        "end": 1310.0
+      },
+      "text": {
+        "auto": "立即重临附近的安全出口楼梯. 酒店火警请立即离开.",
+        "ground_truth": "立即从您附近的安全出口楼梯"
+      }
+    },
+    {
+      "index": 3,
+      "auto": {
+        "start": 4.74,
+        "end": 5.77
+      },
+      "ground_truth": {
+        "start": 4.2,
+        "end": 5.79
+      },
+      "error_ms": {
+        "start": 540.0,
+        "end": -20.0
+      },
+      "text": {
+        "auto": "火势很大.",
+        "ground_truth": "前台前台火势很大"
+      }
+    },
+    {
+      "index": 4,
+      "auto": {
+        "start": 5.93,
+        "end": 7.54
+      },
+      "ground_truth": {
+        "start": 5.91,
+        "end": 7.55
+      },
+      "error_ms": {
+        "start": 20.0,
+        "end": -10.0
+      },
+      "text": {
+        "auto": "电梯已紧急迫降.",
+        "ground_truth": "电梯已紧急迫降"
+      }
+    },
+    {
+      "index": 5,
+      "auto": {
+        "start": 7.72,
+        "end": 9.46
+      },
+      "ground_truth": {
+        "start": 7.71,
+        "end": 9.49
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -30.0
+      },
+      "text": {
+        "auto": "大家沿墙壁弯腰低姿.",
+        "ground_truth": "大家沿墙壁弯腰低姿"
+      }
+    },
+    {
+      "index": 6,
+      "auto": {
+        "start": 9.68,
+        "end": 11.3
+      },
+      "ground_truth": {
+        "start": 9.67,
+        "end": 11.37
+      },
+      "error_ms": {
+        "start": 10.0,
+        "end": -70.0
+      },
+      "text": {
+        "auto": "目前疏散人员已清点完毕.",
+        "ground_truth": "目前疏散人员已清点完毕"
+      }
+    },
+    {
+      "index": 7,
+      "auto": {
+        "start": 11.3,
+        "end": 13.28
+      },
+      "ground_truth": {
+        "start": 11.41,
+        "end": 13.26
+      },
+      "error_ms": {
+        "start": -110.0,
+        "end": 20.0
+      },
+      "text": {
+        "auto": "请各位宾客不要惊慌.",
+        "ground_truth": "请各位宾客不要惊慌"
+      }
+    }
+  ],
+  "text_metrics": {
+    "auto_event_count": 7,
+    "ground_truth_event_count": 7,
+    "matched_event_count": 6,
+    "unmatched_auto_event_count": 1,
+    "unmatched_ground_truth_event_count": 1,
+    "mean_text_similarity": 0.8324,
+    "char_error_rate_proxy": 0.1676,
+    "reference_content_coverage": 0.9697
+  }
+}

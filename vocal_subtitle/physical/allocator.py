@@ -14,6 +14,7 @@ from .ir import (
     GlobalWord,
 )
 from .subtitle_bins import PhysicalSubtitleBin
+from .boundary_arbiter import BoundaryDecision
 from .timeline import PhysicalTimeline, SpeechEvidenceSpan
 
 
@@ -45,10 +46,43 @@ class WordAllocation:
     speaker_source: str = "unknown"
     warnings: tuple[str, ...] = ()
     accepted: bool = True
+    aligned_start: float | None = None
+    aligned_end: float | None = None
+    physical_bin_id: str | None = None
+    boundary_confidence: float = 0.0
+    alignment_status: str = "unaligned"
+    start_boundary_decision: BoundaryDecision | None = None
+    end_boundary_decision: BoundaryDecision | None = None
+    boundary_evidence_ids: tuple[str, ...] = ()
 
     @property
     def clip_ids(self) -> tuple[str, ...]:
         return tuple(span.clip_id for span in self.physical_spans)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "word": self.word.to_dict(),
+            "physical_spans": [item.to_dict() for item in self.physical_spans],
+            "evidence_ids": list(self.evidence_ids),
+            "speaker_id": self.speaker_id,
+            "speaker_source": self.speaker_source,
+            "warnings": list(self.warnings),
+            "accepted": self.accepted,
+            "aligned_start": self.aligned_start,
+            "aligned_end": self.aligned_end,
+            "physical_bin_id": self.physical_bin_id,
+            "boundary_confidence": self.boundary_confidence,
+            "alignment_status": self.alignment_status,
+            "start_boundary_decision": (
+                self.start_boundary_decision.to_dict()
+                if self.start_boundary_decision else None
+            ),
+            "end_boundary_decision": (
+                self.end_boundary_decision.to_dict()
+                if self.end_boundary_decision else None
+            ),
+            "boundary_evidence_ids": list(self.boundary_evidence_ids),
+        }
 
 
 @dataclass

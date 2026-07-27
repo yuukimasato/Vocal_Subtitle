@@ -1,0 +1,288 @@
+{
+  "meta": {
+    "auto_file": "/home/hope/Tools/Vocal_Subtitle/test/benchmark_results/real_material-20260727/auto/英国老头测评/subtitle.ass",
+    "ground_truth_file": "/home/hope/Tools/Vocal_Subtitle/test/video_英国老头评测中国美的移动空调_手动人工字幕.ass",
+    "total_events": 17,
+    "matched_events": 8
+  },
+  "statistics": {
+    "start": {
+      "mean_error_ms": -800.0,
+      "mae_ms": 985.0,
+      "std_ms": 1207.7,
+      "max_error_ms": 2950.0,
+      "gt_300ms_pct": 62.5,
+      "gt_500ms_pct": 62.5
+    },
+    "end": {
+      "mean_error_ms": 1265.0,
+      "mae_ms": 1265.0,
+      "std_ms": 1359.0,
+      "max_error_ms": 4240.0,
+      "gt_300ms_pct": 75.0,
+      "gt_500ms_pct": 62.5
+    }
+  },
+  "health_score": null,
+  "flagged_events": [
+    {
+      "id": 2,
+      "issues": [
+        "end_error_4240ms"
+      ],
+      "auto_start": 9.66,
+      "auto_end": 18.22,
+      "gt_start": 9.68,
+      "gt_end": 13.98,
+      "text_preview": "It's got lots of glass, bifold doors, lovely roof ",
+      "start_error_ms": -20.0,
+      "end_error_ms": 4240.0
+    },
+    {
+      "id": 5,
+      "issues": [
+        "end_error_1140ms"
+      ],
+      "auto_start": 18.22,
+      "auto_end": 22.24,
+      "gt_start": 18.38,
+      "gt_end": 21.1,
+      "text_preview": "But once that sun gets up in the height of the sum",
+      "start_error_ms": -160.0,
+      "end_error_ms": 1140.0
+    },
+    {
+      "id": 9,
+      "issues": [
+        "end_error_1100ms",
+        "start_error_720ms"
+      ],
+      "auto_start": 27.36,
+      "auto_end": 32.78,
+      "gt_start": 28.08,
+      "gt_end": 31.68,
+      "text_preview": "bedroom loft room or any other room in the house t",
+      "start_error_ms": -720.0,
+      "end_error_ms": 1100.0
+    },
+    {
+      "id": 11,
+      "issues": [
+        "end_error_670ms",
+        "start_error_740ms"
+      ],
+      "auto_start": 32.78,
+      "auto_end": 37.62,
+      "gt_start": 33.52,
+      "gt_end": 36.95,
+      "text_preview": "i mean so when people talk about portable air cond",
+      "start_error_ms": -740.0,
+      "end_error_ms": 670.0
+    },
+    {
+      "id": 12,
+      "issues": [
+        "end_error_2550ms",
+        "start_error_700ms"
+      ],
+      "auto_start": 37.77,
+      "auto_end": 42.83,
+      "gt_start": 37.07,
+      "gt_end": 40.28,
+      "text_preview": "a bit skeptical because a lot of the ones I've see",
+      "start_error_ms": 700.0,
+      "end_error_ms": 2550.0
+    },
+    {
+      "id": 15,
+      "issues": [
+        "end_error_370ms",
+        "start_error_2950ms"
+      ],
+      "auto_start": 42.83,
+      "auto_end": 48.55,
+      "gt_start": 45.78,
+      "gt_end": 48.18,
+      "text_preview": "and they're not really that effective. But this on",
+      "start_error_ms": -2950.0,
+      "end_error_ms": 370.0
+    },
+    {
+      "id": 17,
+      "issues": [
+        "start_error_2550ms"
+      ],
+      "auto_start": 48.55,
+      "auto_end": 53.89,
+      "gt_start": 51.1,
+      "gt_end": 53.85,
+      "text_preview": "it's actually a porter split. It's a split unit bu",
+      "start_error_ms": -2550.0,
+      "end_error_ms": 40.0
+    }
+  ],
+  "detail": [
+    {
+      "index": 1,
+      "auto": {
+        "start": 6.06,
+        "end": 9.66
+      },
+      "ground_truth": {
+        "start": 6.02,
+        "end": 9.65
+      },
+      "error_ms": {
+        "start": 40.0,
+        "end": 10.0
+      },
+      "text": {
+        "auto": "You join me in what is undoubtedly the hottest room in the house.",
+        "ground_truth": "You join me in what is undoubtedly the hottest room in the house."
+      }
+    },
+    {
+      "index": 2,
+      "auto": {
+        "start": 9.66,
+        "end": 18.22
+      },
+      "ground_truth": {
+        "start": 9.68,
+        "end": 13.98
+      },
+      "error_ms": {
+        "start": -20.0,
+        "end": 4240.0
+      },
+      "text": {
+        "auto": "It's got lots of glass, bifold doors, lovely roof lantern. And for the",
+        "ground_truth": "Sponsored feature It's got lots of glass, bi-fold doors, lovely roof lantern."
+      }
+    },
+    {
+      "index": 5,
+      "auto": {
+        "start": 18.22,
+        "end": 22.24
+      },
+      "ground_truth": {
+        "start": 18.38,
+        "end": 21.1
+      },
+      "error_ms": {
+        "start": -160.0,
+        "end": 1140.0
+      },
+      "text": {
+        "auto": "But once that sun gets up in the height of the summer, you just can't be in here.",
+        "ground_truth": "But once that sun gets up in the height of the summer,"
+      }
+    },
+    {
+      "index": 9,
+      "auto": {
+        "start": 27.36,
+        "end": 32.78
+      },
+      "ground_truth": {
+        "start": 28.08,
+        "end": 31.68
+      },
+      "error_ms": {
+        "start": -720.0,
+        "end": 1100.0
+      },
+      "text": {
+        "auto": "bedroom loft room or any other room in the house that gets unbearably hot you'll know exactly what.",
+        "ground_truth": "loft room or any other room in the house that gets unbearably hot,"
+      }
+    },
+    {
+      "index": 11,
+      "auto": {
+        "start": 32.78,
+        "end": 37.62
+      },
+      "ground_truth": {
+        "start": 33.52,
+        "end": 36.95
+      },
+      "error_ms": {
+        "start": -740.0,
+        "end": 670.0
+      },
+      "text": {
+        "auto": "i mean so when people talk about portable air conditioning i'm.",
+        "ground_truth": "So when people talk about portable air conditioning,"
+      }
+    },
+    {
+      "index": 12,
+      "auto": {
+        "start": 37.77,
+        "end": 42.83
+      },
+      "ground_truth": {
+        "start": 37.07,
+        "end": 40.28
+      },
+      "error_ms": {
+        "start": 700.0,
+        "end": 2550.0
+      },
+      "text": {
+        "auto": "a bit skeptical because a lot of the ones I've seen are a bit clunky, they're a bit noisy.",
+        "ground_truth": "I'ma bit skeptical because a lot of the"
+      }
+    },
+    {
+      "index": 15,
+      "auto": {
+        "start": 42.83,
+        "end": 48.55
+      },
+      "ground_truth": {
+        "start": 45.78,
+        "end": 48.18
+      },
+      "error_ms": {
+        "start": -2950.0,
+        "end": 370.0
+      },
+      "text": {
+        "auto": "and they're not really that effective. But this one from my deer is different because.",
+        "ground_truth": "But this one from Midea is different"
+      }
+    },
+    {
+      "index": 17,
+      "auto": {
+        "start": 48.55,
+        "end": 53.89
+      },
+      "ground_truth": {
+        "start": 51.1,
+        "end": 53.85
+      },
+      "error_ms": {
+        "start": -2550.0,
+        "end": 40.0
+      },
+      "text": {
+        "auto": "it's actually a porter split. It's a split unit but you can move it around.",
+        "ground_truth": "It's a split unit but you can move it around."
+      }
+    }
+  ],
+  "text_metrics": {
+    "auto_event_count": 9,
+    "ground_truth_event_count": 17,
+    "matched_event_count": 8,
+    "unmatched_auto_event_count": 1,
+    "unmatched_ground_truth_event_count": 9,
+    "mean_text_similarity": 0.7651,
+    "char_error_rate_proxy": 0.2349,
+    "reference_content_coverage": 0.8805
+  }
+}

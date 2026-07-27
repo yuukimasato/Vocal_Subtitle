@@ -34,6 +34,7 @@ class GlobalSubtitleEvent:
     physical_bin_start: float | None = None
     physical_bin_end: float | None = None
     time_source: str = "asr_word"
+    revision_trace: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -53,21 +54,12 @@ class GlobalSubtitleEvent:
             "physical_bin_start": self.physical_bin_start,
             "physical_bin_end": self.physical_bin_end,
             "time_source": self.time_source,
+            "revision_trace": list(self.revision_trace),
         }
 
     def to_subtitle_event(self) -> SubtitleEvent:
-        if self.physical_bin_start is not None:
-            physical_start = self.physical_bin_start
-        else:
-            physical_start = min(
-                (span.start for span in self.physical_spans), default=self.start
-            )
-        if self.physical_bin_end is not None:
-            physical_end = self.physical_bin_end
-        else:
-            physical_end = max(
-                (span.end for span in self.physical_spans), default=self.end
-            )
+        physical_start = self.start
+        physical_end = self.end
         relative_words = [
             WordTimestamp(
                 word=word.text,
@@ -98,6 +90,7 @@ class GlobalSubtitleEvent:
             physical_bin_start=self.physical_bin_start,
             physical_bin_end=self.physical_bin_end,
             time_source=self.time_source,
+            revision_trace=list(self.revision_trace),
         )
 
 
@@ -382,8 +375,21 @@ def _make_event(
             else "unknown"
         )
     )
-    start = subtitle_bin.start if subtitle_bin is not None else min(word.raw_start for word in words)
-    end = subtitle_bin.end if subtitle_bin is not None else max(word.raw_end for word in words)
+    first = items[0]
+    last = items[-1]
+    start = first.aligned_start if first.aligned_start is not None else words[0].raw_start
+    end = last.aligned_end if last.aligned_end is not None else words[-1].raw_end
+    decisions = [
+        decision
+        for decision in (
+            first.start_boundary_decision,
+            last.end_boundary_decision,
+        )
+        if decision is not None
+    ]
+    degraded = len(decisions) != 2 or any(not item.accepted for item in decisions)
+    if degraded:
+        warnings.append("timing_degraded")
     return GlobalSubtitleEvent(
         index=index,
         start=start,
@@ -401,7 +407,15 @@ def _make_event(
         physical_bin_id=subtitle_bin.id if subtitle_bin is not None else None,
         physical_bin_start=subtitle_bin.start if subtitle_bin is not None else None,
         physical_bin_end=subtitle_bin.end if subtitle_bin is not None else None,
-        time_source="physical_bin" if subtitle_bin is not None else "asr_word",
+        time_source="boundary_decision" if not degraded else "timing_degraded",
+        revision_trace=[
+            {
+                "stage": "boundary_arbitration",
+                "boundary": decision.boundary_type,
+                "decision": decision.to_dict(),
+            }
+            for decision in decisions
+        ],
     )
 
 

@@ -73,13 +73,25 @@ class AudioUtils:
     def _load_wav(
         cls, wav_path: Path, target_sr: int
     ) -> Tuple[np.ndarray, int]:
-        """使用标准库加载 WAV 文件（无需 pydub）"""
-        with wave.open(str(wav_path), "rb") as wf:
-            n_channels = wf.getnchannels()
-            sample_width = wf.getsampwidth()
-            framerate = wf.getframerate()
-            n_frames = wf.getnframes()
-            raw_data = wf.readframes(n_frames)
+        """使用标准库加载 WAV 文件（无需 pydub）
+
+        如果 wave.open 失败（例如扩展名为 .wav 但实际是其他格式，
+        如 MP4 视频），自动回退到 pydub（内部使用 ffmpeg）。
+        """
+        try:
+            with wave.open(str(wav_path), "rb") as wf:
+                n_channels = wf.getnchannels()
+                sample_width = wf.getsampwidth()
+                framerate = wf.getframerate()
+                n_frames = wf.getnframes()
+                raw_data = wf.readframes(n_frames)
+        except wave.Error:
+            logger.warning(
+                "File %s has .wav extension but is not a valid WAV file; "
+                "falling back to pydub/ffmpeg for format detection.",
+                wav_path,
+            )
+            return cls._load_with_pydub(wav_path, target_sr)
 
         # 解析样本
         if sample_width == 2:
@@ -242,8 +254,15 @@ class AudioUtils:
         """获取音频时长（秒）"""
         suffix = audio_path.suffix.lower()
         if suffix == ".wav":
-            with wave.open(str(audio_path), "rb") as wf:
-                return wf.getnframes() / wf.getframerate()
+            try:
+                with wave.open(str(audio_path), "rb") as wf:
+                    return wf.getnframes() / wf.getframerate()
+            except wave.Error:
+                logger.warning(
+                    "File %s has .wav extension but is not a valid WAV; "
+                    "falling back to pydub.",
+                    audio_path,
+                )
         pydub = cls._get_pydub()
         audio = pydub.AudioSegment.from_file(str(audio_path))
         return len(audio) / 1000.0
@@ -257,14 +276,21 @@ class AudioUtils:
         """
         suffix = audio_path.suffix.lower()
         if suffix == ".wav":
-            with wave.open(str(audio_path), "rb") as wf:
-                return {
-                    "channels": wf.getnchannels(),
-                    "sample_rate": wf.getframerate(),
-                    "sample_width": wf.getsampwidth(),
-                    "duration_seconds": wf.getnframes() / wf.getframerate(),
-                    "format": suffix.lstrip("."),
-                }
+            try:
+                with wave.open(str(audio_path), "rb") as wf:
+                    return {
+                        "channels": wf.getnchannels(),
+                        "sample_rate": wf.getframerate(),
+                        "sample_width": wf.getsampwidth(),
+                        "duration_seconds": wf.getnframes() / wf.getframerate(),
+                        "format": suffix.lstrip("."),
+                    }
+            except wave.Error:
+                logger.warning(
+                    "File %s has .wav extension but is not a valid WAV; "
+                    "falling back to pydub.",
+                    audio_path,
+                )
         pydub = cls._get_pydub()
         audio = pydub.AudioSegment.from_file(str(audio_path))
         return {
@@ -685,10 +711,54 @@ class AudioUtils:
         ".rmvb", ".vob", ".divx",
     }
 
+    # 常见视频容器格式的魔数字节签名
+    VIDEO_MAGIC = {
+        b"\x00\x00\x00\x18ftyp": ".mp4",       # ISO Base Media (MP4/M4V/MOV/3GP)
+        b"\x00\x00\x00\x20ftyp": ".mp4",       # ISO BMFF variant header size
+        b"\x1aE\xdf\xa3":       ".mkv",         # Matroska / WebM EBML
+        b"RIFF":                None,            # AVI = RIFF container — check next
+        b"\x00\x00\x01\xba":    ".mpg",          # MPEG-PS
+        b"\x00\x00\x01\xb3":    ".mpg",          # MPEG
+        b"\x47":                ".ts",           # MPEG-TS
+        b"FLV":                 ".flv",          # Flash Video
+    }
+
+    @classmethod
+    def _has_video_magic(cls, path: Path) -> bool:
+        """检测文件头部是否为已知的视频容器格式（魔数检查）。
+
+        避免依赖、仅读取前 12 字节，用于判断文件是否为视频容器
+        （无论扩展名是否匹配）。
+        """
+        try:
+            with open(path, "rb") as f:
+                header = f.read(12)
+        except OSError:
+            return False
+
+        if len(header) < 8:
+            return False
+
+        for magic, ext in cls.VIDEO_MAGIC.items():
+            if not header.startswith(magic):
+                continue
+            if ext is not None:
+                return True
+            # RIFF 可能是 AVI — 检查 FOURCC（偏移 8 的 "AVI "）
+            if magic == b"RIFF" and len(header) >= 12:
+                return header[8:12] == b"AVI "
+        return False
+
     @classmethod
     def is_video_file(cls, path: Path) -> bool:
-        """判断是否为视频文件（根据扩展名）"""
-        return path.suffix.lower() in cls.VIDEO_EXTENSIONS
+        """判断是否为视频文件（先查扩展名，再查文件头魔数）。
+
+        两层检查自动处理扩展名与实际格式不匹配的情况
+        （例如 .wav 命名的 MP4 视频）。
+        """
+        if path.suffix.lower() in cls.VIDEO_EXTENSIONS:
+            return True
+        return cls._has_video_magic(path)
 
     @classmethod
     def extract_audio_from_video(

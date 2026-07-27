@@ -1052,24 +1052,7 @@ def _rewrite_subtitle_files(task_result: Dict[str, Any]) -> None:
     from ..mapping.subtitle_builder import SubtitleBuilder, SubtitleRule
     from ..config import SubtitleBuildConfig
 
-    rebuilt_events = [
-        SubtitleEvent(
-            index=e["index"],
-            start=e["start"],
-            end=e["end"],
-            text=e["text"],
-            original_text=e.get("original_text"),
-            speaker_id=e.get("speaker_id"),
-            speaker_label=e.get("speaker_label"),
-            physical_start=e.get("physical_start"),
-            physical_end=e.get("physical_end"),
-            source_word_ids=e.get("source_word_ids", []),
-            speaker_status=e.get("speaker_status", ""),
-            speaker_source=e.get("speaker_source", ""),
-            alignment_warning=e.get("alignment_warning"),
-        )
-        for e in events
-    ]
+    rebuilt_events = [_subtitle_event_from_payload(e) for e in events]
 
     # 加载字幕构建规则
     loader = ConfigLoader()
@@ -1170,18 +1153,7 @@ async def export_subtitle(
         raise HTTPException(status_code=404, detail="Task not found or has no events")
 
     # 重建 SubtitleEvent 对象
-    events = [
-        SubtitleEvent(
-            index=e["index"],
-            start=e["start"],
-            end=e["end"],
-            text=e["text"],
-            original_text=e.get("original_text"),
-            speaker_id=e.get("speaker_id"),
-            speaker_label=e.get("speaker_label"),
-        )
-        for e in raw_events
-    ]
+    events = [_subtitle_event_from_payload(e) for e in raw_events]
 
     # 使用 SubtitleBuilder 生成字符串
     from ..config import SubtitleBuildConfig

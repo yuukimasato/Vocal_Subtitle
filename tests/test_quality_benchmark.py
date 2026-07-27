@@ -60,13 +60,24 @@ def test_quality_manifest_contains_existing_fixture_pairs():
     root = Path(__file__).resolve().parents[1]
     scenes = load_manifest(root / "test/quality_manifest.yaml", root)
 
-    assert len(scenes) == 6
+    assert len(scenes) == 8
     assert {scene["category"] for scene in scenes} == {
         "single_speaker",
         "multi_speaker",
     }
     assert all(scene["audio_path"].is_file() for scene in scenes)
-    assert all(scene["ground_truth_path"].is_file() for scene in scenes)
+    assert sum(scene["ground_truth_path"] is not None for scene in scenes) == 6
+    assert all(
+        scene["ground_truth_path"] is None
+        or scene["ground_truth_path"].is_file()
+        for scene in scenes
+    )
+    assert all(scene.get("language") in {"zh", "en"} for scene in scenes)
+    assert all(scene.get("speaker_count", 0) >= 1 for scene in scenes)
+    assert any(
+        "overlap_or_interruption" in scene.get("tags", []) for scene in scenes
+    )
+    assert {"中文朗读双人", "巧乐兹"} <= {scene["name"] for scene in scenes}
 
 
 def test_quality_manifest_rejects_duplicate_names(tmp_path):

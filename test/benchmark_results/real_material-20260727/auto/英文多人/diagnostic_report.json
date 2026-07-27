@@ -1,0 +1,67 @@
+{
+  "input_path": "/home/hope/Tools/Vocal_Subtitle/test/英文多人员测试音频.wav",
+  "duration_seconds": 18.636,
+  "stage_timings": {
+    "llm_merge": 0.0009322166442871094,
+    "acoustic": 0.00015807151794433594,
+    "skeleton": 0.049657344818115234,
+    "vad": 0.2732205390930176,
+    "merging": 0.012818574905395508,
+    "asr": 11.338122844696045,
+    "boundary_refine": 0.0005481243133544922,
+    "mapping": 0.0033140182495117188
+  },
+  "total_time": 12.10346007347107,
+  "segment_count": 3,
+  "subtitle_count": 4,
+  "asr_path": "",
+  "global_attempted": false,
+  "fallback_category": "",
+  "fallback_reason": "",
+  "global_diagnostics": {},
+  "raw_diarization_speaker_count": 0,
+  "canonical_speaker_count": 0,
+  "speaker_merge_map": {},
+  "canonicalization_status": "",
+  "diarization_backend": "",
+  "diarization_status": "",
+  "mixed_event_count": 0,
+  "atomic_span_count": 0,
+  "quality_diagnostics": {
+    "finalization": {
+      "input_event_count": 4,
+      "output_event_count": 4,
+      "step": [
+        "display_mapping",
+        "final_validation"
+      ],
+      "skipped_invalid": 0,
+      "valid_input_count": 4,
+      "display_cue_count": 4,
+      "physical_clamped_count": 0,
+      "removed_count": 0,
+      "reasons": {},
+      "warning_count": 0,
+      "overlap_count": 0,
+      "overlap_trimmed_count": 0
+    }
+  },
+  "hallucination_filter_version": "",
+  "hallucination_dropped_count": 0,
+  "speaker_count": 4,
+  "diagnostic_report": {
+    "snapped_starts": 0,
+    "snapped_ends": 0,
+    "rms_overrides": 0,
+    "skipped_low_confidence": 0,
+    "events_flagged": [],
+    "gap_merged": 3,
+    "total_events": 4,
+    "start_in_silence": 0,
+    "end_in_silence": 0,
+    "end_truncated": 0,
+    "start_out_of_range": 0,
+    "end_out_of_range": 0,
+    "health_score": 100.0
+  }
+}

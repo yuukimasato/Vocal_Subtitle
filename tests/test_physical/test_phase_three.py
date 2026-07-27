@@ -164,7 +164,7 @@ def test_physical_subtitle_bins_prefer_precise_skeleton_evidence():
     assert [(item.start, item.end) for item in bins] == [(0.1, 0.8), (1.2, 2.0)]
 
 
-def test_physical_bin_event_uses_bin_bounds_without_splitting_words():
+def test_physical_bin_event_preserves_bin_envelope_without_faking_word_time():
     timeline = PhysicalTimeline(3.0)
     timeline.add_clip(0.0, 3.0, clip_id="clip-a")
     timeline.add_evidence(0.1, 1.0, "ffmpeg_skeleton", physical_clip_id="clip-a")
@@ -179,10 +179,11 @@ def test_physical_bin_event_uses_bin_bounds_without_splitting_words():
     )[0]
 
     assert event.text == "今天天气"
-    assert (event.start, event.end) == (0.1, 1.0)
+    assert (event.start, event.end) == (0.3, 0.8)
+    assert (event.physical_bin_start, event.physical_bin_end) == (0.1, 1.0)
     subtitle_event = event.to_subtitle_event()
-    assert (subtitle_event.physical_start, subtitle_event.physical_end) == (0.1, 1.0)
-    assert event.time_source == "physical_bin"
+    assert (subtitle_event.physical_start, subtitle_event.physical_end) == (0.3, 0.8)
+    assert event.time_source == "timing_degraded"
 
 
 def test_micro_bin_fragment_merges_at_contiguous_whole_word_boundary():
@@ -388,6 +389,11 @@ def test_pipeline_global_entry_builds_subtitle_events_from_shadow_ir():
     assert len(events) == 1
     assert events[0].source_word_ids
     assert events[0].physical_spans
+    assert events[0].time_source == "boundary_decision"
+    assert len(events[0].revision_trace) == 2
+    assert all(
+        item["decision"]["accepted"] for item in events[0].revision_trace
+    )
 
 
 def test_micro_gap_merge_does_not_cross_physical_clip_and_preserves_provenance():

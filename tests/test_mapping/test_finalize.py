@@ -134,3 +134,16 @@ def test_finalize_handles_empty_input():
     assert result.subtitle_count == 0
     assert len(result.events) == 0
     assert len(result.display_cues) == 0
+
+
+def test_finalize_does_not_mutate_source_events():
+    event = _make_event(
+        8, 1.0, 1.2, "hello", physical_start=1.0, physical_end=1.2
+    )
+
+    result = finalize_subtitle_events([event], audio_duration=3.0)
+
+    assert result.events[0] is not event
+    assert event.index == 8
+    assert event.start == 1.0
+    assert event.end == 1.2

@@ -7,73 +7,211 @@ final word to the end of the VAD segment.
 
 from __future__ import annotations
 
-import copy
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+import math
+from dataclasses import replace
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+import numpy as np
 
 from .allocator import WordAllocation
-from .ir import GlobalWord
-from .subtitle_bins import PhysicalSubtitleBin
+from .boundary_arbiter import (
+    BoundaryArbiter,
+    BoundaryCandidate,
+    BoundaryDecision,
+)
+from .subtitle_bins import PhysicalSubtitleBin, assign_word_to_bin
 from .timeline import PhysicalTimeline
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class BoundaryDecision:
-    """Structured boundary arbitration result.
+def _dedupe_times(values: Sequence[tuple[float, str]]) -> list[tuple[float, str]]:
+    """Deduplicate candidate timestamps without losing source provenance."""
+    grouped: dict[float, list[str]] = {}
+    for value, label in values:
+        if not math.isfinite(value) or value < 0:
+            continue
+        key = round(float(value), 4)
+        grouped.setdefault(key, []).append(label)
+    return [
+        (time, "+".join(dict.fromkeys(labels)))
+        for time, labels in sorted(grouped.items())
+    ]
 
-    Attributes:
-        accepted: Whether this boundary was accepted.
-        boundary_time: The chosen boundary time in seconds.
-        boundary_type: Type of boundary ("start" or "end").
-        confidence: Normalized confidence score (0-1).
-        evidence_ids: Evidence IDs that contributed to this decision.
-        reason_codes: Short codes explaining the decision ("hard_split_violation", etc.)
-        candidate_scores: Optional list of (candidate_label, score) tuples.
-        rejected_candidates: Optional reason strings for rejected candidates.
-    """
 
-    accepted: bool
-    boundary_time: float
-    boundary_type: str  # "start" | "end"
-    confidence: float = 0.0
-    evidence_ids: tuple[str, ...] = ()
-    reason_codes: tuple[str, ...] = ()
-    candidate_scores: tuple[tuple[str, float], ...] = ()
-    rejected_candidates: tuple[str, ...] = ()
+def _rms_features(
+    audio: np.ndarray | None,
+    sample_rate: int,
+    time: float,
+    *,
+    window: float = 0.02,
+) -> dict[str, float]:
+    """Measure local level, slope and valley evidence around one candidate."""
+    if audio is None or len(audio) == 0 or sample_rate <= 0:
+        return {}
+    center = max(0, min(len(audio), int(time * sample_rate)))
+    width = max(1, int(window * sample_rate))
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "accepted": self.accepted,
-            "boundary_time": self.boundary_time,
-            "boundary_type": self.boundary_type,
-            "confidence": self.confidence,
-            "evidence_ids": list(self.evidence_ids),
-            "reason_codes": list(self.reason_codes),
-            "candidate_scores": [
-                {"label": label, "score": score}
-                for label, score in self.candidate_scores
-            ],
-            "rejected_candidates": list(self.rejected_candidates),
-        }
+    def rms(start: int, end: int) -> float:
+        frame = audio[max(0, start):min(len(audio), end)]
+        if len(frame) == 0:
+            return 0.0
+        return float(np.sqrt(np.mean(frame.astype(np.float64) ** 2)))
 
-    @classmethod
-    def from_dict(cls, payload: dict) -> "BoundaryDecision":
-        return cls(
-            accepted=payload["accepted"],
-            boundary_time=payload["boundary_time"],
-            boundary_type=payload.get("boundary_type", "start"),
-            confidence=payload.get("confidence", 0.0),
-            evidence_ids=tuple(payload.get("evidence_ids", [])),
-            reason_codes=tuple(payload.get("reason_codes", [])),
-            candidate_scores=tuple(
-                (cs["label"], cs["score"])
-                for cs in payload.get("candidate_scores", [])
-            ),
-            rejected_candidates=tuple(payload.get("rejected_candidates", [])),
+    before = rms(center - width, center)
+    current = rms(center - width // 2, center + width // 2)
+    after = rms(center, center + width)
+    neighbor = max(before, after, 1e-8)
+    return {
+        "rms_level": current,
+        "rms_gradient": after - before,
+        "rms_valley": max(0.0, min(1.0, 1.0 - current / neighbor)),
+        "rms_before": before,
+        "rms_after": after,
+    }
+
+
+def _vad_features(
+    time: float,
+    vad_segments: Sequence[Any] | None,
+) -> dict[str, float]:
+    if vad_segments is None:
+        return {}
+    active = [
+        float(getattr(item, "confidence", 1.0))
+        for item in vad_segments
+        if float(getattr(item, "start", 0.0)) <= time <= float(
+            getattr(item, "end", 0.0)
         )
+    ]
+    return {
+        "vad_probability": max(0.0, min(1.0, max(active, default=0.0))),
+        "vad_active": 1.0 if active else 0.0,
+    }
+
+
+def _ffmpeg_boundaries(result: Mapping[str, Any] | None) -> list[tuple[float, str]]:
+    if not isinstance(result, Mapping):
+        return []
+    values: list[tuple[float, str]] = []
+    for field, label in (
+        ("raw_silence_intervals", "ffmpeg_silence"),
+        ("skeleton", "ffmpeg_skeleton"),
+        ("coarse_speech", "ffmpeg_coarse"),
+    ):
+        for item in result.get(field, ()) or ():
+            if isinstance(item, Mapping):
+                start, end = item.get("start"), item.get("end")
+            else:
+                start = getattr(item, "start", item[0] if isinstance(item, (tuple, list)) else None)
+                end = getattr(item, "end", item[1] if isinstance(item, (tuple, list)) else None)
+            if start is None or end is None:
+                continue
+            values.extend(((float(start), f"{label}_start"), (float(end), f"{label}_end")))
+    return values
+
+
+def _ffmpeg_features(time: float, result: Mapping[str, Any] | None) -> dict[str, float]:
+    boundaries = _ffmpeg_boundaries(result)
+    if not boundaries:
+        return {}
+    distances = [abs(time - value) for value, _ in boundaries]
+    silence = result.get("raw_silence_intervals", ()) if isinstance(result, Mapping) else ()
+    in_silence = any(
+        isinstance(item, (tuple, list)) and len(item) >= 2
+        and float(item[0]) <= time <= float(item[1])
+        for item in silence or ()
+    )
+    return {
+        "ffmpeg_boundary_distance": min(distances),
+        "ffmpeg_boundary_proximity": max(0.0, 1.0 - min(distances) / 0.2),
+        "ffmpeg_silence": 1.0 if in_silence else 0.0,
+    }
+
+
+def _evidence_features(
+    time: float,
+    timeline: Optional[PhysicalTimeline],
+) -> tuple[dict[str, float], tuple[str, ...]]:
+    if timeline is None:
+        return {}, ()
+    nearby = [
+        item for item in timeline.speech_evidence_spans
+        if item.start - 0.2 <= time <= item.end + 0.2
+    ]
+    distances = [min(abs(time - item.start), abs(time - item.end)) for item in nearby]
+    sources = {item.source for item in nearby}
+    return (
+        {
+            "evidence_boundary_distance": min(distances) if distances else 1.0,
+            "evidence_source_count": float(len(sources)),
+            "source_consistency": min(1.0, len(sources) / 3.0),
+        },
+        tuple(item.id for item in nearby),
+    )
+
+
+def _candidate_features(
+    time: float,
+    *,
+    audio: np.ndarray | None,
+    sample_rate: int,
+    vad_segments: Sequence[Any] | None,
+    ffmpeg_result: Mapping[str, Any] | None,
+    noise_profile: Any | None,
+    timeline: Optional[PhysicalTimeline],
+) -> tuple[dict[str, float], tuple[str, ...]]:
+    features: dict[str, float] = {}
+    features.update(_rms_features(audio, sample_rate, time))
+    features.update(_vad_features(time, vad_segments))
+    features.update(_ffmpeg_features(time, ffmpeg_result))
+    evidence_features, evidence_ids = _evidence_features(time, timeline)
+    features.update(evidence_features)
+    if noise_profile is not None and hasattr(noise_profile, "candidate_features"):
+        features.update(noise_profile.candidate_features(time))
+    return features, evidence_ids
+
+
+def _score_with_features(
+    boundary_type: str,
+    candidate: float,
+    *,
+    asr_time: float,
+    features: Mapping[str, float],
+    asr_confidence: float,
+) -> tuple[float, tuple[tuple[str, float], ...]]:
+    """Score all available signals and return auditable components."""
+    asr_proximity = max(0.0, 1.0 - abs(candidate - asr_time) / 0.2)
+    rms_gradient = float(features.get("rms_gradient", 0.0))
+    rms_scale = max(abs(float(features.get("rms_before", 0.0))), abs(float(features.get("rms_after", 0.0))), 1e-6)
+    gradient = max(0.0, min(1.0, (rms_gradient / rms_scale + 1.0) / 2.0))
+    if boundary_type == "end":
+        gradient = 1.0 - gradient
+    rms_score = max(float(features.get("rms_valley", 0.0)), gradient)
+    vad_score = float(features.get("vad_probability", 0.5))
+    ffmpeg_score = float(features.get("ffmpeg_boundary_proximity", 0.0))
+    source_score = float(features.get("source_consistency", 0.0))
+    noise_stability = float(features.get("noise_stability", 0.0))
+    noise_score = 1.0 - float(features.get("noise_fallback", 0.0))
+    components = {
+        "asr": max(0.0, min(1.0, asr_proximity * max(0.0, min(1.0, asr_confidence)))),
+        "rms": max(0.0, min(1.0, rms_score)),
+        "vad": max(0.0, min(1.0, vad_score)),
+        "ffmpeg": max(0.0, min(1.0, ffmpeg_score)),
+        "noise": max(0.0, min(1.0, (noise_stability + noise_score) / 2.0)),
+        "source_consistency": max(0.0, min(1.0, source_score)),
+    }
+    weights = {
+        "asr": 0.28,
+        "rms": 0.22,
+        "vad": 0.16,
+        "ffmpeg": 0.14,
+        "noise": 0.10,
+        "source_consistency": 0.10,
+    }
+    score = sum(weights[key] * components[key] for key in weights)
+    return score, tuple((key, round(value, 6)) for key, value in components.items())
 
 
 def _asr_confidence_tier(confidence: Optional[float]) -> str:
@@ -240,6 +378,11 @@ def align_words_to_physical(
     bin_owner_map: Optional[Dict[str, str]] = None,
     timeline: Optional[PhysicalTimeline] = None,
     clip_bounds: Optional[Dict[str, Tuple[float, float]]] = None,
+    audio: np.ndarray | None = None,
+    sample_rate: int = 16000,
+    vad_segments: Sequence[Any] | None = None,
+    ffmpeg_result: Mapping[str, Any] | None = None,
+    noise_profile: Any | None = None,
 ) -> List[WordAllocation]:
     """Produce aligned WordAllocations with BoundaryDecision on each word endpoint.
 
@@ -263,6 +406,7 @@ def align_words_to_physical(
     result: List[WordAllocation] = []
     if not allocations:
         return result
+    arbiter = BoundaryArbiter()
 
     for alloc in allocations:
         word = alloc.word
@@ -272,7 +416,11 @@ def align_words_to_physical(
         search_radius = _search_window_for_tier(tier)
 
         # Determine the primary bin for this word
-        primary_bin_id = alloc.clip_ids[0] if alloc.clip_ids else None
+        assigned_bin = assign_word_to_bin(word, physical_bins)
+        primary_bin_id = (
+            alloc.physical_bin_id
+            or (assigned_bin.id if assigned_bin is not None else None)
+        )
         relevant_bins = [
             b for b in physical_bins
             if primary_bin_id is None or b.id == primary_bin_id
@@ -295,133 +443,135 @@ def align_words_to_physical(
                 clip_start, clip_end = clip_b
 
         # --- START boundary ---
-        # Build candidate set from evidence sources
-        start_candidates: List[Tuple[float, str, float]] = []
-        # ASR observation
-        start_candidates.append((raw_start, "asr_start", word.confidence or 0.5))
-        # Nearby silence boundary from bins
+        # Candidate sources are deliberately local: ASR, bin/evidence edges,
+        # VAD and FFmpeg transitions. RMS is sampled at every candidate and
+        # contributes a feature rather than silently creating a second timeline.
+        start_candidates: list[tuple[float, str]] = [(raw_start, "asr_start")]
         for b in relevant_bins:
             if abs(b.start - raw_start) < search_radius * 2:
-                start_candidates.append((b.start, "bin_start", b.confidence or 0.5))
+                start_candidates.append((b.start, "bin_start"))
+        for item in timeline.speech_evidence_spans if timeline else ():
+            for value, label in ((item.start, f"{item.source}_start"), (item.end, f"{item.source}_end")):
+                if abs(value - raw_start) < search_radius * 2:
+                    start_candidates.append((value, label))
+        for value, label in _ffmpeg_boundaries(ffmpeg_result):
+            if abs(value - raw_start) < search_radius * 2:
+                start_candidates.append((value, label))
+        for item in vad_segments or ():
+            for value, label in ((float(item.start), "vad_start"), (float(item.end), "vad_end")):
+                if abs(value - raw_start) < search_radius * 2:
+                    start_candidates.append((value, label))
 
-        # Filter by legal range
-        legal_start_candidates = [
-            (t, s, c) for t, s, c in start_candidates
-            if _is_within_legal_range(t, relevant_bins, timeline, clip_start, clip_end)
-        ]
-
-        # Monotonicity: cannot be before previous word's end
+        previous_end = None
         if result:
-            prev_end = max(
+            previous_end = max(
                 getattr(a, "aligned_end", a.word.raw_end)
                 for a in result[-1:]
             )
-            legal_start_candidates = [
-                (t, s, c) for t, s, c in legal_start_candidates
-                if t >= prev_end - 0.005
-            ]
-
-        start_decision: BoundaryDecision
-        if not legal_start_candidates:
-            start_decision = BoundaryDecision(
-                accepted=False,
-                boundary_time=raw_start,
-                boundary_type="start",
-                confidence=0.0,
-                reason_codes=("no_legal_start_candidate",),
-                rejected_candidates=("all candidates outside legal range",),
+        scored_start_candidates = []
+        for time, label in _dedupe_times(start_candidates):
+            rejection_reasons = []
+            if not _is_within_legal_range(
+                time, relevant_bins, timeline, clip_start, clip_end
+            ):
+                rejection_reasons.append("outside_physical_owner")
+            if previous_end is not None and time < previous_end - 0.005:
+                rejection_reasons.append("breaks_monotonicity")
+            if abs(time - raw_start) > search_radius:
+                rejection_reasons.append("outside_search_window")
+            features, feature_evidence_ids = _candidate_features(
+                time,
+                audio=audio,
+                sample_rate=sample_rate,
+                vad_segments=vad_segments,
+                ffmpeg_result=ffmpeg_result,
+                noise_profile=noise_profile,
+                timeline=timeline,
             )
-        else:
-            scores = [
-                (label, _score_start_candidate(
-                    time,
-                    asr_time=raw_start,
-                    vad_prob=0.5,
-                    source_consistency=1.0 if "asr" in label else 0.7,
-                ))
-                for time, label, conf in legal_start_candidates
-            ]
-            best_time, best_label, best_score = max(
-                zip(
-                    [t for t, _, _ in legal_start_candidates],
-                    [l for _, l, _ in legal_start_candidates],
-                    [s for _, s in scores],
-                ),
-                key=lambda x: x[2],
+            score, score_components = _score_with_features(
+                "start",
+                time,
+                asr_time=raw_start,
+                features=features,
+                asr_confidence=word.confidence or 0.5,
             )
-
-            # Clamp to search window
-            if abs(best_time - raw_start) > search_radius:
-                best_time = raw_start
-
-            start_decision = BoundaryDecision(
-                accepted=True,
-                boundary_time=best_time,
-                boundary_type="start",
-                confidence=best_score,
-                evidence_ids=alloc.evidence_ids,
-                reason_codes=("aligned_start",),
-                candidate_scores=tuple(
-                    (label, sc) for (_, label, _), (_, sc) in zip(legal_start_candidates, scores)
-                ),
-            )
+            scored_start_candidates.append(BoundaryCandidate(
+                label=label,
+                time=time,
+                score=score,
+                evidence_ids=tuple(dict.fromkeys(alloc.evidence_ids + feature_evidence_ids)),
+                rejection_reasons=tuple(rejection_reasons),
+                features=tuple(sorted((key, float(value)) for key, value in features.items())),
+                score_components=score_components,
+            ))
+        start_decision = arbiter.decide(
+            "start",
+            scored_start_candidates,
+            fallback_time=raw_start,
+            accepted_reason="aligned_start",
+            missing_reason="no_legal_start_candidate",
+        )
 
         # --- END boundary ---
-        end_candidates: List[Tuple[float, str, float]] = []
-        end_candidates.append((raw_end, "asr_end", word.confidence or 0.5))
+        end_candidates: list[tuple[float, str]] = [(raw_end, "asr_end")]
         for b in relevant_bins:
             if abs(b.end - raw_end) < search_radius * 2:
-                end_candidates.append((b.end, "bin_end", b.confidence or 0.5))
+                end_candidates.append((b.end, "bin_end"))
+        for item in timeline.speech_evidence_spans if timeline else ():
+            for value, label in ((item.start, f"{item.source}_start"), (item.end, f"{item.source}_end")):
+                if abs(value - raw_end) < search_radius * 2:
+                    end_candidates.append((value, label))
+        for value, label in _ffmpeg_boundaries(ffmpeg_result):
+            if abs(value - raw_end) < search_radius * 2:
+                end_candidates.append((value, label))
+        for item in vad_segments or ():
+            for value, label in ((float(item.start), "vad_start"), (float(item.end), "vad_end")):
+                if abs(value - raw_end) < search_radius * 2:
+                    end_candidates.append((value, label))
 
-        legal_end_candidates = [
-            (t, s, c) for t, s, c in end_candidates
-            if _is_within_legal_range(t, relevant_bins, timeline, clip_start, clip_end)
-            and t > start_decision.boundary_time
-        ]
-
-        end_decision: BoundaryDecision
-        if not legal_end_candidates:
-            end_decision = BoundaryDecision(
-                accepted=False,
-                boundary_time=raw_end,
-                boundary_type="end",
-                confidence=0.0,
-                reason_codes=("no_legal_end_candidate",),
-                rejected_candidates=("all candidates outside legal range",),
+        scored_end_candidates = []
+        for time, label in _dedupe_times(end_candidates):
+            rejection_reasons = []
+            if not _is_within_legal_range(
+                time, relevant_bins, timeline, clip_start, clip_end
+            ):
+                rejection_reasons.append("outside_physical_owner")
+            if time <= start_decision.boundary_time:
+                rejection_reasons.append("non_positive_word_duration")
+            if abs(time - raw_end) > search_radius:
+                rejection_reasons.append("outside_search_window")
+            features, feature_evidence_ids = _candidate_features(
+                time,
+                audio=audio,
+                sample_rate=sample_rate,
+                vad_segments=vad_segments,
+                ffmpeg_result=ffmpeg_result,
+                noise_profile=noise_profile,
+                timeline=timeline,
             )
-        else:
-            scores = [
-                (label, _score_end_candidate(
-                    time,
-                    asr_time=raw_end,
-                    vad_prob=0.5,
-                    source_consistency=1.0 if "asr" in label else 0.7,
-                ))
-                for time, label, conf in legal_end_candidates
-            ]
-            best_time, best_label, best_score = max(
-                zip(
-                    [t for t, _, _ in legal_end_candidates],
-                    [l for _, l, _ in legal_end_candidates],
-                    [s for _, s in scores],
-                ),
-                key=lambda x: x[2],
+            score, score_components = _score_with_features(
+                "end",
+                time,
+                asr_time=raw_end,
+                features=features,
+                asr_confidence=word.confidence or 0.5,
             )
-
-            if abs(best_time - raw_end) > search_radius:
-                best_time = raw_end
-
-            end_decision = BoundaryDecision(
-                accepted=True,
-                boundary_time=best_time,
-                boundary_type="end",
-                confidence=best_score,
-                evidence_ids=alloc.evidence_ids,
-                reason_codes=("aligned_end",),
-                candidate_scores=tuple(
-                    (label, sc) for (_, label, _), (_, sc) in zip(legal_end_candidates, scores)
-                ),
-            )
+            scored_end_candidates.append(BoundaryCandidate(
+                label=label,
+                time=time,
+                score=score,
+                evidence_ids=tuple(dict.fromkeys(alloc.evidence_ids + feature_evidence_ids)),
+                rejection_reasons=tuple(rejection_reasons),
+                features=tuple(sorted((key, float(value)) for key, value in features.items())),
+                score_components=score_components,
+            ))
+        end_decision = arbiter.decide(
+            "end",
+            scored_end_candidates,
+            fallback_time=raw_end,
+            accepted_reason="aligned_end",
+            missing_reason="no_legal_end_candidate",
+        )
 
         # Never stretch the last word end beyond raw_end by more than 50ms
         if end_decision.boundary_time > raw_end + 0.050:
@@ -432,28 +582,31 @@ def align_words_to_physical(
                 confidence=end_decision.confidence * 0.8,
                 evidence_ids=end_decision.evidence_ids,
                 reason_codes=end_decision.reason_codes + ("end_clamped",),
+                candidate_scores=end_decision.candidate_scores,
+                rejected_candidates=end_decision.rejected_candidates,
+                candidate_diagnostics=end_decision.candidate_diagnostics,
             )
             end_decision = end_decision_limited
 
-        # Build new WordAllocation with alignment data
-        new_allocation = WordAllocation(
-            word=word,
-            physical_spans=alloc.physical_spans,
-            evidence_ids=alloc.evidence_ids,
-            evidence_spans=alloc.evidence_spans,
-            speaker_id=alloc.speaker_id,
-            speaker_source=alloc.speaker_source,
-            warnings=alloc.warnings,
-            accepted=alloc.accepted,
+        new_allocation = replace(
+            alloc,
+            aligned_start=start_decision.boundary_time,
+            aligned_end=end_decision.boundary_time,
+            physical_bin_id=primary_bin_id,
+            boundary_confidence=min(
+                start_decision.confidence, end_decision.confidence
+            ),
+            alignment_status=(
+                "aligned"
+                if start_decision.accepted and end_decision.accepted
+                else "degraded"
+            ),
+            start_boundary_decision=start_decision,
+            end_boundary_decision=end_decision,
+            boundary_evidence_ids=tuple(dict.fromkeys(
+                start_decision.evidence_ids + end_decision.evidence_ids
+            )),
         )
-        # Annotate with alignment fields via object mutation (WordAllocation is frozen; use __dict__)
-        object.__setattr__(new_allocation, "aligned_start", start_decision.boundary_time)
-        object.__setattr__(new_allocation, "aligned_end", end_decision.boundary_time)
-        object.__setattr__(new_allocation, "start_boundary_decision", start_decision)
-        object.__setattr__(new_allocation, "end_boundary_decision", end_decision)
-        object.__setattr__(new_allocation, "alignment_status", (
-            "aligned" if start_decision.accepted and end_decision.accepted else "degraded"
-        ))
 
         result.append(new_allocation)
 

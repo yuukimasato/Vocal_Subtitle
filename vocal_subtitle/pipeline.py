@@ -54,6 +54,7 @@ class PipelineStats:
     speaker_count: int = 0
     diarization_silhouette: Optional[float] = None
     diagnostic_report: Optional[Dict] = None
+    quality_diagnostics: Dict[str, Any] = field(default_factory=dict)
 
     # global ASR path diagnostics
     asr_path: str = ""
@@ -95,6 +96,7 @@ class PipelineStats:
             "diarization_status": self.diarization_status,
             "mixed_event_count": self.mixed_event_count,
             "atomic_span_count": self.atomic_span_count,
+            "quality_diagnostics": self.quality_diagnostics,
             "hallucination_filter_version": getattr(self, "hallucination_filter_version", ""),
             "hallucination_dropped_count": getattr(self, "hallucination_dropped_count", 0),
         }
@@ -130,6 +132,7 @@ class PipelineStats:
         stats.speaker_count = payload.get("speaker_count", 0)
         stats.diarization_silhouette = payload.get("diarization_silhouette")
         stats.diagnostic_report = payload.get("diagnostic_report")
+        stats.quality_diagnostics = payload.get("quality_diagnostics", {})
         return stats
 
 
@@ -204,7 +207,17 @@ class Pipeline:
         """
         return self._get_asr_engine()
 
-    def _run_global_transcription_path(self, audio, sample_rate, shadow, stats):
+    def _run_global_transcription_path(
+        self,
+        audio,
+        sample_rate,
+        shadow,
+        stats,
+        *,
+        vad_segments=None,
+        ffmpeg_result=None,
+        noise_profile=None,
+    ):
         """Execute the global transcription path.
 
         Transcribes the full audio, allocates words to physical bins,
@@ -214,8 +227,15 @@ class Pipeline:
         """
         from .physical.ir import GlobalTranscript, GlobalTranscriptSegment, GlobalWord
         from .physical.subtitle_bins import build_physical_subtitle_bins
-        from .physical.allocator import allocate_words, WordAllocation
+        from .physical.allocator import (
+            AllocationResult,
+            PhysicalSpan,
+            WordAllocation,
+            allocate_words,
+        )
         from .physical.coverage import audit_physical_coverage
+        from .physical.events import build_events
+        from .physical.word_alignment import align_words_to_physical
         from .mapping.time_mapper import SubtitleEvent as SE
 
         engine = self._get_global_asr_engine()
@@ -277,19 +297,76 @@ class Pipeline:
         if timeline is None:
             return [], {"recovery": {"status": "no_timeline"}, "physical_coverage": {"complete": False}}, global_transcript
 
-        bins = build_physical_subtitle_bins(timeline)
+        bins = build_physical_subtitle_bins(
+            timeline, audio=audio, sample_rate=sample_rate,
+        )
         speaker_timeline = getattr(shadow, "global_speaker_timeline", None)
         allocation_result = allocate_words(global_transcript, timeline, speaker_timeline=speaker_timeline, subtitle_bins=bins)
 
-        # Build events from accepted allocations
-        events = []
-        for idx, alloc in enumerate(allocation_result.allocations, 1):
-            w = alloc.word
-            ev = SE(idx, w.raw_start, w.raw_end, w.text,
-                    source_word_ids=[w.id],
-                    physical_spans=[s.to_dict() for s in alloc.physical_spans] if alloc.physical_spans else [],
-                    speaker_id=alloc.speaker_id, speaker_source=alloc.speaker_source)
-            events.append(ev)
+        bin_owner_map = {
+            item.id: item.physical_clip_id
+            for item in bins
+            if item.physical_clip_id
+        }
+        clip_bounds = {
+            item.id: (item.start, item.end)
+            for item in timeline.physical_clips
+        }
+        # Global callers may provide detector outputs directly. When they do
+        # not, reconstruct the same absolute-time evidence from the shadow
+        # timeline so BoundaryArbiter still receives all available sources.
+        if vad_segments is None:
+            from .vad.base import SpeechSegment
+
+            vad_sources = {"silero", "ten", "webrtc", "boundary_fusion"}
+            vad_segments = [
+                SpeechSegment(item.start, item.end, item.confidence or 0.5)
+                for item in timeline.speech_evidence_spans
+                if item.source in vad_sources
+            ]
+        if ffmpeg_result is None:
+            ffmpeg_result = {
+                "skeleton": [
+                    (item.start, item.end)
+                    for item in timeline.speech_evidence_spans
+                    if item.source == "ffmpeg_skeleton"
+                ],
+                "coarse_speech": [
+                    (item.start, item.end)
+                    for item in timeline.speech_evidence_spans
+                    if item.source == "ffmpeg_coarse"
+                ],
+                "raw_silence_intervals": [],
+            }
+        if noise_profile is None:
+            from .physical.noise_profile import estimate_noise_profile
+
+            noise_profile = estimate_noise_profile(audio, sample_rate)
+
+        aligned_allocations = align_words_to_physical(
+            allocation_result.allocations,
+            bins,
+            bin_owner_map=bin_owner_map,
+            timeline=timeline,
+            clip_bounds=clip_bounds,
+            audio=audio,
+            sample_rate=sample_rate,
+            vad_segments=vad_segments,
+            ffmpeg_result=(
+                getattr(shadow, "ffmpeg_unified_result", None)
+                or ffmpeg_result
+            ),
+            noise_profile=noise_profile,
+        )
+        aligned_result = AllocationResult(
+            allocations=aligned_allocations,
+            rejected=list(allocation_result.rejected),
+            diagnostics=dict(allocation_result.diagnostics),
+        )
+        events = [
+            item.to_subtitle_event()
+            for item in build_events(aligned_result, subtitle_bins=bins)
+        ]
 
         coverage = audit_physical_coverage(bins, allocation_result.allocations)
         diag = {"physical_coverage": coverage.to_dict(), "recovery": {"status": "recovered" if coverage.complete else "incomplete"}}
@@ -319,11 +396,37 @@ class Pipeline:
                                                source_window_id="recovery", segment_id="recovery")
                             words.append(rword)
                             word_idx += 1
-                            events.append(SE(len(events)+1, rword.raw_start, rword.raw_end, rword.text,
-                                             source_word_ids=[rword.id], speaker_source="recovery"))
-                            # Build recovered allocation for re-audit
-                            rec_span = type("_Span", (), {"to_dict": lambda s=None, r=rec_range: {"physical_clip_id": getattr(r, "physical_clip_id", "clip-000001"), "start": r.start, "end": r.end}})()
-                            recovered_allocations.append(WordAllocation(word=rword, physical_spans=(rec_span,), accepted=True))
+                            clip_id = rec_range.physical_clip_id or "clip-000001"
+                            rec_span = PhysicalSpan(
+                                clip_id=clip_id,
+                                start=r_start,
+                                end=max(r_start + 0.01, r_end),
+                            )
+                            events.append(SE(
+                                len(events) + 1,
+                                rword.raw_start,
+                                rword.raw_end,
+                                rword.text,
+                                physical_start=rword.raw_start,
+                                physical_end=rword.raw_end,
+                                physical_spans=[rec_span.to_dict()],
+                                source_word_ids=[rword.id],
+                                speaker_source="recovery",
+                                alignment_warning="timing_degraded:local_recovery",
+                                time_source="timing_degraded",
+                                revision_trace=[{
+                                    "stage": "local_recovery",
+                                    "status": "timing_degraded",
+                                    "reason": "recovered_word_not_boundary_aligned",
+                                }],
+                            ))
+                            recovered_allocations.append(WordAllocation(
+                                word=rword,
+                                physical_spans=(rec_span,),
+                                warnings=("timing_degraded",),
+                                alignment_status="degraded",
+                                accepted=True,
+                            ))
 
                 coverage2 = audit_physical_coverage(bins, list(allocation_result.allocations) + recovered_allocations)
                 diag["physical_coverage"] = coverage2.to_dict()
@@ -837,7 +940,10 @@ class Pipeline:
                 try:
                     cached_result = json.loads(cached_task["result_json"])
                     cached_subtitle_path = Path(cached_result.get("subtitle_path", ""))
-                    if cached_subtitle_path.exists():
+                    if (
+                        cached_subtitle_path.exists()
+                        and self._is_usable_full_pipeline_cache(cached_result)
+                    ):
                         logger.info(
                             "Full pipeline cache HIT for %s (task: %s)",
                             input_path.name, cached_task["id"],
@@ -855,10 +961,18 @@ class Pipeline:
                             subtitle_count=cached_result.get("subtitle_count", 0),
                         )
 
+                        cached_events = [
+                            item
+                            if isinstance(item, SubtitleEvent)
+                            else SubtitleEvent.from_dict(item)
+                            for item in cached_result.get("events", [])
+                        ]
+                        stats.subtitle_count = len(cached_events)
+
                         return {
                             "subtitle_path": output_path,
                             "stats": stats,
-                            "events": cached_result.get("events", []),
+                            "events": cached_events,
                             "from_cache": True,
                         }
                 except Exception as e:
@@ -1192,13 +1306,11 @@ class Pipeline:
         except Exception as e:
             logger.warning("EndTimePostValidator failed: %s", e)
 
-        # ---- 导出干净版字幕（LLM 优化前，保留 ASR 原始结果） ----
+        # The builder is created here, but export is deliberately deferred
+        # until all semantic processing and the single finalization pass finish.
         builder = self._get_subtitle_builder()
-        clean_subtitle_paths = self._export_subtitles_multi_format(
-            builder, events, output_path, output_format, session_dir, label="asr"
-        )
-        clean_subtitle_path = clean_subtitle_paths.get("srt", str(output_path))
-        logger.info("Clean subtitle exported: %s (%d events)", clean_subtitle_path, len(events))
+        clean_subtitle_paths: Dict[str, str] = {}
+        clean_subtitle_path = str(output_path)
 
         # ---- 导出骨架段音频（独立于 skeleton_mode，供人工验证） ----
         if self.config.acoustic_validation.export_skeleton_segments:
@@ -1237,18 +1349,25 @@ class Pipeline:
             )
             stats.stage_timings["llm"] = self._progress.finish_stage()
 
-            # ---- 导出 LLM 优化版字幕 ----
-            llm_output_path = Path(str(output_path).replace(
-                f".{output_format}", f"_llm.{output_format}"
-            ))
-            llm_subtitle_paths = self._export_subtitles_multi_format(
-                builder, events, llm_output_path, output_format, session_dir, label="llm"
-            )
-            llm_subtitle_path = llm_subtitle_paths.get("srt", str(llm_output_path))
-            logger.info(
-                "LLM-optimized subtitle exported: %s (%d events)",
-                llm_subtitle_path, len(events),
-            )
+        # ---- 唯一最终化与主字幕导出 ----
+        events = self._finalize_events(events, stats, stats.duration_seconds)
+        export_label = "llm" if self.config.llm_optimize.enabled else "asr"
+        final_paths = self._export_subtitles_multi_format(
+            builder, events, output_path, output_format, session_dir, label=export_label
+        )
+        final_subtitle_path = final_paths.get(output_format, str(output_path))
+        if session_dir:
+            final_subtitle_path = final_paths.get("srt", final_subtitle_path)
+        if self.config.llm_optimize.enabled:
+            llm_subtitle_paths = final_paths
+            llm_subtitle_path = final_subtitle_path
+        else:
+            clean_subtitle_paths = final_paths
+            clean_subtitle_path = final_subtitle_path
+        logger.info(
+            "Final subtitle exported: %s (%d events)",
+            final_subtitle_path, len(events),
+        )
 
         # ---- 将分离音频复制到会话目录 ----
         if session_dir and separation_result:
@@ -1324,7 +1443,7 @@ class Pipeline:
             )
 
         return {
-            "subtitle_path": clean_subtitle_path,
+            "subtitle_path": final_subtitle_path,
             "llm_subtitle_path": llm_subtitle_path,
             "stats": stats,
             "events": events,
@@ -1619,8 +1738,10 @@ class Pipeline:
             except Exception as e:
                 logger.warning("Frame seamless stitching failed: %s", e)
 
+        all_events = self._finalize_events(
+            all_events, stats, stats.duration_seconds
+        )
         stats.segment_count = total_segments
-        stats.subtitle_count = len(all_events)
         stats.total_time = time.time() - start_time
 
         # 输出字幕
@@ -2993,6 +3114,23 @@ class Pipeline:
             result[output_format] = str(default_output_path)
 
         return result
+
+    @staticmethod
+    def _finalize_events(
+        events: List[SubtitleEvent],
+        stats: PipelineStats,
+        audio_duration: Optional[float],
+    ) -> List[SubtitleEvent]:
+        """Finalize once before stats, API responses, cache, and export."""
+        from .mapping.finalize import finalize_subtitle_events
+
+        result = finalize_subtitle_events(
+            events,
+            audio_duration=audio_duration if audio_duration and audio_duration > 0 else None,
+        )
+        stats.subtitle_count = result.subtitle_count
+        stats.quality_diagnostics["finalization"] = result.diagnostics
+        return result.events
 
     def _run_mapping(
         self,

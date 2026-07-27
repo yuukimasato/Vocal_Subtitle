@@ -98,6 +98,7 @@ def test_pipeline_stats_round_trip_keeps_path_diagnostics(tmp_path):
     stats.fallback_category = "dependency_unavailable"
     stats.fallback_reason = "WhisperX is not installed"
     stats.global_diagnostics = {"fallback": True}
+    stats.quality_diagnostics = {"finalization": {"output_event_count": 2}}
 
     restored = PipelineStats.from_dict(
         Path("audio.wav"), stats.to_dict(), duration_seconds=0.0
@@ -107,6 +108,9 @@ def test_pipeline_stats_round_trip_keeps_path_diagnostics(tmp_path):
     assert restored.global_attempted is True
     assert restored.fallback_category == "dependency_unavailable"
     assert restored.global_diagnostics == {"fallback": True}
+    assert restored.quality_diagnostics == {
+        "finalization": {"output_event_count": 2}
+    }
 
 
 def test_full_pipeline_cache_requires_compatible_path():

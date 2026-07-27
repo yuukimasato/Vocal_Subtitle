@@ -1,0 +1,68 @@
+{
+  "input_path": "/home/hope/Tools/Vocal_Subtitle/test/video_英国老头评测中国美的移动空调_1MIN_real-人声.wav",
+  "duration_seconds": 53.8880625,
+  "stage_timings": {
+    "llm_merge": 0.0018050670623779297,
+    "acoustic": 0.00016307830810546875,
+    "skeleton": 0.05290699005126953,
+    "vad": 0.3651771545410156,
+    "merging": 0.030781269073486328,
+    "asr": 16.078256368637085,
+    "boundary_refine": 0.0003783702850341797,
+    "boundary_confidence": 0.00013756752014160156,
+    "mapping": 0.0016713142395019531
+  },
+  "total_time": 17.637877702713013,
+  "segment_count": 3,
+  "subtitle_count": 9,
+  "asr_path": "",
+  "global_attempted": false,
+  "fallback_category": "",
+  "fallback_reason": "",
+  "global_diagnostics": {},
+  "raw_diarization_speaker_count": 0,
+  "canonical_speaker_count": 0,
+  "speaker_merge_map": {},
+  "canonicalization_status": "",
+  "diarization_backend": "",
+  "diarization_status": "",
+  "mixed_event_count": 0,
+  "atomic_span_count": 0,
+  "quality_diagnostics": {
+    "finalization": {
+      "input_event_count": 9,
+      "output_event_count": 9,
+      "step": [
+        "display_mapping",
+        "final_validation"
+      ],
+      "skipped_invalid": 0,
+      "valid_input_count": 9,
+      "display_cue_count": 9,
+      "physical_clamped_count": 0,
+      "removed_count": 0,
+      "reasons": {},
+      "warning_count": 0,
+      "overlap_count": 1,
+      "overlap_trimmed_count": 1
+    }
+  },
+  "hallucination_filter_version": "",
+  "hallucination_dropped_count": 0,
+  "speaker_count": 3,
+  "diagnostic_report": {
+    "snapped_starts": 0,
+    "snapped_ends": 0,
+    "rms_overrides": 0,
+    "skipped_low_confidence": 0,
+    "events_flagged": [],
+    "gap_merged": 1,
+    "total_events": 9,
+    "start_in_silence": 0,
+    "end_in_silence": 1,
+    "end_truncated": 0,
+    "start_out_of_range": 0,
+    "end_out_of_range": 0,
+    "health_score": 94.4
+  }
+}
