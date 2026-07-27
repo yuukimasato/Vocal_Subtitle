@@ -15,11 +15,42 @@ class WordTimestamp:
     start: float
     end: float
     confidence: float = 1.0
+    speaker_id: Optional[int] = None
 
     def __repr__(self) -> str:
         return (
             f"WordTimestamp(word='{self.word}', "
             f"start={self.start:.3f}, end={self.end:.3f})"
+        )
+
+
+@dataclass
+class LanguageDetection:
+    """语言检测结果
+
+    Attributes:
+        language: 语言代码 (zh/en/ja/...)
+        probability: 检测置信度 (0-1)
+        source: 检测来源 (模型名称或 "heuristic")
+    """
+
+    language: str
+    probability: float
+    source: str
+
+    def to_dict(self) -> dict:
+        return {
+            "language": self.language,
+            "probability": self.probability,
+            "source": self.source,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "LanguageDetection":
+        return cls(
+            language=payload["language"],
+            probability=payload["probability"],
+            source=payload.get("source", "unknown"),
         )
 
 
@@ -33,6 +64,11 @@ class TranscriptionSegment:
         end: 段内结束时间（秒）
         words: 词级时间戳列表
         avg_logprob: 平均对数概率
+        language: 检测到的语言代码
+        language_probability: 语言检测置信度
+        no_speech_prob: 无语音概率
+        compression_ratio: 压缩比
+        speaker_id: 说话人 ID（可选）
     """
 
     text: str
@@ -40,6 +76,11 @@ class TranscriptionSegment:
     end: float
     words: List[WordTimestamp] = field(default_factory=list)
     avg_logprob: float = 0.0
+    language: Optional[str] = None
+    language_probability: Optional[float] = None
+    no_speech_prob: Optional[float] = None
+    compression_ratio: Optional[float] = None
+    speaker_id: Optional[int] = None
 
     @property
     def duration(self) -> float:

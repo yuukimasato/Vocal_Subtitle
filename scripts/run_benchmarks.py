@@ -56,6 +56,8 @@ class SceneResult:
     diagnostic: Optional[dict] = None
     elapsed_sec: float = 0.0
     error: str = ""
+    asr_path: str = ""
+    fallback_category: str = ""
 
 
 @dataclass
@@ -73,6 +75,10 @@ class BenchmarkSummary:
     avg_end_mae_ms: float = 0.0
     avg_health_score: float = 0.0
     total_elapsed_sec: float = 0.0
+
+    # rollout 状态
+    rollout_eligible: bool = False
+    eligibility_reasons: List[str] = field(default_factory=list)
 
 
 # ------------------------------------------------------------------
@@ -263,6 +269,8 @@ def summary_to_dict(summary: BenchmarkSummary) -> dict:
         "total_scenes": summary.total_scenes,
         "success_scenes": summary.success_scenes,
         "failure_scenes": summary.total_scenes - summary.success_scenes,
+        "rollout_eligible": summary.rollout_eligible,
+        "eligibility_reasons": list(summary.eligibility_reasons),
         "aggregate": {
             "avg_start_mae_ms": round(summary.avg_start_mae_ms, 1),
             "avg_end_mae_ms": round(summary.avg_end_mae_ms, 1),
@@ -275,6 +283,8 @@ def summary_to_dict(summary: BenchmarkSummary) -> dict:
                 "success": r.success,
                 "elapsed_sec": round(r.elapsed_sec, 1),
                 "error": r.error,
+                "asr_path": r.asr_path,
+                "fallback_category": r.fallback_category,
                 "statistics": r.comparison.get("statistics") if r.comparison else None,
                 "health_score": r.comparison.get("health_score") if r.comparison else None,
                 "flagged_count": len(r.comparison.get("flagged_events", [])) if r.comparison else 0,
@@ -287,6 +297,47 @@ def summary_to_dict(summary: BenchmarkSummary) -> dict:
             for r in summary.results
         ],
     }
+
+
+def evaluate_rollout_eligibility(
+    scene_dirs: dict,
+    results: List[SceneResult],
+    summary: BenchmarkSummary,
+    min_scenes: int = 3,
+    target_metrics: Optional[dict] = None,
+) -> tuple:
+    """Evaluate whether a benchmark rollout is eligible for publication.
+
+    Args:
+        scene_dirs: Dict of {scene_name: scene_directory}
+        results: List of per-scene benchmark results
+        summary: Aggregated benchmark summary
+        min_scenes: Minimum number of valid scenes required
+        target_metrics: Dict of metric targets, e.g. {"end_mae": 300}
+
+    Returns:
+        (eligible: bool, reasons: List[str])
+    """
+    reasons = []
+
+    if summary.total_scenes < min_scenes:
+        reasons.append(f"至少 {min_scenes} 个场景 (当前 {summary.total_scenes})")
+
+    success_results = [r for r in results if r.success]
+    non_global = [r for r in success_results if getattr(r, "asr_path", "") != "global"]
+    if non_global:
+        reasons.append("没有使用 global ASR 路径的场景")
+
+    if target_metrics:
+        end_target = target_metrics.get("end_mae")
+        start_target = target_metrics.get("start_mae")
+        if end_target and summary.avg_end_mae_ms > end_target:
+            reasons.append(f"End MAE {summary.avg_end_mae_ms:.0f}ms 超过目标 {end_target}ms")
+        if start_target and summary.avg_start_mae_ms > start_target:
+            reasons.append(f"Start MAE {summary.avg_start_mae_ms:.0f}ms 超过目标 {start_target}ms")
+
+    eligible = len(reasons) == 0
+    return eligible, reasons
 
 
 def print_summary(summary: BenchmarkSummary) -> None:

@@ -22,6 +22,33 @@ logger = logging.getLogger(__name__)
 DEFAULT_CACHE_DIR = Path(__file__).parent.parent.parent / "cache" / "speaker_models"
 
 
+def is_huggingface_model_cached(model_ref: str, cache_dir: Optional[Path] = None) -> bool:
+    """Check whether a Hugging Face model is already fully cached locally.
+
+    Does NOT initiate any network request. Only inspects the local filesystem.
+
+    Args:
+        model_ref: Hugging Face model reference (e.g. "pyannote/embedding")
+        cache_dir: Optional cache directory; uses DEFAULT_CACHE_DIR if not provided.
+
+    Returns:
+        True if the model snapshot directory exists and contains a config file.
+    """
+    cache_root = Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
+    hub_dir = cache_root / "hub"
+    # Convert model_ref to huggingface_hub cache path convention
+    model_path = hub_dir / ("models--" + model_ref.replace("/", "--"))
+    snapshots_dir = model_path / "snapshots"
+    if not snapshots_dir.is_dir():
+        return False
+    # Any snapshot directory with a config file counts as cached
+    for snapshot in snapshots_dir.iterdir():
+        if snapshot.is_dir():
+            if (snapshot / "config.yaml").exists() or (snapshot / "config.json").exists():
+                return True
+    return False
+
+
 class SpeakerEmbeddingEngine(ABC):
     """说话人嵌入引擎抽象基类
 

@@ -26,6 +26,52 @@ class ClusteredSegment:
 
 
 @dataclass
+class SpeakerTurn:
+    """单个说话人轮次
+
+    Attributes:
+        start: 起始时间（秒）
+        end: 结束时间（秒）
+        speaker_id: 说话人编号 (0-indexed)
+        speaker: 说话人标签 (可选，如 "SPEAKER_00")
+        confidence: 置信度 (0-1)
+        overlapped: 是否与其他说话人重叠
+    """
+
+    start: float
+    end: float
+    speaker_id: int
+    speaker: Optional[str] = None
+    confidence: Optional[float] = None
+    overlapped: bool = False
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+
+
+@dataclass
+class DiarizationResult:
+    """说话人分离结果
+
+    Attributes:
+        turns: 所有 speaker turns
+        exclusive_turns: 无重叠的 speaker turns
+        speaker_count: 识别的说话人数量
+        backend: 使用的后端名称
+        status: 处理状态 ("ok", "degraded", "failed")
+        diagnostics: 诊断信息
+    """
+
+    turns: List[SpeakerTurn] = field(default_factory=list)
+    exclusive_turns: List[SpeakerTurn] = field(default_factory=list)
+    speaker_count: int = 0
+    backend: str = "unknown"
+    status: str = "unknown"
+    diagnostics: dict = field(default_factory=dict)
+
+
+@dataclass
 class SpeakerRole:
     """说话人角色标注结果
 
@@ -40,6 +86,31 @@ class SpeakerRole:
     role: Optional[str] = None       # 推断的角色类型: "嘉宾"
     label: str = ""                  # 最终显示标签: "张三(嘉宾)"
     confidence: str = "fallback"     # "identity" | "role" | "fallback"
+
+
+@dataclass
+class AtomicSpeechSpan:
+    """原子语音跨度 — 物理边界与 diarization turns 融合后的最小单元
+
+    Attributes:
+        start: 起始时间（秒）
+        end: 结束时间（秒）
+        speaker_id: 说话人编号 (None 表示 UNKNOWN)
+        physical_source: 物理来源标识
+        speaker_source: 说话人来源标识
+        overlapped: 是否重叠
+    """
+
+    start: float
+    end: float
+    speaker_id: Optional[int] = None
+    physical_source: str = ""
+    speaker_source: str = "unknown"
+    overlapped: bool = False
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
 
 
 class DiarizationEngine(ABC):
