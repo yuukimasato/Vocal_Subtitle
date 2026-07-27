@@ -7,6 +7,7 @@
 - 中文每行最多 20 字，英文每行最多 42 字符
 - 单条字幕最多 2 行
 """
+import math
 
 import logging
 import re
@@ -647,8 +648,8 @@ class SubtitleBuilder:
                 text = self._format_speaker_label(event)
 
             sub_event = pysubs2.SSAEvent(
-                start=round(event.start * 1000),  # pysubs2 使用毫秒，四舍五入
-                end=round(event.end * 1000),
+                start=max(1, int(math.floor(event.start * 1000 + 0.5))),  # SRT uses ms, never 0
+                end=max(1, int(math.floor(event.end * 1000 + 0.5))),
                 text=text,
                 name=name,
             )

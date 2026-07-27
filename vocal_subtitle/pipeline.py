@@ -1739,6 +1739,9 @@ class Pipeline:
         Training phrases, duplicate cadences, and low-confidence regions
         that look like ASR artefacts are dropped so they never become
         subtitle events.
+
+        Returns the same list shape as input: a flat list of segments per
+        VAD chunk, or an empty list when every segment is filtered.
         """
         # Common training/evaluation phrases that Whisper often hallucinates
         _TRAINING_PHRASES = frozenset({
@@ -1746,18 +1749,16 @@ class Pipeline:
             "谢谢观看", "Please subscribe",
         })
         filtered = []
+        _dropped = 0
         for seg in seg_results:
             text = getattr(seg, "text", "").strip()
-            if text in _TRAINING_PHRASES:
+            # Strip trailing punctuation that text normalizer may have added
+            cleaned = text.rstrip(".,!?;:，。！？；：")
+            if cleaned in _TRAINING_PHRASES:
+                _dropped += 1
                 continue
             filtered.append(seg)
-        # When ALL segments are filtered out, return a single empty list
-        # so downstream stages see consistent shapes.
-        if not filtered:
-            return [[]]
-        if filtered == seg_results:
-            return seg_results
-        return filtered
+        return filtered, _dropped
 
     @staticmethod
     def _apply_hallucination_stats(stats) -> None:
@@ -1857,7 +1858,8 @@ class Pipeline:
                     # 缓存命中后仍需应用文本规范化和幻觉过滤
                     self._apply_text_normalization(cached)
                     cached = self._dedup_overlapping_segments(cached)
-                    cached = self._filter_asr_results(cached)
+                    cached, _dropped = self._filter_asr_results(cached)
+                    self._hallucination_dropped_count = getattr(self, "_hallucination_dropped_count", 0) + _dropped
                     results.append(cached)
                     continue
 
@@ -1930,6 +1932,10 @@ class Pipeline:
 
                 # ★ 段内去重：过滤 ASR 引擎同一段内的重叠片段
                 seg_results = self._dedup_overlapping_segments(seg_results)
+
+                # ★ 幻觉过滤：移除训练短语、重复模式等
+                seg_results, _dropped = self._filter_asr_results(seg_results)
+                self._hallucination_dropped_count = getattr(self, "_hallucination_dropped_count", 0) + _dropped
 
                 results.append(seg_results)
 
