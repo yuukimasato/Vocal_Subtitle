@@ -4,7 +4,7 @@
 
 ## 1. 目标与执行契约
 
-本计划把现有 VAD/FFmpeg/RMS 物理时间轴接入唯一生产链路，建立可追溯的词级对齐、自适应语义分片、受约束 LLM 滑窗、双时间轴和唯一最终事件出口。
+本计划把现有 VAD/FFmpeg/RMS 物理时间轴接入唯一生产链路，建立局部噪声模型、结构化边界仲裁、可追溯词级对齐、自适应语义分片、受约束 LLM 滑窗、有限回投状态机、双时间轴和唯一最终事件出口。
 
 执行模型必须遵守：
 
@@ -42,10 +42,13 @@ venv/bin/pytest -q
 ## 3. 核心实现选择
 
 - 复用 `PhysicalTimeline` / `PhysicalClip` / `SpeechEvidenceSpan` / `PhysicalSubtitleBin`，不新建第二套物理时间轴。
+- `LocalNoiseProfile` 只校准物理候选，不改写原始声学证据；固定阈值回退必须显式降置信度。
+- `BoundaryArbiter` 先执行硬约束，再对多源特征评分；所有冻结物理边界保存结构化 `BoundaryDecision`。
 - 将 `GlobalWord + WordAllocation` 作为设计中 `WordToken` 的实现，在 allocation 上增加对齐结果，避免复制词对象。
 - 保留 `SubtitleEvent` 作为外部兼容类型；`start/end` 在最终阶段代表显示时间，`physical_start/end` 代表冻结的人声证据时间。
 - `SubtitleBuilder` 最终只负责渲染。合并、拆分、去重、显示映射和最终校验必须在导出前完成。
 - LLM 输出只引用 word/fragment ID，禁止直接采信它返回的数值时间。
+- 语义边界没有合法投影时先确定性合并，最多一次受限 LLM 修复，随后回退 PhysicalFragment。
 
 ## 4. 任务 1：恢复基础数据契约和测试收集
 
@@ -198,7 +201,7 @@ venv/bin/pytest -q tests/test_mapping/test_event_ops.py tests/test_mapping/test_
 
 ## 8. 任务 5：接通现有物理时间轴和 global ASR 主路径
 
-**目标：** 让已存在的 phase 2/3 模块进入真实 Pipeline，并保证 global 失败时整体回退，不混用部分结果。
+**目标：** 让已存在的 phase 2/3 模块进入真实 Pipeline，建立可缓存的局部噪声模型，并保证 global 失败时整体回退，不混用部分结果。
 
 **修改文件：**
 
@@ -207,30 +210,38 @@ venv/bin/pytest -q tests/test_mapping/test_event_ops.py tests/test_mapping/test_
 - `vocal_subtitle/physical/shadow.py`
 - `vocal_subtitle/physical/evidence_adapter.py`
 - `vocal_subtitle/physical/subtitle_bins.py`
+- 新增 `vocal_subtitle/physical/noise_profile.py`
 - `vocal_subtitle/physical/allocator.py`
 - `vocal_subtitle/physical/events.py`
+- `vocal_subtitle/vad/ffmpeg_vad.py`
+- `vocal_subtitle/config.py`
+- `configs/default.yaml`
 - `vocal_subtitle/asr/global_transcriber.py`
 - `tests/test_physical/test_shadow.py`
 - `tests/test_physical/test_evidence_adapter.py`
+- 新增 `tests/test_physical/test_noise_profile.py`
 - `tests/test_physical/test_phase_three.py`
 - `tests/test_phase_five.py`
 
 **步骤：**
 
 1. `_process_chunk_pipeline()` 完成 VAD/FFmpeg 后构建并在 context 中保留唯一 `PhysicalTimeline`。
-2. 为单块、宏块和骨架路径使用绝对时间 offset；宏块拼接必须调用 `shift_event()`。
-3. 实现 `_run_global_transcription_path()`：`GlobalTranscriber -> physical bins -> allocate_words -> build_events -> SubtitleEvent`。
-4. 实现 `_resolve_asr_path()` 的真实编排。global 结果为 empty/degraded/非法时，丢弃全部 global 事件，再运行 segmented fallback。
-5. 缓存记录 schema 与 actual path，global 请求不能命中无 path 的旧 full-pipeline 缓存。
-6. 保留所有原始 evidence IDs 和 allocation warnings，不为了产出事件扩大 PhysicalClip。
+2. 在物理阶段使用滚动分位数与 MAD 建立 `LocalNoiseProfile`，通过变点检测、滞回、最小稳定区间和上下限夹持生成稳定噪声区间。
+3. FFmpeg `silencedetect` 在稳定噪声区间使用分段阈值；若分段执行的额外成本超出性能预算，则保留一次敏感 FFmpeg pass，并由局部 RMS/VAD 补充候选。不得把一次固定阈值调用标记为动态阈值。
+4. 噪声估计失败时回退配置阈值、降低对应 evidence confidence 并记录 warning，不扩大 PhysicalClip，也不把无静音结果直接解释为全程人声。
+5. 为单块、宏块和骨架路径使用绝对时间 offset；宏块拼接必须调用 `shift_event()`。
+6. 实现 `_run_global_transcription_path()`：`GlobalTranscriber -> physical bins -> allocate_words -> build_events -> SubtitleEvent`。
+7. 实现 `_resolve_asr_path()` 的真实编排。global 结果为 empty/degraded/非法时，丢弃全部 global 事件，再运行 segmented fallback。
+8. 缓存记录 schema、noise-profile 配置指纹与 actual path，global 请求不能命中无 path 的旧 full-pipeline 缓存。
+9. 保留所有原始 evidence IDs、局部噪声区间和 allocation warnings，不为了产出事件扩大 PhysicalClip。
 
 **验证：**
 
 ```bash
-venv/bin/pytest -q tests/test_physical tests/test_phase_five.py tests/test_utils/test_cache_manager.py
+venv/bin/pytest -q tests/test_physical/test_noise_profile.py tests/test_physical tests/test_vad/test_ffmpeg_vad.py tests/test_phase_five.py tests/test_utils/test_cache_manager.py
 ```
 
-**完成条件：** fake global engine 成功时不调用 legacy ASR；任一 global 失败类别均只产生完整 legacy 结果或明确失败。
+**完成条件：** fake global engine 成功时不调用 legacy ASR；任一 global 失败类别均只产生完整 legacy 结果或明确失败。合成底噪阶跃能生成不同的稳定噪声区间；噪声估计失败可审计地回退配置值。
 
 **建议提交：** `feat: connect physical timeline to global subtitle path`
 
@@ -241,32 +252,41 @@ venv/bin/pytest -q tests/test_physical tests/test_phase_five.py tests/test_utils
 **新增/修改文件：**
 
 - 新增 `vocal_subtitle/physical/word_alignment.py`
+- 新增 `vocal_subtitle/physical/boundary_arbiter.py`
 - `vocal_subtitle/physical/allocator.py`
 - `vocal_subtitle/physical/events.py`
 - `vocal_subtitle/physical/subtitle_bins.py`
 - 新增 `tests/test_physical/test_word_alignment.py`
+- 新增 `tests/test_physical/test_boundary_arbiter.py`
 - 扩展 `tests/test_physical/test_phase_three.py`
 - 更新 `tests/test_mapping/test_time_mapper.py`
 
 **数据契约：**
 
-`WordAllocation` 追加 `aligned_start/end`、`physical_bin_id`、`boundary_confidence`、`alignment_status` 和使用的 boundary evidence IDs。`GlobalWord.raw_start/end` 保持不变。
+`WordAllocation` 追加 `aligned_start/end`、`physical_bin_id`、`boundary_confidence`、`alignment_status`、起止 `BoundaryDecision` 和使用的 boundary evidence IDs。`GlobalWord.raw_start/end` 保持不变。
+
+`BoundaryDecision` 至少包含 `accepted`、`boundary_time`、`boundary_type`、`confidence`、`evidence_ids` 和 `reason_codes`。拒绝候选同样保留原因，便于质量报告区分“没有候选”和“候选违反硬约束”。
 
 **对齐规则：**
 
-1. 先按词与 PhysicalSubtitleBin 的正重叠、中点距离和 evidence 优先级分配候选仓。
+1. 先按词与 PhysicalSubtitleBin 的正重叠、中点距离和 evidence 质量分配候选仓。
 2. 在同一词序列上保证单调、有限、正时长和不互相逆序。
-3. 只在词端点落入候选吸附窗口时向证据边界移动；记录原始值、新值和证据。
-4. 末词结束时间不得无条件改为 `speech_seg.end` 或 `physical_bin.end`。
-5. 跨仓词保留整词并标记冲突；不从中间截断文字。
-6. 无词级时间时降级为片段证据，写入 `timing_degraded`，不伪造词精度。
-7. `build_events()` 使用首尾对齐词生成 `physical_start/end`；PhysicalSubtitleBin 外边界只作为候选锚点和合法上限，不直接取代词边界。
+3. `BoundaryArbiter` 先过滤越出 PhysicalSubtitleBin/PhysicalClip、跨 speaker/hard split、截断确认人声、覆盖下一确认人声或破坏单调性的候选，再对归一化后的 ASR 置信度、RMS 梯度/谷底、VAD 概率、FFmpeg 静音、来源一致性和局部噪声状态评分。
+4. 起点与终点使用不同损失函数，但不实现永久的 `RMS > VAD > ASR` 或 `FFmpeg > RMS > VAD > ASR` 固定排序。连续 200-400ms 低能静音是强终点候选，不是所有字幕换条的必要条件。
+5. ASR 置信度按后端校准为等级。高置信度初始使用约 `±200ms` 搜索窗，低置信度初始使用约 `±500ms`；窗口被相邻词、物理仓、PhysicalClip 和 speaker 硬边界夹持。`0.9`、`0.6` 和物理权重 `80%` 只允许作为实验初值。
+6. 只在词端点落入合法候选窗口时移动；记录原始值、新值、候选评分、拒绝原因和 evidence IDs。
+7. 末词结束时间不得无条件改为 `speech_seg.end` 或 `physical_bin.end`。
+8. 跨仓词保留整词并标记冲突；不从中间截断文字。
+9. 无词级时间或无可接受边界时降级为片段证据，写入 `timing_degraded` 和结构化降级决策，不伪造词精度。
+10. `build_events()` 使用首尾已接受的边界决策生成 `physical_start/end`；PhysicalSubtitleBin 外边界只作为候选锚点和合法上限，不直接取代词边界。
 
 **验证：**
 
 ```bash
-venv/bin/pytest -q tests/test_physical/test_word_alignment.py tests/test_physical/test_phase_three.py tests/test_mapping/test_time_mapper.py
+venv/bin/pytest -q tests/test_physical/test_boundary_arbiter.py tests/test_physical/test_word_alignment.py tests/test_physical/test_phase_three.py tests/test_mapping/test_time_mapper.py
 ```
+
+**完成条件：** 违反硬约束的高分候选永不被选中；连续语音可在合法词间边界换条；相同输入与配置产生完全一致的 BoundaryDecision；所有降级边界都有 reason code。
 
 **建议提交：** `feat: align ASR words to physical boundary evidence`
 
@@ -290,6 +310,7 @@ venv/bin/pytest -q tests/test_physical/test_word_alignment.py tests/test_physica
 3. PhysicalClip 变化、已确认 speaker 变化、长停顿和真实重叠轨道边界标记为 hard split。
 4. 细粒度句号/问号/叹号断句对正常时长事件也生效，不再只对超长事件调用。
 5. 语义断句必须在词边界；没有词的事件使用保守的文本/停顿降级。
+6. 连续语音允许在受 BoundaryDecision 支持的词间边界换条；不得因为缺少 200-400ms 静音而强制合并全部语义句。
 
 **验证：**
 
@@ -317,6 +338,7 @@ venv/bin/pytest -q tests/test_mapping/test_semantic_fragments.py tests/test_phas
 
 - 输入：window ID、fragment IDs、word IDs、只读 physical range、文本、语言、speaker/status/confidence、pause class、hard split 和 overlap 标记。
 - 输出：有序 fragment/word ID groups、绑定原始 ID 的 normalized text overlay、仅针对 UNKNOWN 的 speaker decision、review requests 和 reason。
+- 修复输入额外包含可重组的 ID 与只读合法 boundary candidate IDs；修复输出仍只能重组 ID，不能生成候选。
 - 输出 schema 明确禁止 `start`、`end`、`duration` 等数值时间字段。
 
 **实现要点：**
@@ -327,6 +349,7 @@ venv/bin/pytest -q tests/test_mapping/test_semantic_fragments.py tests/test_phas
 4. 联网且已配置 LLM 时优先 quality provider；单窗口 schema 失败有限重试一次，仍失败则仅该窗口本地降级。
 5. 修正现有 `_run_llm_merge()` 直接新建丢字段 `SubtitleEvent` 的行为；它只应用经验证的 ID 操作。
 6. 保留每个窗口的 provider/model/retry/fallback/rejection 诊断，不记录 API key。
+7. 物理投影失败时只允许一次受限语义修复；第二次失败必须确定性回退，不得循环请求 LLM。
 
 **验证：**
 
@@ -338,7 +361,7 @@ venv/bin/pytest -q tests/test_merging/test_semantic_window.py tests/test_merging
 
 ## 12. 任务 9：局部再识别与 UNKNOWN speaker 补全
 
-**目标：** 让“漏词补全”通过新声学证据完成，不把 LLM 猜测当成转录真值。
+**目标：** 让“漏词补全”通过新声学证据完成，并以受约束的声学异常门控 UNKNOWN speaker，不把 LLM 猜测当成转录或说话人真值。
 
 **新增/修改文件：**
 
@@ -347,7 +370,10 @@ venv/bin/pytest -q tests/test_merging/test_semantic_window.py tests/test_merging
 - `vocal_subtitle/physical/coverage.py`
 - `vocal_subtitle/physical/allocator.py`
 - `vocal_subtitle/mapping/strict_segmenter.py`
+- 新增 `vocal_subtitle/diarization/speaker_change.py`
+- `vocal_subtitle/diarization/feature_extractor.py`
 - 新增 `tests/test_asr/test_local_recovery.py`
+- 新增 `tests/test_diarization/test_speaker_change.py`
 - 扩展 `tests/test_physical/test_coverage_recovery.py`
 - 扩展 `tests/test_phase_four.py`
 
@@ -358,12 +384,17 @@ venv/bin/pytest -q tests/test_merging/test_semantic_window.py tests/test_merging
 3. 候选补词先转为新 `GlobalWord` ID，再重跑 allocation/alignment/coverage；无正物理重叠或置信度不足时拒绝。
 4. 文本覆盖若改变词数，必须引用新词 ID；只改标点/大小写时可继续引用原始 ID。
 5. UNKNOWN speaker 先使用两侧一致性和物理 owner 规则，再允许 LLM 推断。任何已确认 speaker 标签必须保持 100%。
+6. 全局 diarization change point 或 speaker embedding 距离是 speaker 异常判断的主要证据；阈值按模型和场景校准。
+7. RMS 均值差只产生 `SPK_CHANGE_CANDIDATE`，不能单独形成 hard split。MFCC/F0 可在 embedding 不可用时补强；仅在样本足以稳定估计协方差时允许使用马氏距离。
+8. 候选只有在 diarization 确认或多源声学一致时才升级为 speaker hard split。LLM 只能补全硬边界范围内的 UNKNOWN，不能跨边界合并或覆盖已确认 speaker。
 
 **验证：**
 
 ```bash
-venv/bin/pytest -q tests/test_asr/test_local_recovery.py tests/test_physical/test_coverage_recovery.py tests/test_phase_four.py
+venv/bin/pytest -q tests/test_asr/test_local_recovery.py tests/test_diarization/test_speaker_change.py tests/test_physical/test_coverage_recovery.py tests/test_phase_four.py
 ```
+
+**完成条件：** 同一 speaker 的音量突变不会单独产生 hard split；经确认的声学 speaker 变化不可被 LLM 跨越；embedding 不可用时的特征降级有明确诊断。
 
 **建议提交：** `feat: recover low-confidence speech with local evidence`
 
@@ -374,28 +405,34 @@ venv/bin/pytest -q tests/test_asr/test_local_recovery.py tests/test_physical/tes
 **新增/修改文件：**
 
 - 新增 `vocal_subtitle/mapping/display_timeline.py`
+- 新增 `vocal_subtitle/mapping/boundary_projection.py`
 - `vocal_subtitle/mapping/final_validator.py`
 - `vocal_subtitle/mapping/end_time_validator.py`
 - `vocal_subtitle/config.py`
 - `configs/default.yaml`
 - 新增 `tests/test_mapping/test_display_timeline.py`
+- 新增 `tests/test_mapping/test_boundary_projection.py`
 - 扩展 `tests/test_phase_four.py`
 - 扩展 `tests/test_end_time_fixes.py`
 
 **映射规则：**
 
-1. `physical_start/end` 取 SemanticCue 首尾对齐词时间，进入本阶段后不可修改。
-2. display start/end 可向最近候选静音边界吸附，但必须被 PhysicalClip、hard split、下一人声起点和最大前导/尾随窗口夹持。
-3. 显示时间必须覆盖物理人声，除非事件已标记 `timing_degraded`；不得用阅读时长要求截断人声。
-4. 相邻不同 speaker 时优先人声边界；阅读时长不足写入质量警告，不篡改下一 speaker 的时间。
-5. 修正当前 `final_validator` 把 display 强制夹进 physical envelope 的旧逻辑。新校验验证“display 合法覆盖 physical”，而不是要求两者必须相等。
-6. 非真实重叠在最终阶段解决；不允许盲目裁前一条而导致切尾。无合法解时回退 PhysicalFragment 并标记需复核。
+1. `boundary_projection.py` 实现 `PROPOSED -> PROJECTED -> ACCEPTED/MERGED/ONE_REPAIR/FALLBACK` 有限状态机，并记录每次转移原因。
+2. 语义组首尾只能投影到任务 6 产生的合法候选。无合法候选时先确定性合并相邻兼容组；仍冲突时最多发起一次受限修复，失败后回退 PhysicalFragment。
+3. `physical_start/end` 取已接受的 SemanticCue 首尾对齐词边界，进入本阶段后不可修改。
+4. display start/end 可向最近候选静音边界吸附，但必须被 PhysicalClip、hard split、下一人声起点和最大前导/尾随窗口夹持。
+5. 显示时间必须覆盖物理人声，除非事件已标记 `timing_degraded`；不得用阅读时长要求截断人声。
+6. 相邻不同 speaker 时优先人声边界；阅读时长不足写入质量警告，不篡改下一 speaker 的时间。
+7. 修正当前 `final_validator` 把 display 强制夹进 physical envelope 的旧逻辑。新校验验证“display 合法覆盖 physical”，而不是要求两者必须相等。
+8. 非真实重叠在最终阶段解决；不允许盲目裁前一条而导致切尾。无合法解时回退 PhysicalFragment 并标记需复核。
 
 **验证：**
 
 ```bash
-venv/bin/pytest -q tests/test_mapping/test_display_timeline.py tests/test_phase_four.py tests/test_end_time_fixes.py
+venv/bin/pytest -q tests/test_mapping/test_boundary_projection.py tests/test_mapping/test_display_timeline.py tests/test_phase_four.py tests/test_end_time_fixes.py
 ```
+
+**完成条件：** 无合法投影时最多调用一次 LLM 修复；失败后稳定回退 PhysicalFragment；状态机不存在无界循环，物理时间在进入显示映射后保持不可变。
 
 **建议提交：** `feat: map immutable physical cues to display timing`
 
@@ -487,6 +524,8 @@ venv/bin/pytest -q tests/test_mapping/test_overlap_export.py tests/test_mapping/
 5. 声学金标准使用独立 JSON schema 记录 word onset/offset/speaker，报告 start/end 中位数、P95、超过 80ms 切头/切尾率。
 6. 词级金标准必须由人工听辨标注或复核。执行模型不得用 ASR 输出自动生成“金标准”并宣称通过。
 7. CI 模式在缺真实场景、缺 global path、指标失败或金标准未就绪时返回非零，报告写明阻断理由。
+8. 合成回归覆盖连续语音语义换条、气音/弱起声、渐弱尾音、底噪阶跃与缓变、音乐/撞击高能、同 speaker 音量突变、无静音 speaker 切换，以及语义边界无合法投影。
+9. 分别报告不同 ASR 后端的置信度校准曲线和边界误差；未经校准的 `0.9/0.6` 阈值不得进入发布默认值。
 
 **验证：**
 
@@ -515,11 +554,12 @@ venv/bin/python scripts/run_quality_benchmark.py --help
 
 **实现要点：**
 
-1. 分阶段缓存 physical evidence、global ASR、speaker、alignment/fragments、LLM decisions 和 finalized cues。
-2. 每层缓存指纹包含 schema 版本与影响该层的配置。LLM prompt 变化不重跑声学；VAD/FFmpeg/RMS 变化使全部下游失效。
+1. 分阶段缓存 physical evidence、local noise profile、global ASR、speaker、boundary decisions、alignment/fragments、LLM decisions 和 finalized cues。
+2. 每层缓存指纹包含 schema 版本与影响该层的配置。LLM prompt 变化不重跑声学；VAD/FFmpeg/RMS/noise-profile 或置信度校准变化使边界仲裁及全部下游失效。
 3. 质量报告分开声学边界、语义断句、speaker、最终结构四类健康度，不使用单一 100% 覆盖失败。
 4. 记录局部 ASR/LLM 请求数、重试数、降级窗口数和各阶段耗时。
 5. 设置每窗口和每任务复核上限，测试证明失败 provider 不会无限重试。
+6. 边界报告记录搜索窗口、候选来源与归一化分数、硬约束拒绝原因、噪声区间、最终 evidence IDs、timing-degraded 决策和投影状态机终态。
 
 **验证：**
 
@@ -548,7 +588,7 @@ venv/bin/pytest -q tests/test_pipeline.py tests/test_persistence_manager.py test
    venv/bin/pytest -q
    ```
 
-3. 用 fake ASR/fake LLM 跑端到端 Pipeline，验证 global 成功、global 整体降级、LLM 单窗口失败和缓存恢复四种链路。
+3. 用 fake ASR/fake LLM 跑端到端 Pipeline，验证 global 成功、global 整体降级、LLM 单窗口失败、无合法边界的一次修复/回退和缓存恢复五种链路。
 4. 启动本地 WebUI，使用浏览器把 `test/` 下 8 个样本重跑到新的独立输出目录。
 5. 逐任务验证页面无 console 错误、任务状态 completed、预览和下载 SRT/ASS 一致，且质量分项诊断可见。
 6. 对 6 个有人工成片字幕的样本运行成片基准；对已完成人工词级标注的样本运行声学基准。
@@ -558,7 +598,9 @@ venv/bin/pytest -q tests/test_pipeline.py tests/test_persistence_manager.py test
 
 - 全量无模型测试通过。
 - 字幕 100% 可追溯至词 ID 和物理证据。
+- 每个冻结物理起止点均有 accepted BoundaryDecision 或明确的 timing-degraded 降级决策。
 - 跨硬边界、跨已确认 speaker、重复灌词和非真实重叠均为 0。
+- 同 speaker 音量突变不得仅因 RMS 差异创建硬边界；无静音 speaker 切换不得被语义阶段跨越。
 - 已确认 speaker 保持率 100%；UNKNOWN 推断准确率目标不低于 95%。
 - 清晰语音中文 CER/英文 WER 不高于 5%，复杂多人场景不高于 10%。
 - 在词级声学金标准就绪后，边界中位绝对误差不高于 80ms，P95 不高于 160ms，超过 80ms 的可听切头/切尾率不高于 0.5%。
@@ -575,26 +617,23 @@ venv/bin/pytest -q tests/test_pipeline.py tests/test_persistence_manager.py test
 | 工作流 | 任务 | 主要文件所有权 |
 |---|---|---|
 | 契约组 | 1、3、4 | base dataclasses、`SubtitleEvent`、`event_ops.py` |
-| 物理组 | 6-7 | `physical/word_alignment.py`、`semantic_fragments.py` |
-| 语义组 | 8-9 | `semantic_window.py`、LLM guard、local recovery |
-| 时间与导出组 | 10、12 | display timeline、final validator、overlap export |
+| 物理与仲裁组 | 5 的纯模块、6-7 | `noise_profile.py`、`boundary_arbiter.py`、`word_alignment.py`、`semantic_fragments.py` |
+| 语义与恢复组 | 8-9 | `semantic_window.py`、LLM guard、local recovery、`speaker_change.py` |
+| 时间与导出组 | 10、12 | boundary projection、display timeline、final validator、overlap export |
 | 评测组 | 13 | `scripts/`、benchmark tests、manifest |
-| 集成组 | 2、5、11、14、15 | config/routing、`pipeline.py`、WebUI、cache、最终验收 |
+| 集成组 | 2、5 的 Pipeline 接入、11、14、15 | config/routing、`pipeline.py`、WebUI、cache、最终验收 |
 
 依赖关系：
 
 ```text
-1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
-                              +-> 8 -> 9 --+
-                              |             |
-                              +-> 10 -------+-> 11 -> 12
-                                                +-> 14
+1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12
+                                                   +-> 14
 
 4 -> 13
 12 + 13 + 14 -> 15
 ```
 
-语义组、时间组和评测组可并行编写新模块，但只有集成组修改 `pipeline.py`、`webui/api.py` 和全流水线缓存。
+各组可在前置数据契约稳定后并行编写纯模块和测试，但任务 10 的状态机集成必须等待任务 6、8、9。只有集成组修改 `pipeline.py`、`webui/api.py` 和全流水线缓存。
 
 ## 20. 总完成定义
 
@@ -605,3 +644,5 @@ venv/bin/pytest -q tests/test_pipeline.py tests/test_persistence_manager.py test
 5. 主结果同时保存物理时间与显示时间，两者的差异可诊断。
 6. WebUI、API、缓存、SRT/VTT/ASS 和质量报告消费同一份最终事件。
 7. 质量报告可复现，未完成的人工标注或模型环境限制被明确标记，不伪造通过。
+8. 每个冻结物理起止点都有 accepted BoundaryDecision 或明确的 timing-degraded 决策，且投影修复不会无限循环。
+9. 局部底噪突变不会使合法边界整体消失；RMS 音量差不会单独创建 speaker 硬边界。
