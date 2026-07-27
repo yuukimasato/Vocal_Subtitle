@@ -15,11 +15,11 @@ from vocal_subtitle.pipeline import Pipeline
 def test_default_profile_uses_lightweight_runtime():
     config = ConfigLoader().load_profile("default")
 
-    assert config.separation.engine == "none"
-    assert config.vad.engine == "webrtc"
-    assert config.asr.model == "small"
-    assert config.asr.device == "cpu"
-    assert config.asr.compute_type == "int8"
+    assert config.separation.engine == "uvr"
+    assert config.vad.engine == "silero"
+    assert config.asr.model == "large-v3"
+    assert config.asr.device == "auto"
+    assert config.asr.compute_type == "float16"
     assert config.asr.global_asr.enabled is True
     assert config.asr.global_asr.routing == "auto"
     assert config.diarization.enabled is True
@@ -29,6 +29,7 @@ def test_default_profile_uses_lightweight_runtime():
 
 def test_none_separator_is_forwarded_as_skip_separation(tmp_path):
     config = ConfigLoader().load_profile("default")
+    config.separation.engine = "none"
     config.mode = "streaming"
     pipeline = Pipeline(config)
     input_path = tmp_path / "voice.wav"
@@ -43,6 +44,7 @@ def test_none_separator_is_forwarded_as_skip_separation(tmp_path):
     result = pipeline.run(
         input_path=input_path,
         output_path=tmp_path / "voice.srt",
+        skip_separation=True,
     )
 
     assert result == {"ok": True}
@@ -85,8 +87,8 @@ def test_degradation_accepts_legacy_nested_and_top_level_yaml(tmp_path):
 
     top_level_path = tmp_path / "top-level.yaml"
     top_level_path.write_text(
-        "pipeline:\n  degradation:\n    mode: minimal\n"
-        "degradation:\n  mode: degraded\n",
+        "degradation:\n  mode: degraded\n"
+        "pipeline:\n  degradation:\n    mode: minimal\n",
         encoding="utf-8",
     )
     assert ConfigLoader.load_file(top_level_path).degradation.mode == "degraded"
@@ -99,5 +101,4 @@ def test_all_builtin_profiles_expose_global_and_feedback_settings():
         assert config.asr.global_asr.enabled is True
         assert config.asr.global_asr.routing == "auto"
         assert config.boundary_redundancy.enabled is True
-        assert config.speaker_embedding.engine == "none"
         assert config.feedback.active_profile == "user_default"

@@ -178,6 +178,20 @@ class MergingConfig:
 
 
 @dataclass
+class GlobalASRConfig:
+    """全局转录配置 — 以完整音频为窗口进行 ASR"""
+
+    enabled: bool = True
+    routing: str = "auto"  # auto | global | segmented
+    backend: str = "faster-whisper"
+    left_context: float = 0.5
+    right_context: float = 0.5
+    min_word_confidence: float = 0.0
+    hallucination_filter: bool = True
+    language_switch_threshold: float = 0.7
+
+
+@dataclass
 class ASRConfig:
     """Stage 4: ASR 识别配置"""
 
@@ -190,13 +204,15 @@ class ASRConfig:
     word_timestamps: bool = True
     condition_on_previous_text: bool = False
     vad_filter: bool = False
+    language_mode: str = "single"  # single | mixed | auto
+    global_asr: "GlobalASRConfig" = field(default_factory=GlobalASRConfig)
 
 
 @dataclass
 class GapHandlingConfig:
     """段间间隙处理配置"""
 
-    seamless_threshold: float = 0.6  # 增大回退衔接阈值（原 0.2s → 0.6s）
+    seamless_threshold: float = 0.2  # matches default.yaml
     natural_pause_max: float = 1.0
 
 
@@ -265,9 +281,11 @@ class DiarizationConfig:
 
     enabled: bool = True   # 默认启用说话人分离
     engine: str = "agglomerative"  # 聚类引擎: agglomerative
+    backend: str = "auto"  # 后端: auto | pyannote | legacy
     distance_threshold: float = 0.5  # 凝聚聚类合并阈值（余弦距离）
     min_speakers: int = 1  # 最少说话人数
     max_speakers: int = 10  # 最多说话人数
+    expected_speakers: Optional[int] = None  # 已知说话人数（None = 自动推断）
     use_pca: bool = True  # 聚类前是否 PCA 降维
     pca_variance: float = 0.95  # PCA 保留的方差比例
     text_fallback: bool = True  # 声学聚类失败时启用文本模式降级
@@ -574,7 +592,7 @@ class ConfigLoader:
         vad = VADConfig(
             engine=vad_raw.get("engine", "silero"),
             threshold=vad_raw.get("threshold", 0.5),
-            min_speech_duration_ms=vad_raw.get("min_speech_duration_ms", 250),
+            min_speech_duration_ms=vad_raw.get("min_speech_duration_ms", 150),
             min_silence_duration_ms=vad_raw.get("min_silence_duration_ms", 400),
             ffmpeg_enabled=vad_raw.get("ffmpeg_enabled", True),
             ffmpeg_noise_db=vad_raw.get("ffmpeg_noise_db", -35.0),
@@ -590,7 +608,7 @@ class ConfigLoader:
             padding_min=merge_raw.get("padding_min", 0.05),
             padding_max=merge_raw.get("padding_max", 0.20),
             pre_split_silence=merge_raw.get("pre_split_silence", True),
-            pre_split_threshold=merge_raw.get("pre_split_threshold", 0.5),
+            pre_split_threshold=merge_raw.get("pre_split_threshold", 0.8),
             min_fragment_duration=merge_raw.get("min_fragment_duration", 0.15),
             min_segment_length=merge_raw.get("min_segment_length", 0.5),
             protect_single_word=merge_raw.get("protect_single_word", True),
@@ -601,15 +619,28 @@ class ConfigLoader:
         diarization = DiarizationConfig(
             enabled=diar_raw.get("enabled", False),
             engine=diar_raw.get("engine", "agglomerative"),
+            backend=diar_raw.get("backend", "auto"),
             distance_threshold=diar_raw.get("distance_threshold", 0.5),
             min_speakers=diar_raw.get("min_speakers", 1),
             max_speakers=diar_raw.get("max_speakers", 10),
+            expected_speakers=diar_raw.get("expected_speakers"),
             use_pca=diar_raw.get("use_pca", True),
             pca_variance=diar_raw.get("pca_variance", 0.95),
             text_fallback=diar_raw.get("text_fallback", True),
         )
 
         asr_raw = pipeline_raw.get("asr", {})
+        global_asr_raw = asr_raw.get("global_asr", {})
+        global_asr = GlobalASRConfig(
+            enabled=global_asr_raw.get("enabled", True),
+            routing=global_asr_raw.get("routing", "auto"),
+            backend=global_asr_raw.get("backend", "faster-whisper"),
+            left_context=global_asr_raw.get("left_context", 0.5),
+            right_context=global_asr_raw.get("right_context", 0.5),
+            min_word_confidence=global_asr_raw.get("min_word_confidence", 0.0),
+            hallucination_filter=global_asr_raw.get("hallucination_filter", True),
+            language_switch_threshold=global_asr_raw.get("language_switch_threshold", 0.7),
+        )
         asr = ASRConfig(
             engine=asr_raw.get("engine", "faster-whisper"),
             model=asr_raw.get("model", "large-v3"),
@@ -622,6 +653,8 @@ class ConfigLoader:
                 "condition_on_previous_text", False
             ),
             vad_filter=asr_raw.get("vad_filter", False),
+            language_mode=asr_raw.get("language_mode", "single"),
+            global_asr=global_asr,
         )
 
         spk_role_raw = pipeline_raw.get("speaker_role", {})
@@ -663,7 +696,7 @@ class ConfigLoader:
         llm_optimize = LLMOptimizeConfig(
             enabled=llm_raw.get("enabled", False),
             model=llm_raw.get("model", "deepseek-v4-pro"),
-            batch_num=llm_raw.get("batch_num", 10),
+            batch_num=llm_raw.get("batch_num", 5),
             thread_num=llm_raw.get("thread_num", 4),
             temperature=llm_raw.get("temperature", 0.2),
             base_url=llm_raw.get("base_url"),
@@ -711,8 +744,12 @@ class ConfigLoader:
             file=log_raw.get("file", "logs/pipeline.log"),
         )
 
-        # 降级模式
-        deg_raw = pipeline_raw.get("degradation", {})
+        # 降级模式 (pipeline.degradation first, then top-level degradation overrides)
+        deg_raw = {}
+        if pipeline_raw.get("degradation"):
+            deg_raw.update(pipeline_raw["degradation"])
+        if raw.get("degradation"):
+            deg_raw.update(raw["degradation"])
         degradation = DegradationConfig(
             mode=deg_raw.get("mode", "full"),
             per_module_timeout=deg_raw.get("per_module_timeout", 60.0),
@@ -768,7 +805,7 @@ class ConfigLoader:
         boundary_raw = pipeline_raw.get("boundary_refinement", {})
         boundary_refinement = BoundaryRefinementConfig(
             enabled=boundary_raw.get("enabled", True),
-            max_shrink_ms=boundary_raw.get("max_shrink_ms", 200),
+            max_shrink_ms=boundary_raw.get("max_shrink_ms", 0),
             max_extend_ms=boundary_raw.get("max_extend_ms", 100),
             check_frames=boundary_raw.get("check_frames", 3),
             frame_ms=boundary_raw.get("frame_ms", 10),
@@ -808,14 +845,14 @@ class ConfigLoader:
             skeleton_min_silence=acoustic_raw.get("skeleton_min_silence", 0.1),
             skeleton_min_speech=acoustic_raw.get("skeleton_min_speech", 0.05),
             max_snap_distance=acoustic_raw.get("max_snap_distance", 0.5),
-            snap_start_margin=acoustic_raw.get("snap_start_margin", 0.02),
+            snap_start_margin=acoustic_raw.get("snap_start_margin", 0.03),
             snap_end_margin=acoustic_raw.get("snap_end_margin", 0.01),
             confidence_threshold=acoustic_raw.get("confidence_threshold", 0.6),
             rms_override_threshold=acoustic_raw.get("rms_override_threshold", 0.15),
             generate_report=acoustic_raw.get("generate_report", True),
             flag_threshold_ms=acoustic_raw.get("flag_threshold_ms", 200),
             unified_ffmpeg_pass=acoustic_raw.get("unified_ffmpeg_pass", True),
-            skeleton_mode=acoustic_raw.get("skeleton_mode", False),
+            skeleton_mode=acoustic_raw.get("skeleton_mode", True),
             export_skeleton_segments=acoustic_raw.get("export_skeleton_segments", False),
             export_skeleton_dir=acoustic_raw.get("export_skeleton_dir", ""),
             allow_end_shorten=acoustic_raw.get("allow_end_shorten", True),

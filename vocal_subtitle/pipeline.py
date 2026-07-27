@@ -55,6 +55,19 @@ class PipelineStats:
     diarization_silhouette: Optional[float] = None
     diagnostic_report: Optional[Dict] = None
 
+    # global ASR path diagnostics
+    asr_path: str = ""
+    global_attempted: bool = False
+    fallback_category: str = ""
+    fallback_reason: str = ""
+    global_diagnostics: Dict = field(default_factory=dict)
+
+    # diarization canonicalization
+    raw_diarization_speaker_count: int = 0
+    canonical_speaker_count: int = 0
+    speaker_merge_map: Dict = field(default_factory=dict)
+    canonicalization_status: str = ""
+
     def to_dict(self) -> dict:
         result = {
             "input_path": str(self.input_path),
@@ -63,10 +76,45 @@ class PipelineStats:
             "total_time": self.total_time,
             "segment_count": self.segment_count,
             "subtitle_count": self.subtitle_count,
+            "asr_path": self.asr_path,
+            "global_attempted": self.global_attempted,
+            "fallback_category": self.fallback_category,
+            "fallback_reason": self.fallback_reason,
+            "global_diagnostics": self.global_diagnostics,
+            "raw_diarization_speaker_count": self.raw_diarization_speaker_count,
+            "canonical_speaker_count": self.canonical_speaker_count,
+            "speaker_merge_map": self.speaker_merge_map,
+            "canonicalization_status": self.canonicalization_status,
         }
+        if self.speaker_count:
+            result["speaker_count"] = self.speaker_count
+        if self.diarization_silhouette is not None:
+            result["diarization_silhouette"] = self.diarization_silhouette
         if self.diagnostic_report:
             result["diagnostic_report"] = self.diagnostic_report
         return result
+
+    @classmethod
+    def from_dict(
+        cls, input_path: Path, payload: dict, duration_seconds: float = 0.0
+    ) -> "PipelineStats":
+        stats = cls(input_path=input_path, duration_seconds=duration_seconds)
+        stats.total_time = payload.get("total_time", 0.0)
+        stats.segment_count = payload.get("segment_count", 0)
+        stats.subtitle_count = payload.get("subtitle_count", 0)
+        stats.asr_path = payload.get("asr_path", "")
+        stats.global_attempted = payload.get("global_attempted", False)
+        stats.fallback_category = payload.get("fallback_category", "")
+        stats.fallback_reason = payload.get("fallback_reason", "")
+        stats.global_diagnostics = payload.get("global_diagnostics", {})
+        stats.raw_diarization_speaker_count = payload.get("raw_diarization_speaker_count", 0)
+        stats.canonical_speaker_count = payload.get("canonical_speaker_count", 0)
+        stats.speaker_merge_map = payload.get("speaker_merge_map", {})
+        stats.canonicalization_status = payload.get("canonicalization_status", "")
+        stats.speaker_count = payload.get("speaker_count", 0)
+        stats.diarization_silhouette = payload.get("diarization_silhouette")
+        stats.diagnostic_report = payload.get("diagnostic_report")
+        return stats
 
 
 class Pipeline:
@@ -110,6 +158,92 @@ class Pipeline:
         # 当前任务的输入文件哈希（用于缓存键）
         self._file_hash: str = ""
         self._config_hash: str = ""
+
+        # ASR 路径追踪
+        self._requested_asr_path: str = ""
+
+    # ------------------------------------------------------------------
+    # ASR path resolution (global vs. segmented)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _classify_global_failure(exc: Exception) -> str:
+        """Classify a global ASR failure into a stable category."""
+        msg = str(exc).lower()
+        type_name = type(exc).__name__
+        if isinstance(exc, ImportError):
+            return "dependency_unavailable"
+        if isinstance(exc, MemoryError):
+            return "resource_unavailable"
+        if any(kw in msg for kw in ("degraded", "empty result", "no transcript")):
+            return "invalid_result"
+        if any(kw in type_name.lower() + msg for kw in ("memory", "oom", "cuda out")):
+            return "resource_unavailable"
+        return "execution_failed"
+
+    @staticmethod
+    def _classify_global_diagnostics(diagnostics: dict) -> str:
+        """Extract the worst failure category from global diagnostics."""
+        failed_windows = diagnostics.get("failed_windows", [])
+        for window in failed_windows:
+            error = window.get("error", "")
+            if "is not installed" in error:
+                return "dependency_unavailable"
+        return "execution_failed"
+
+    @staticmethod
+    def _global_diagnostic_errors(diagnostics: dict) -> list:
+        """Extract error messages from global diagnostics."""
+        return [w.get("error", "") for w in diagnostics.get("failed_windows", [])]
+
+    @staticmethod
+    def _safe_failure_reason(exc: Exception) -> str:
+        """Redact credentials from failure messages."""
+        import re
+        msg = str(exc)
+        msg = re.sub(r'(api_key|token|key)=[\S]+', r'\1=***', msg)
+        return msg
+
+    def _resolve_asr_path(self) -> str:
+        """Determine whether to use global or segmented ASR path."""
+        if self.config.mode == "streaming":
+            return "segmented"
+        if self._requested_asr_path:
+            return self._requested_asr_path
+        if self.config.asr.global_asr.enabled:
+            routing = self.config.asr.global_asr.routing
+            if routing in ("global", "auto"):
+                return "global"
+        return "segmented"
+
+    @staticmethod
+    def _is_usable_global_transcript(transcript) -> bool:
+        """Check whether a global transcript is usable for subtitle production."""
+        status = getattr(transcript, "status", "unknown")
+        words = getattr(transcript, "words", [])
+        if status == "ok" and words:
+            return True
+        if status == "degraded" and words:
+            return True
+        return False
+
+    def _is_usable_full_pipeline_cache(self, cache_entry: dict) -> bool:
+        """Check whether a cached full-pipeline result matches the current ASR path."""
+        cached_path = cache_entry.get("stats", {}).get("asr_path", "")
+        if self._requested_asr_path == "global":
+            return cached_path == "global"
+        return True
+
+    @staticmethod
+    def _clamp_to_physical_envelopes(events: list) -> list:
+        """Clamp display time of each event to its physical envelope."""
+        for event in events:
+            physical_start = getattr(event, "physical_start", None)
+            physical_end = getattr(event, "physical_end", None)
+            if physical_start is not None and physical_end is not None:
+                event.start = max(event.start, physical_start)
+                event.end = min(event.end, physical_end)
+        return events
 
     def _setup_logging(self) -> None:
         """初始化日志"""

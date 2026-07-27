@@ -42,7 +42,7 @@ pipeline:
   ffmpeg_vad:
     enabled: true
     noise_db: -35.0
-    min_speech_duration_ms: 250
+    min_speech_duration_ms: 150
     min_silence_duration_ms: 400
 
   # 方案二：三方法边界融合 (Silero+ffmpeg+RMS)
@@ -54,6 +54,13 @@ pipeline:
     low_conf_padding: 0.12
     min_speech_duration: 0.25
 
+  # Degradation / fallback mode control
+  degradation:
+    mode: "full"                   # "full" | "degraded" | "minimal"
+    per_module_timeout: 60         # 每个模块最大执行秒数
+    ffmpeg_timeout: 30
+    llm_api_timeout: 15
+
   # Stage 3: 片段合并
   merging:
     min_silence_gap: 0.4
@@ -63,7 +70,7 @@ pipeline:
     padding_min: 0.05               # 清晰边界最小填充
     padding_max: 0.20               # 模糊边界最大填充
     pre_split_silence: true         # 新增：段内静音预切分
-    pre_split_threshold: 0.55       # 内部静音>0.55s则切分（降低敏感度，减少碎片）
+    pre_split_threshold: 0.8       # 内部静音>0.55s则切分（降低敏感度，减少碎片）
     min_fragment_duration: 0.25     # 最小片段250ms保护（减少孤立词字幕）
     protect_single_word: true       # 新增：禁止在单词中间切分
     min_word_gap_ms: 80             # 新增：单词内部允许的最大静音（清辅音间隔）
@@ -178,6 +185,8 @@ pipeline:
     use_pca: true
     pca_variance: 0.95
     text_fallback: true                     # 声学聚类失败时启用文本模式降级
+    backend: "auto"
+    # expected_speakers: null                # 自动推断说话人数
 
   # Stage 4: ASR 识别
   asr:
@@ -190,6 +199,18 @@ pipeline:
     word_timestamps: true
     condition_on_previous_text: false          # 每段独立，防止跨段幻觉
     vad_filter: false                          # 关闭内置 VAD，使用 Stage 2
+    language_mode: "single"                    # single | mixed | auto
+
+    # 全局转录（完整音频为窗口）
+    global_asr:
+      enabled: true
+      routing: "auto"                          # auto | global | segmented
+      backend: "faster-whisper"
+      left_context: 0.5
+      right_context: 0.5
+      min_word_confidence: 0.0
+      hallucination_filter: true
+      language_switch_threshold: 0.7
 
   # Stage 4.5: LLM 说话人角色标注（可选）
   speaker_role:
