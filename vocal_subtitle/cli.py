@@ -93,6 +93,19 @@ def main():
               help="ASR 路径: global (全音频一次识别) 或 segmented (VAD 分段识别，默认)")
 @click.option("--llm-optimize", is_flag=True, default=None, help="启用 LLM 字幕优化")
 @click.option("--diarization/--no-diarization", default=None, help="启用/禁用说话人分离")
+@click.option("--expected-speakers", type=click.IntRange(min=1), default=None,
+              help="已知说话人数；省略则自动估计")
+@click.option("--speaker-fusion", type=click.Choice(["auto", "embedding", "dual"]),
+              default=None, help="说话人融合模式")
+@click.option("--global-diarization-model",
+              type=click.Choice(["auto", "none", "community-1", "diarization-3.1"]),
+              default=None, help="全局 diarization 模型")
+@click.option("--speaker-diarization-scope",
+              type=click.Choice(["global", "hierarchical"]), default=None,
+              help="全局 turns 或全局加逐字幕局部精修")
+@click.option("--local-speaker-refinement",
+              type=click.Choice(["off", "embedding", "full"]), default=None,
+              help="逐字幕局部换人检测级别")
 @click.option("--speaker-role/--no-speaker-role", default=None, help="启用/禁用 LLM 角色标注")
 @click.option("--skip-separation", is_flag=True, help="跳过分离阶段（输入已是人声）")
 @click.option("--skeleton-mode", is_flag=True, default=None,
@@ -116,6 +129,11 @@ def run(
     asr_path: Optional[str],
     llm_optimize: Optional[bool],
     diarization: Optional[bool],
+    expected_speakers: Optional[int],
+    speaker_fusion: Optional[str],
+    global_diarization_model: Optional[str],
+    speaker_diarization_scope: Optional[str],
+    local_speaker_refinement: Optional[str],
     speaker_role: Optional[bool],
     skip_separation: bool,
     skeleton_mode: Optional[bool],
@@ -158,6 +176,16 @@ def run(
         overrides["llm_optimize"] = llm_optimize
     if diarization is not None:
         overrides["diarization"] = diarization
+    if expected_speakers is not None:
+        overrides["expected_speakers"] = expected_speakers
+    if speaker_fusion:
+        overrides["speaker_fusion"] = speaker_fusion
+    if global_diarization_model:
+        overrides["global_diarization_model"] = global_diarization_model
+    if speaker_diarization_scope:
+        overrides["speaker_diarization_scope"] = speaker_diarization_scope
+    if local_speaker_refinement:
+        overrides["local_speaker_refinement"] = local_speaker_refinement
     if speaker_role is not None:
         overrides["speaker_role"] = speaker_role
 
@@ -199,6 +227,16 @@ def run(
         click.echo(f"\n✓ 完成! ({stats.total_time:.1f}s)")
         click.echo(f"  片段数: {stats.segment_count}")
         click.echo(f"  字幕条数: {stats.subtitle_count}")
+        click.echo(
+            f"  说话人: {stats.speaker_count or 0}"
+            f" (backend={stats.diarization_backend or 'unknown'},"
+            f" status={stats.diarization_status or 'unknown'})"
+        )
+        click.echo(
+            f"  局部换人切分: {stats.local_speaker_split_count}"
+            f" (冲突={stats.speaker_conflict_count},"
+            f" unknown={stats.unknown_speaker_count})"
+        )
         click.echo(f"  输出: {result['subtitle_path']}")
 
         if verbose:
@@ -299,10 +337,22 @@ def batch(
 @click.option("--all", "download_all", is_flag=True, help="下载所有模型")
 @click.option("--asr-model", default=None, help="ASR 模型 (large-v3 / medium / small)")
 @click.option("--separator", default=None, help="分离引擎 (uvr / spleeter)")
+@click.option(
+    "--speaker-model",
+    "speaker_models",
+    multiple=True,
+    type=click.Choice(["speechbrain-ecapa", "pyannote-embedding", "community-1", "diarization-3.1"]),
+    help="下载 speaker 模型，可重复指定",
+)
+@click.option("--hf-token", default=None, help="Hugging Face Token（仅用于本次下载）")
+@click.option("--list-speaker-models", is_flag=True, help="列出 speaker 模型缓存状态")
 def download_models(
     download_all: bool,
     asr_model: Optional[str],
     separator: Optional[str],
+    speaker_models: tuple[str, ...],
+    hf_token: Optional[str],
+    list_speaker_models: bool,
 ):
     """预下载模型文件
 
@@ -311,8 +361,34 @@ def download_models(
         vocal-subtitle download-models --all
         vocal-subtitle download-models --asr-model large-v3
     """
-    click.echo("模型下载功能将在后续版本实现")
-    click.echo("当前请手动放置模型文件到 ~/.cache/vocal-subtitle/")
+    from .diarization.model_registry import download_model, list_model_status
+
+    if list_speaker_models:
+        for item in list_model_status():
+            state = "ready" if item["cached"] else "not_cached"
+            click.echo(f"{item['model_id']}: {state} — {item['model_ref']}")
+        return
+
+    selected = list(speaker_models)
+    if download_all:
+        selected = [item["model_id"] for item in list_model_status()]
+    if selected:
+        failures = []
+        for model_id in selected:
+            click.echo(f"下载 speaker 模型: {model_id}")
+            try:
+                status = download_model(model_id, token=hf_token)
+                click.echo(f"  ✓ {status['status']}: {status['model_ref']}")
+            except Exception as exc:
+                failures.append((model_id, exc))
+                click.echo(f"  ✗ {model_id} 下载失败: {exc}", err=True)
+        if failures:
+            failed_ids = ", ".join(model_id for model_id, _ in failures)
+            raise click.ClickException(f"speaker 模型下载失败: {failed_ids}")
+        return
+
+    # ASR/separation 下载仍由各自引擎负责；至少提供可用的 speaker 状态。
+    click.echo("未指定 speaker 模型。使用 --list-speaker-models 查看状态。")
 
 
 @main.command()

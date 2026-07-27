@@ -14,6 +14,7 @@
 from .base import ClusteredSegment, DiarizationEngine, SpeakerRole
 from .role_labeler import RoleLabeler
 from .speaker_clusterer import SpeakerDiarizer
+from .speaker_fusion import SpeakerFusionResult, run_speaker_fusion
 from .speaker_embedding import (
     DummyEmbeddingEngine,
     PyannoteEmbeddingEngine,
@@ -28,7 +29,9 @@ __all__ = [
     "PyannoteEmbeddingEngine",
     "RoleLabeler",
     "SpeakerDiarizer",
+    "SpeakerFusionResult",
     "SpeakerEmbeddingEngine",
     "SpeakerRole",
     "create_embedding_engine",
+    "run_speaker_fusion",
 ]

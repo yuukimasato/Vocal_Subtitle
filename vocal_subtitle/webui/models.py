@@ -78,6 +78,9 @@ class SubtitleEventResponse(BaseModel):
     source_word_ids: Optional[List[str]] = None
     speaker_status: Optional[str] = None
     speaker_source: Optional[str] = None
+    speaker_confidence: Optional[float] = None
+    speaker_model: Optional[str] = None
+    speaker_repair_reason: Optional[str] = None
     alignment_warning: Optional[str] = None
     genuine_overlap: Optional[bool] = None
     overlap_group_id: Optional[str] = None

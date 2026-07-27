@@ -287,6 +287,9 @@ class DiarizationConfig:
     enabled: bool = True   # 默认启用说话人分离
     engine: str = "agglomerative"  # 聚类引擎: agglomerative
     backend: str = "auto"  # 后端: auto | pyannote | legacy
+    fusion_mode: str = "auto"  # auto | embedding | dual
+    global_model: str = "auto"  # auto | none | community-1 | diarization-3.1
+    diarization_scope: str = "hierarchical"  # global | hierarchical
     distance_threshold: float = 0.5  # 凝聚聚类合并阈值（余弦距离）
     min_speakers: int = 1  # 最少说话人数
     max_speakers: int = 10  # 最多说话人数
@@ -294,6 +297,10 @@ class DiarizationConfig:
     use_pca: bool = True  # 聚类前是否 PCA 降维
     pca_variance: float = 0.95  # PCA 保留的方差比例
     text_fallback: bool = True  # 声学聚类失败时启用文本模式降级
+    local_refinement: str = "embedding"  # off | embedding | full
+    local_context_seconds: float = 0.6
+    min_local_segment_seconds: float = 0.25
+    min_change_confidence: float = 0.70
 
 
 @dataclass
@@ -625,9 +632,12 @@ class ConfigLoader:
 
         diar_raw = pipeline_raw.get("diarization", {})
         diarization = DiarizationConfig(
-            enabled=diar_raw.get("enabled", False),
+            enabled=diar_raw.get("enabled", True),
             engine=diar_raw.get("engine", "agglomerative"),
             backend=diar_raw.get("backend", "auto"),
+            fusion_mode=diar_raw.get("fusion_mode", "auto"),
+            global_model=diar_raw.get("global_model", "auto"),
+            diarization_scope=diar_raw.get("diarization_scope", "hierarchical"),
             distance_threshold=diar_raw.get("distance_threshold", 0.5),
             min_speakers=diar_raw.get("min_speakers", 1),
             max_speakers=diar_raw.get("max_speakers", 10),
@@ -635,6 +645,10 @@ class ConfigLoader:
             use_pca=diar_raw.get("use_pca", True),
             pca_variance=diar_raw.get("pca_variance", 0.95),
             text_fallback=diar_raw.get("text_fallback", True),
+            local_refinement=diar_raw.get("local_refinement", "embedding"),
+            local_context_seconds=diar_raw.get("local_context_seconds", 0.6),
+            min_local_segment_seconds=diar_raw.get("min_local_segment_seconds", 0.25),
+            min_change_confidence=diar_raw.get("min_change_confidence", 0.70),
         )
 
         asr_raw = pipeline_raw.get("asr", {})
@@ -985,6 +999,14 @@ class ConfigLoader:
             "llm_base_url": "llm_optimize.base_url",
             "llm_api_key": "llm_optimize.api_key",
             "diarization": "diarization.enabled",
+            "speaker_fusion": "diarization.fusion_mode",
+            "global_diarization_model": "diarization.global_model",
+            "speaker_diarization_scope": "diarization.diarization_scope",
+            "local_speaker_refinement": "diarization.local_refinement",
+            "diarization_local_context": "diarization.local_context_seconds",
+            "diarization_min_local_segment": "diarization.min_local_segment_seconds",
+            "diarization_min_change_confidence": "diarization.min_change_confidence",
+            "expected_speakers": "diarization.expected_speakers",
             "diarization_distance_threshold": "diarization.distance_threshold",
             "diarization_min_speakers": "diarization.min_speakers",
             "diarization_max_speakers": "diarization.max_speakers",
@@ -1007,6 +1029,21 @@ class ConfigLoader:
         for key, value in overrides.items():
             if value is None:
                 continue
+
+            # 如果 value 是 dict 且目标路径对应的属性也是 dataclass，
+            # 则递归展开，逐字段设置，避免 dict 覆盖整个 dataclass 对象
+            if isinstance(value, dict) and not field_map.get(key):
+                # 直接 key（非映射路径）且为字典，尝试递归展开
+                if hasattr(new_config, key):
+                    target = getattr(new_config, key)
+                    if hasattr(target, "__dataclass_fields__"):
+                        for sub_key, sub_value in value.items():
+                            sub_path = f"{key}.{sub_key}"
+                            resolved_path = field_map.get(sub_key, sub_path)
+                            if resolved_path == sub_path:
+                                resolved_path = f"{key}.{sub_key}"
+                            _set_nested_attr(new_config, resolved_path, sub_value)
+                        continue
 
             # Normalize boolean overrides: True → "mixed", False → "single"
             if key == "mixed_language":

@@ -50,6 +50,36 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _has_saved_hf_token() -> bool:
+    """Check for an encrypted token without exposing its contents."""
+    try:
+        from ..utils.hf_token_store import has_hf_token
+
+        return has_hf_token()
+    except (ImportError, OSError, ValueError):
+        return False
+
+
+def _speaker_model_download_detail(exc: Exception) -> str:
+    """Map Hugging Face failures to safe, actionable UI messages."""
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    error_name = type(exc).__name__.lower()
+    error_text = str(exc).lower()
+    if status_code in (401, 403) or "gatedrepo" in error_name or "gated" in error_text:
+        return (
+            "Hugging Face Token 无效或尚未获得该模型权限；"
+            "请检查 Token 类型、模型协议和账号授权"
+        )
+    if isinstance(exc, ImportError):
+        return "缺少 huggingface_hub 依赖，请先安装 WebUI/模型下载依赖"
+    if any(marker in error_text for marker in ("ssl", "httpsconnectionpool", "timeout", "connection")):
+        return "无法连接 Hugging Face，请检查网络、代理或 HF_ENDPOINT"
+    if "incomplete" in error_text or "integrity" in error_text:
+        return "模型下载未形成完整本地缓存，请重试下载"
+    return "speaker model download failed"
+
 # ---------------------------------------------------------------------------
 # 任务存储（内存）
 # ---------------------------------------------------------------------------
@@ -124,6 +154,14 @@ def _config_to_overrides_dict(config: PipelineConfig) -> Dict[str, Any]:
         "llm_base_url": config.llm_optimize.base_url or "",
         "llm_api_key": config.llm_optimize.api_key or "",
         "diarization_enabled": config.diarization.enabled,
+        "speaker_fusion": config.diarization.fusion_mode,
+        "global_diarization_model": config.diarization.global_model,
+        "speaker_diarization_scope": config.diarization.diarization_scope,
+        "local_speaker_refinement": config.diarization.local_refinement,
+        "expected_speakers": config.diarization.expected_speakers,
+        "diarization_local_context": config.diarization.local_context_seconds,
+        "diarization_min_local_segment": config.diarization.min_local_segment_seconds,
+        "diarization_min_change_confidence": config.diarization.min_change_confidence,
         "diarization_distance_threshold": config.diarization.distance_threshold,
         "diarization_min_speakers": config.diarization.min_speakers,
         "diarization_max_speakers": config.diarization.max_speakers,
@@ -137,7 +175,11 @@ def _config_to_overrides_dict(config: PipelineConfig) -> Dict[str, Any]:
         "speaker_embedding_enabled": config.speaker_embedding.enabled,
         "speaker_embedding_engine": config.speaker_embedding.engine,
         "speaker_embedding_model_ref": config.speaker_embedding.model_ref,
-        "speaker_embedding_hf_token": "***" if config.speaker_embedding.hf_token else "",
+        "speaker_embedding_hf_token": (
+            "***"
+            if config.speaker_embedding.hf_token or _has_saved_hf_token()
+            else ""
+        ),
         # 骨架分段模式
         "acoustic_skeleton_mode": config.acoustic_validation.skeleton_mode,
         "acoustic_export_skeleton": config.acoustic_validation.export_skeleton_segments,
@@ -255,6 +297,56 @@ async def get_speaker_embedding_license():
         }
 
 
+@router.get("/speaker-models")
+async def list_speaker_models():
+    """列出 embedding/global speaker 模型及本地缓存状态。"""
+    from ..diarization.model_registry import list_model_status
+
+    return {"models": list_model_status()}
+
+
+@router.get("/speaker-models/{model_id}/status")
+async def get_speaker_model_status(model_id: str):
+    """查询单个 speaker 模型状态。"""
+    from ..diarization.model_registry import model_status
+
+    try:
+        return model_status(model_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/speaker-models/{model_id}/download")
+async def download_speaker_model(model_id: str, token: str = Form(default="")):
+    """下载 speaker 模型，并将用户输入的 Token 加密保存到本机。"""
+    from ..diarization.model_registry import download_model
+
+    submitted_token = (token or "").strip()
+    if submitted_token == "***":
+        submitted_token = ""
+    if submitted_token:
+        try:
+            from ..utils.hf_token_store import store_hf_token
+
+            store_hf_token(submitted_token)
+        except ImportError:
+            logger.warning("HF Token storage is unavailable; using token for this request only")
+        except (OSError, ValueError) as exc:
+            logger.warning("Could not persist HF Token securely: %s", type(exc).__name__)
+
+    try:
+        result = await asyncio.to_thread(download_model, model_id, token=submitted_token or None)
+        result.pop("cache_dir", None)
+        return result
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("Speaker model download failed for %s: %s", model_id, exc)
+        detail = _speaker_model_download_detail(exc)
+        status_code = 503 if isinstance(exc, ImportError) else 502
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
 # ---------------------------------------------------------------------------
 # Pipeline 执行
 # ---------------------------------------------------------------------------
@@ -325,6 +417,9 @@ def _run_pipeline_in_thread(
                 "source_word_ids": e.source_word_ids,
                 "speaker_status": e.speaker_status,
                 "speaker_source": e.speaker_source,
+                "speaker_confidence": e.speaker_confidence,
+                "speaker_model": e.speaker_model,
+                "speaker_repair_reason": e.speaker_repair_reason,
                 "alignment_warning": e.alignment_warning,
             }
             for e in events
@@ -336,6 +431,7 @@ def _run_pipeline_in_thread(
         # 存储结果
         task_result = {
             "subtitle_path": str(result["subtitle_path"]),
+            "clean_subtitle_path": str(result["clean_subtitle_path"]) if result.get("clean_subtitle_path") else None,
             "llm_subtitle_path": str(result["llm_subtitle_path"]) if result.get("llm_subtitle_path") else None,
             "stats": stats.to_dict(),
             "events": subtitle_events,
@@ -1177,7 +1273,16 @@ async def export_subtitle(
         )
     )
 
-    subtitle_text = builder.build_to_string(events, fmt=fmt)
+    # 验证格式（提前捕获不支持的格式，避免 500）
+    SUPPORTED_FORMATS = {"srt", "vtt", "ass"}
+    normalized_fmt = fmt.lower()
+    if normalized_fmt not in SUPPORTED_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported subtitle format: '{fmt}'. Supported: {', '.join(sorted(SUPPORTED_FORMATS))}",
+        )
+
+    subtitle_text = builder.build_to_string(events, fmt=normalized_fmt)
 
     media_types = {
         "srt": "text/plain; charset=utf-8",
@@ -1187,9 +1292,9 @@ async def export_subtitle(
 
     return PlainTextResponse(
         content=subtitle_text,
-        media_type=media_types.get(fmt, "text/plain"),
+        media_type=media_types.get(normalized_fmt, "text/plain"),
         headers={
-            "Content-Disposition": f'attachment; filename="subtitle.{fmt}"'
+            "Content-Disposition": f'attachment; filename="subtitle.{normalized_fmt}"'
         },
     )
 
@@ -1311,6 +1416,12 @@ async def stream_audio(
                     # 尝试从 session_dir 查找
                     if task and task.get("session_dir"):
                         file_path = _find_input_file(task["session_dir"])
+                    # 回退：从 subtitle_path 推断 session_dir
+                    if not file_path:
+                        sp = r.get("subtitle_path", "")
+                        inferred_dir = str(Path(sp).parent) if sp else ""
+                        if inferred_dir:
+                            file_path = _find_input_file(inferred_dir)
                     if not file_path:
                         file_path = _find_input_file(str(UPLOAD_DIR / task_id))
                 else:
@@ -1322,6 +1433,18 @@ async def stream_audio(
     if not file_path and type == "vocals":
         if task and task.get("session_dir"):
             file_path = _find_input_file(task["session_dir"])
+        # 回退：从历史记录的 subtitle_path 推断 session_dir
+        if not file_path:
+            hist_task = _task_history.get(task_id)
+            if hist_task and hist_task.get("result_json"):
+                try:
+                    r = json.loads(hist_task["result_json"])
+                    sp = r.get("subtitle_path", "")
+                    inferred_dir = str(Path(sp).parent) if sp else ""
+                    if inferred_dir:
+                        file_path = _find_input_file(inferred_dir)
+                except (json.JSONDecodeError, TypeError):
+                    pass
         if not file_path:
             file_path = _find_input_file(str(UPLOAD_DIR / task_id))
 
@@ -1337,6 +1460,8 @@ async def stream_audio(
             status_code=404,
             detail=f"Audio file no longer exists on disk.",
         )
+
+    from fastapi.responses import FileResponse
 
     # FileResponse 原生支持 Range 请求（Accept-Ranges: bytes）
     return FileResponse(
@@ -1372,6 +1497,8 @@ async def download_subtitle_file(
     if task and task.get("result"):
         if version == "llm":
             file_path = task["result"].get("llm_subtitle_path")
+        else:
+            file_path = task["result"].get("clean_subtitle_path")
         if not file_path:
             file_path = task["result"].get("subtitle_path")
         input_name = task.get("input_file_name", "subtitle") if hasattr(task, "get") else "subtitle"
@@ -1384,6 +1511,8 @@ async def download_subtitle_file(
                 r = json.loads(hist_task["result_json"])
                 if version == "llm":
                     file_path = r.get("llm_subtitle_path")
+                else:
+                    file_path = r.get("clean_subtitle_path")
                 if not file_path:
                     file_path = r.get("subtitle_path")
             except (json.JSONDecodeError, TypeError):

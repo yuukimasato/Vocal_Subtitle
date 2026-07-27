@@ -24,6 +24,10 @@ def test_default_profile_uses_lightweight_runtime():
     assert config.asr.global_asr.routing == "auto"
     assert config.diarization.enabled is True
     assert config.diarization.backend == "auto"
+    assert config.diarization.fusion_mode == "auto"
+    assert config.diarization.global_model == "auto"
+    assert config.diarization.diarization_scope == "hierarchical"
+    assert config.diarization.local_refinement == "embedding"
     assert config.speaker_embedding.enabled is True
 
 
@@ -75,6 +79,22 @@ def test_default_degradation_is_loaded_at_pipeline_level():
     assert config.degradation.per_module_timeout == 60
     assert config.diarization.expected_speakers is None
     assert config.feedback.active_profile == "user_default"
+
+
+def test_speaker_overrides_are_loaded_into_diarization_config():
+    config = ConfigLoader().load_profile("default")
+    overridden = ConfigLoader().merge_with_overrides(
+        config,
+        expected_speakers=2,
+        speaker_fusion="dual",
+        global_diarization_model="community-1",
+        speaker_diarization_scope="hierarchical",
+        local_speaker_refinement="full",
+    )
+    assert overridden.diarization.expected_speakers == 2
+    assert overridden.diarization.fusion_mode == "dual"
+    assert overridden.diarization.global_model == "community-1"
+    assert overridden.diarization.local_refinement == "full"
 
 
 def test_degradation_accepts_legacy_nested_and_top_level_yaml(tmp_path):

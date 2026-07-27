@@ -40,8 +40,23 @@ class TestCLI:
         result = runner.invoke(main, ["download-models"])
         assert result.exit_code == 0
 
-    def test_download_models_all(self, runner):
+    def test_download_models_all(self, runner, monkeypatch):
         """download-models --all"""
+        import vocal_subtitle.diarization.model_registry as registry
+
+        monkeypatch.setattr(
+            registry,
+            "list_model_status",
+            lambda: [{"model_id": "speechbrain-ecapa", "model_ref": "fake/ref"}],
+        )
+        monkeypatch.setattr(
+            registry,
+            "download_model",
+            lambda model_id, token=None: {
+                "status": "ready",
+                "model_ref": "fake/ref",
+            },
+        )
         result = runner.invoke(main, ["download-models", "--all"])
         assert result.exit_code == 0
 
@@ -64,6 +79,10 @@ class TestCLI:
         assert "--language" in result.output
         assert "--format" in result.output
         assert "--skip-separation" in result.output
+        assert "--expected-speakers" in result.output
+        assert "--speaker-fusion" in result.output
+        assert "--global-diarization-model" in result.output
+        assert "--speaker-diarization-scope" in result.output
 
     def test_batch_help(self, runner):
         """batch --help"""
@@ -100,3 +119,9 @@ class TestCLI:
         assert "profiles" in result.output
         assert "info" in result.output
         assert "download-models" in result.output
+
+    def test_download_models_lists_speaker_models(self, runner):
+        result = runner.invoke(main, ["download-models", "--list-speaker-models"])
+        assert result.exit_code == 0
+        assert "speechbrain-ecapa" in result.output
+        assert "community-1" in result.output

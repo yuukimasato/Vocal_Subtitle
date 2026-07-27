@@ -352,3 +352,25 @@ class TaskHistoryManager:
                 conn.execute("VACUUM")
             finally:
                 conn.close()
+
+    def fixup_stale_running_tasks(self) -> int:
+        """将残留的 "running" 状态任务标记为 "failed"。
+
+        服务器重启后，任何处于 "running" 状态的任务实际已中断，
+        继续保留该状态会导致前端永远显示"处理中"。
+
+        Returns:
+            被修复的任务数量
+        """
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                cursor = conn.execute(
+                    "UPDATE task_history SET status = 'failed', "
+                    "error = 'Server restarted during task execution' "
+                    "WHERE status = 'running'"
+                )
+                conn.commit()
+                return cursor.rowcount
+            finally:
+                conn.close()

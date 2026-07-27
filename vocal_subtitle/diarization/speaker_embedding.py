@@ -31,8 +31,9 @@ def is_huggingface_model_cached(model_ref: str, cache_dir: Optional[Path] = None
         model_ref: Hugging Face model reference (e.g. "pyannote/embedding")
         cache_dir: Optional cache directory; uses DEFAULT_CACHE_DIR if not provided.
 
-    Returns:
-        True if the model snapshot directory exists and contains a config file.
+    A snapshot is complete enough for the registry when it has a non-empty
+    config file, at least one additional non-empty model file, and no broken
+    symlinks. This remains a local-only check.
     """
     cache_root = Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
     hub_dir = cache_root / "hub"
@@ -41,11 +42,29 @@ def is_huggingface_model_cached(model_ref: str, cache_dir: Optional[Path] = None
     snapshots_dir = model_path / "snapshots"
     if not snapshots_dir.is_dir():
         return False
-    # Any snapshot directory with a config file counts as cached
+    # A config-only or partially materialized snapshot is not usable.
     for snapshot in snapshots_dir.iterdir():
-        if snapshot.is_dir():
-            if (snapshot / "config.yaml").exists() or (snapshot / "config.json").exists():
-                return True
+        if not snapshot.is_dir():
+            continue
+        try:
+            config_files = [
+                path
+                for path in (snapshot / "config.yaml", snapshot / "config.json")
+                if path.is_file() and path.stat().st_size > 0
+            ]
+            if not config_files:
+                continue
+            has_model_file = False
+            for path in snapshot.rglob("*"):
+                if path.is_symlink() and not path.exists():
+                    break
+                if path.is_file() and path not in config_files and path.stat().st_size > 0:
+                    has_model_file = True
+            else:
+                if has_model_file:
+                    return True
+        except OSError:
+            continue
     return False
 
 
@@ -246,10 +265,19 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
         logger.info("Loading speaker embedding model: %s", model_ref)
 
         # 解析 token
-        use_auth_token = token or kwargs.get("use_auth_token")
+        use_auth_token = token if token and token != "***" else kwargs.get("use_auth_token")
+        if use_auth_token == "***":
+            use_auth_token = None
         if use_auth_token is None:
             import os
             use_auth_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        if use_auth_token is None:
+            try:
+                from ..utils.hf_token_store import load_hf_token
+
+                use_auth_token = load_hf_token()
+            except (ImportError, OSError, ValueError):
+                use_auth_token = None
 
         import torch
         _torch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -373,12 +401,20 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
                     )
                     self._inference = Inference(
                         model=loaded_model,
-                        device=device_str,
+                        # Speaker clustering needs one fixed-size vector per
+                        # snippet; the default sliding window returns a
+                        # variable-length sequence of frame embeddings.
+                        window="whole",
+                        # pyannote.audio 4.x accesses ``device.type`` during
+                        # inference, so a string such as ``"cpu"`` is not
+                        # sufficient here.
+                        device=_torch_device,
                     )
                 else:
                     self._inference = Inference(
                         model=model_ref,
-                        device=device_str,
+                        window="whole",
+                        device=_torch_device,
                         use_auth_token=use_auth_token,
                     )
                 self._model_loaded = True
@@ -457,8 +493,11 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
                         emb = emb.cpu().numpy()
                     embedding = np.squeeze(emb)
                 else:
-                    # pyannote.audio: Inference
-                    embedding = self._inference(waveform)
+                    # pyannote.audio Inference expects an AudioFile-like
+                    # mapping, not a bare waveform tensor.
+                    embedding = self._inference(
+                        {"waveform": waveform, "sample_rate": sample_rate}
+                    )
                     if isinstance(embedding, torch.Tensor):
                         embedding = embedding.cpu().numpy()
                     embedding = np.squeeze(embedding)
@@ -518,7 +557,7 @@ def create_embedding_engine(config) -> SpeakerEmbeddingEngine:
 
     engine_name = config.engine
     model_ref = config.model_ref
-    token = config.hf_token
+    token = config.hf_token if config.hf_token != "***" else ""
 
     if engine_name == "pyannote":
         engine = PyannoteEmbeddingEngine(cache_dir=Path(config.cache_dir))
@@ -549,14 +588,14 @@ def create_embedding_engine(config) -> SpeakerEmbeddingEngine:
             logger.warning(
                 "Speaker embedding package '%s' not installed. "
                 "Install with: pip install %s. "
-                "Falling back to gap-based alternation.",
+                "Speaker identity will remain unknown unless another acoustic backend is available.",
                 pkg, pkg,
             )
             return DummyEmbeddingEngine()
         except Exception as e:
             logger.warning(
                 "Speaker embedding engine failed to load '%s': %s. "
-                "Falling back to gap-based alternation.",
+                "Speaker identity will remain unknown unless another acoustic backend is available.",
                 model_ref, e,
             )
             return DummyEmbeddingEngine()

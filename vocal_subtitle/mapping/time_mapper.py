@@ -131,6 +131,8 @@ class SubtitleEvent:
     # 说话人溯源
     speaker_status: str = ""
     speaker_source: str = ""
+    speaker_confidence: Optional[float] = None
+    speaker_model: Optional[str] = None
     speaker_repair_reason: str = ""
     asr_text: Optional[str] = None
 
@@ -172,6 +174,8 @@ class SubtitleEvent:
             "hard_split_before": self.hard_split_before,
             "speaker_status": self.speaker_status,
             "speaker_source": self.speaker_source,
+            "speaker_confidence": self.speaker_confidence,
+            "speaker_model": self.speaker_model,
             "speaker_repair_reason": self.speaker_repair_reason,
             "asr_text": self.asr_text,
             "genuine_overlap": self.genuine_overlap,
@@ -206,6 +210,8 @@ class SubtitleEvent:
             hard_split_before=payload.get("hard_split_before", False),
             speaker_status=payload.get("speaker_status", ""),
             speaker_source=payload.get("speaker_source", ""),
+            speaker_confidence=payload.get("speaker_confidence"),
+            speaker_model=payload.get("speaker_model"),
             speaker_repair_reason=payload.get("speaker_repair_reason", ""),
             asr_text=payload.get("asr_text"),
             genuine_overlap=payload.get("genuine_overlap", False),

@@ -172,7 +172,7 @@ class PersistenceManager:
         # ASR 字幕（干净版）
         if settings.persist_asr_subtitle:
             _copy_file(
-                task_result.get("subtitle_path"),
+                task_result.get("clean_subtitle_path") or task_result.get("subtitle_path"),
                 "ASR字幕",
                 settings.ttl_subtitle_days,
             )

@@ -48,6 +48,17 @@ class TestProfilesAPI:
         resp = client.get("/api/profiles/nonexistent")
         assert resp.status_code == 404
 
+    def test_speaker_models_catalog(self, client):
+        resp = client.get("/api/speaker-models")
+        assert resp.status_code == 200
+        models = resp.json()["models"]
+        assert {item["model_id"] for item in models} == {
+            "speechbrain-ecapa",
+            "pyannote-embedding",
+            "community-1",
+            "diarization-3.1",
+        }
+
 
 class TestDeviceAPI:
     """设备信息 API 测试"""
@@ -60,6 +71,75 @@ class TestDeviceAPI:
         assert "device_type" in data
         assert "device_count" in data
         assert "recommended_model" in data
+
+
+class TestSpeakerModelDownloadAPI:
+    def test_download_passes_and_persists_token(self, client, monkeypatch):
+        captured = {}
+
+        def fake_store(token):
+            captured["stored"] = token
+
+        def fake_download(model_id, *, token=None):
+            captured["download"] = (model_id, token)
+            return {"model_id": model_id, "status": "ready", "cache_dir": "hidden"}
+
+        monkeypatch.setattr(
+            "vocal_subtitle.utils.hf_token_store.store_hf_token", fake_store,
+        )
+        monkeypatch.setattr(
+            "vocal_subtitle.diarization.model_registry.download_model", fake_download,
+        )
+
+        response = client.post(
+            "/api/speaker-models/community-1/download",
+            data={"token": "hf_test_secret"},
+        )
+
+        assert response.status_code == 200
+        assert captured == {
+            "stored": "hf_test_secret",
+            "download": ("community-1", "hf_test_secret"),
+        }
+        assert "hf_test_secret" not in response.text
+
+    def test_model_status_is_local_and_reports_integrity(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "vocal_subtitle.diarization.model_registry.model_status",
+            lambda model_id: {
+                "model_id": model_id,
+                "cached": True,
+                "status": "ready",
+                "cache_integrity": "complete",
+            },
+        )
+
+        response = client.get("/api/speaker-models/community-1/status")
+
+        assert response.status_code == 200
+        assert response.json()["cache_integrity"] == "complete"
+
+    def test_download_classifies_auth_failure_without_leaking_token(
+        self, client, monkeypatch
+    ):
+        class FakeGatedError(Exception):
+            response = type("Response", (), {"status_code": 403})()
+
+        def fake_download(model_id, *, token=None):
+            raise FakeGatedError("token material must not be returned")
+
+        monkeypatch.setattr(
+            "vocal_subtitle.diarization.model_registry.download_model", fake_download
+        )
+
+        response = client.post(
+            "/api/speaker-models/community-1/download",
+            data={"token": "hf_test_secret"},
+        )
+
+        assert response.status_code == 502
+        assert "Token 无效" in response.json()["detail"]
+        assert "hf_test_secret" not in response.text
 
 
 class TestTasksAPI:
@@ -100,6 +180,9 @@ class TestStaticFiles:
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
         assert "Vocal Subtitle" in resp.text
+        assert 'data-action="check"' in resp.text
+        assert "'speaker_embedding_hf_token'," not in resp.text
+        assert "'speaker_embedding_hf_token': 'speaker_embedding_token'" not in resp.text
 
     def test_api_docs_available(self, client):
         """GET /docs 返回 Swagger UI"""

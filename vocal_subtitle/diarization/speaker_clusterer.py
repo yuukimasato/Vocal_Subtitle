@@ -38,6 +38,7 @@ class SpeakerDiarizer(DiarizationEngine):
         distance_threshold: float = 0.5,
         min_speakers: int = 1,
         max_speakers: int = 10,
+        expected_speakers: int | None = None,
         use_pca: bool = True,
         pca_variance: float = 0.95,
     ):
@@ -52,6 +53,7 @@ class SpeakerDiarizer(DiarizationEngine):
         self.distance_threshold = distance_threshold
         self.min_speakers = min_speakers
         self.max_speakers = max_speakers
+        self.expected_speakers = expected_speakers
         self.use_pca = use_pca
         self.pca_variance = pca_variance
 
@@ -132,7 +134,7 @@ class SpeakerDiarizer(DiarizationEngine):
         needs_retry = (
             silhouette < 0
             or (silhouette < 0.20 and n_speakers > 3 and n_speakers > len(segments) // 3)
-            or (n_speakers == 1 and n_segments >= 5)
+            or (n_speakers == 1 and len(segments) >= 5)
         )
 
         if needs_retry:
@@ -273,10 +275,19 @@ class SpeakerDiarizer(DiarizationEngine):
                 logger.warning("PCA failed, using raw features: %s", e)
 
         # 凝聚聚类
-        n_clusters = None if self.max_speakers > 1 else 1
+        n_clusters = self.expected_speakers
+        if n_clusters is not None:
+            n_clusters = max(1, min(int(n_clusters), n_segments))
+        if n_clusters is None and self.max_speakers <= 1:
+            n_clusters = 1
+        metric = "cosine"
+        if np.any(np.linalg.norm(X, axis=1) <= 1e-8):
+            # StandardScaler can produce an all-zero row when a small batch
+            # has identical values in one or more feature dimensions.
+            metric = "euclidean"
         clustering = AgglomerativeClustering(
             n_clusters=n_clusters,
-            metric="cosine",
+            metric=metric,
             linkage="average",
             distance_threshold=self.distance_threshold if n_clusters is None else None,
         )
@@ -606,8 +617,11 @@ class SpeakerDiarizer(DiarizationEngine):
                 self.last_silhouette_ = 0.0
                 return 0.0
 
+            metric = "cosine"
+            if np.any(np.linalg.norm(feature_matrix[valid], axis=1) <= 1e-8):
+                metric = "euclidean"
             score = silhouette_score(
-                feature_matrix[valid], labels_arr[valid], metric="cosine"
+                feature_matrix[valid], labels_arr[valid], metric=metric
             )
             score = float(score)
 

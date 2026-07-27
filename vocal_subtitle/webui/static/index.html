@@ -409,6 +409,7 @@ body {
   vertical-align: top;
 }
 .subtitle-table tr:hover td { background: var(--surface-hover); }
+.subtitle-table tbody tr { cursor: pointer; }
 .subtitle-table .col-idx { width: 36px; color: var(--text-tertiary); text-align: center; }
 .subtitle-table .col-time { width: 80px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--accent); white-space: nowrap; }
 .subtitle-table .col-speaker { width: 70px; color: var(--accent-purple); font-size: 0.78rem; white-space: nowrap; text-align: center; }
@@ -857,6 +858,13 @@ body {
         </div>
         <div class="option-group-body" id="opts-speaker-embedding"></div>
       </div>
+      <!-- Speaker model downloads -->
+      <div class="option-group" data-group="speaker_models">
+        <div class="option-group-header" onclick="this.parentElement.classList.toggle('open')">
+          <span>📦 模型下载</span><span class="og-arrow">▼</span>
+        </div>
+        <div class="option-group-body" id="opts-speaker-models"></div>
+      </div>
       <!-- LLM -->
       <div class="option-group" data-group="llm">
         <div class="option-group-header" onclick="this.parentElement.classList.toggle('open')">
@@ -1079,7 +1087,7 @@ body {
         <div class="panel" style="margin-bottom:16px;">
           <div class="panel-header">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
-            字幕时间轴 <span style="font-weight:400;color:var(--text-secondary);margin-left:4px;font-size:0.78rem;">(双击文本编辑)</span>
+            字幕时间轴 <span style="font-weight:400;color:var(--text-secondary);margin-left:4px;font-size:0.78rem;">(单击行任意位置播放，双击文本编辑内容，双击时间/说话人编辑整行字幕)</span>
           </div>
           <div class="subtitle-table-wrap">
             <table class="subtitle-table">
@@ -1353,8 +1361,11 @@ const App = {
     'asr_engine', 'asr_model', 'asr_device', 'language',
     'subtitle_min_duration', 'subtitle_max_duration',
     'diarization_enabled', 'diarization_distance_threshold', 'diarization_min_speakers', 'diarization_max_speakers',
+    'speaker_fusion', 'global_diarization_model', 'speaker_diarization_scope',
+    'local_speaker_refinement', 'expected_speakers', 'diarization_local_context',
+    'diarization_min_local_segment', 'diarization_min_change_confidence',
     'speaker_role_enabled', 'speaker_role_context_hint',
-    'speaker_embedding_enabled', 'speaker_embedding_model_ref', 'speaker_embedding_hf_token',
+    'speaker_embedding_enabled', 'speaker_embedding_model_ref',
     'llm_enabled', 'llm_model', 'llm_base_url', 'llm_api_key',
     'macro_chunk_enabled', 'macro_chunk_target_duration', 'macro_chunk_max_duration',
     'merge_fast_gap', 'merge_llm_min_gap', 'merge_llm_max_gap', 'merge_hard_split_gap',
@@ -1669,7 +1680,8 @@ const App = {
       const key = el.dataset.key;
       let val;
       if (el.type === 'checkbox') val = el.checked;
-      else if (el.type === 'range' || el.type === 'number') val = parseFloat(el.value);
+      else if (el.type === 'range') val = parseFloat(el.value);
+      else if (el.type === 'number') val = el.value === '' ? '' : parseFloat(el.value);
       else val = el.value;
       if (val !== '' && val !== null && val !== undefined) {
         // Map key names to config paths
@@ -1685,6 +1697,14 @@ const App = {
           'language': 'language',
           'device': 'device',
           'diarization_enabled': 'diarization',
+          'speaker_fusion': 'speaker_fusion',
+          'global_diarization_model': 'global_diarization_model',
+          'speaker_diarization_scope': 'speaker_diarization_scope',
+          'local_speaker_refinement': 'local_speaker_refinement',
+          'expected_speakers': 'expected_speakers',
+          'diarization_local_context': 'diarization_local_context',
+          'diarization_min_local_segment': 'diarization_min_local_segment',
+          'diarization_min_change_confidence': 'diarization_min_change_confidence',
           'diarization_distance_threshold': 'diarization_distance_threshold',
           'diarization_min_speakers': 'diarization_min_speakers',
           'diarization_max_speakers': 'diarization_max_speakers',
@@ -1692,7 +1712,6 @@ const App = {
           'speaker_role_context_hint': 'speaker_role_context_hint',
           'speaker_embedding_enabled': 'speaker_embedding',
           'speaker_embedding_model_ref': 'speaker_embedding_model',
-          'speaker_embedding_hf_token': 'speaker_embedding_token',
           'llm_enabled': 'llm_optimize',
           'llm_model': 'llm_model',
           'macro_chunk_enabled': 'macro_chunking.enabled',
@@ -2112,6 +2131,29 @@ const App = {
       // Diarization options
       $('#opts-diarization').innerHTML = `
         <div class="option-row"><label>启用说话人分离</label><input type="checkbox" data-key="diarization_enabled" ${config.diarization_enabled?'checked':''}></div>
+        <div class="option-row"><label>融合模式</label><select data-key="speaker_fusion">
+          <option value="auto" ${(config.speaker_fusion||'auto')==='auto'?'selected':''}>自动</option>
+          <option value="embedding" ${config.speaker_fusion==='embedding'?'selected':''}>仅声纹嵌入</option>
+          <option value="dual" ${config.speaker_fusion==='dual'?'selected':''}>线路四：双路融合</option>
+        </select></div>
+        <div class="option-row"><label>全局模型</label><select data-key="global_diarization_model">
+          <option value="auto" ${(config.global_diarization_model||'auto')==='auto'?'selected':''}>自动</option>
+          <option value="none" ${config.global_diarization_model==='none'?'selected':''}>禁用</option>
+          <option value="community-1" ${config.global_diarization_model==='community-1'?'selected':''}>Community-1</option>
+          <option value="diarization-3.1" ${config.global_diarization_model==='diarization-3.1'?'selected':''}>Diarization 3.1</option>
+        </select></div>
+        <div class="option-row"><label>处理范围</label><select data-key="speaker_diarization_scope">
+          <option value="hierarchical" ${(config.speaker_diarization_scope||'hierarchical')==='hierarchical'?'selected':''}>线路四：全局 + 片段精修</option>
+          <option value="global" ${config.speaker_diarization_scope==='global'?'selected':''}>仅全局 turns</option>
+        </select></div>
+        <div class="option-row"><label>已知说话人数</label><input type="number" data-key="expected_speakers" value="${config.expected_speakers||''}" min="1" max="20" placeholder="自动" style="max-width:80px;"></div>
+        <div class="option-row"><label>局部换人检测</label><select data-key="local_speaker_refinement">
+          <option value="embedding" ${(config.local_speaker_refinement||'embedding')==='embedding'?'selected':''}>ECAPA 检测</option>
+          <option value="full" ${config.local_speaker_refinement==='full'?'selected':''}>全局模型复核</option>
+          <option value="off" ${config.local_speaker_refinement==='off'?'selected':''}>关闭</option>
+        </select></div>
+        <div class="option-row"><label>局部上下文 (秒)</label><input type="number" data-key="diarization_local_context" value="${config.diarization_local_context||0.6}" min="0.1" max="2" step="0.1" style="max-width:80px;"></div>
+        <div class="option-row"><label>换人置信度</label><input type="range" data-key="diarization_min_change_confidence" min="0.3" max="1" step="0.05" value="${config.diarization_min_change_confidence||0.7}"><span class="value-display">${config.diarization_min_change_confidence||0.7}</span></div>
         <div class="option-row"><label>聚类阈值</label><input type="range" data-key="diarization_distance_threshold" min="0.1" max="1.0" step="0.05" value="${config.diarization_distance_threshold||0.5}"><span class="value-display">${config.diarization_distance_threshold||0.5}</span></div>
         <div class="option-row"><label>最少说话人数</label><input type="number" data-key="diarization_min_speakers" value="${config.diarization_min_speakers||1}" min="1" max="10" style="max-width:60px;"></div>
         <div class="option-row"><label>最多说话人数</label><input type="number" data-key="diarization_max_speakers" value="${config.diarization_max_speakers||10}" min="1" max="20" style="max-width:60px;"></div>
@@ -2121,6 +2163,7 @@ const App = {
 
       // Speaker Embedding options
       App.ui.renderSpeakerEmbeddingOptions(config);
+      App.ui.renderSpeakerModelOptions();
 
       // LLM options
       App.ui.renderLLMOptions(config);
@@ -2172,6 +2215,81 @@ const App = {
     // ---- LLM 配置面板 ----
     _llmState: { base_url: '', api_key: '', models: [] },
 
+    async renderSpeakerModelOptions() {
+      const target = $('#opts-speaker-models');
+      if (!target) return;
+      target.innerHTML = '<div class="option-row-full" style="color:var(--text-tertiary);">正在读取模型状态...</div>';
+      try {
+        const response = await fetch('/api/speaker-models');
+        const payload = await response.json();
+        const models = payload.models || [];
+        target.innerHTML = models.map(model => `
+          <div class="option-row-full" style="border-bottom:1px solid var(--border);padding:8px 0;">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+              <span><strong>${model.name}</strong><br><small style="color:var(--text-tertiary);">${model.kind} · ${model.model_ref}</small></span>
+              <span style="display:flex;gap:6px;flex-shrink:0;">
+                <button class="btn-secondary" type="button" data-model-id="${model.model_id}" data-action="download" ${model.cached?'disabled':''}>${model.cached?'已缓存':'下载'}</button>
+                <button class="btn-secondary" type="button" data-model-id="${model.model_id}" data-action="check">检查缓存</button>
+              </span>
+            </div>
+            <div style="font-size:0.72rem;color:var(--text-tertiary);margin-top:4px;">${model.license}${model.requires_token?' · 需要 HF Token':''}</div>
+          </div>`).join('');
+        target.querySelectorAll('button[data-model-id]').forEach(button => {
+          button.addEventListener('click', () => {
+            if (button.dataset.action === 'check') {
+              this.checkSpeakerModelCache(button.dataset.modelId, button);
+            } else {
+              this.downloadSpeakerModel(button.dataset.modelId, button);
+            }
+          });
+        });
+      } catch (error) {
+        target.innerHTML = '<div class="option-row-full" style="color:var(--accent-red);">模型状态读取失败</div>';
+      }
+    },
+
+    async downloadSpeakerModel(modelId, button) {
+      const token = document.querySelector('[data-key="speaker_embedding_hf_token"]');
+      const form = new FormData();
+      if (token && token.value && token.value !== '***') form.append('token', token.value);
+      button.disabled = true;
+      button.textContent = '下载中...';
+      try {
+        const response = await fetch('/api/speaker-models/' + encodeURIComponent(modelId) + '/download', {method:'POST', body:form});
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.detail || 'download failed');
+        }
+        toast('模型下载完成', 'success');
+      } catch (error) {
+        toast('模型下载失败：' + error.message, 'error');
+      } finally {
+        this.renderSpeakerModelOptions();
+      }
+    },
+
+    async checkSpeakerModelCache(modelId, button) {
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '检查中...';
+      try {
+        const response = await fetch('/api/speaker-models/' + encodeURIComponent(modelId) + '/status');
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'cache check failed');
+        if (payload.cached) {
+          toast('模型缓存完整，可直接使用', 'success');
+        } else {
+          toast('未检测到完整模型缓存，请下载模型', 'error');
+        }
+      } catch (error) {
+        toast('缓存检查失败：' + error.message, 'error');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+        this.renderSpeakerModelOptions();
+      }
+    },
+
     renderSpeakerEmbeddingOptions(config) {
       const enabled = config.speaker_embedding_enabled !== false;  // 默认 true
       const modelRef = config.speaker_embedding_model_ref || 'speechbrain/spkrec-ecapa-voxceleb';
@@ -2202,9 +2320,9 @@ const App = {
             <p style="margin-top:4px;"><strong>pyannote/embedding</strong> — 512维 ECAPA-TDNN，精度最高。<br>需先在 huggingface.co 接受模型使用协议。</p>
           </div>
         </div>
-        <div class="option-row-full option-field-wrapper" id="speaker-hf-token-row" style="${isPyannote?'':'display:none;'}">
-          <label>HF Token<span class="tip-icon" title="HuggingFace API Token">?</span></label>
-          <input data-key="speaker_embedding_hf_token" value="${tokenMasked}" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxx" type="password" autocomplete="off"
+        <div class="option-row-full option-field-wrapper" id="speaker-hf-token-row">
+          <label>HF Token（pyannote 模型）<span class="tip-icon" title="HuggingFace API Token">?</span></label>
+          <input data-key="speaker_embedding_hf_token" name="speaker-embedding-token" value="${tokenMasked}" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxx" type="password" autocomplete="new-password"
                  style="${hasToken?'border-color:var(--accent-green);':''}">
           <div class="option-field-tip">
             <div class="tip-title">🔑 如何获取 HF Token</div>
@@ -2215,7 +2333,7 @@ const App = {
               <li>复制生成的 token (格式: <code>hf_xxxx...</code>)</li>
               <li>粘贴到此处</li>
             </ol>
-            <p style="margin-top:4px;">Token 仅用于下载模型，本地加密存储。</p>
+            <p style="margin-top:4px;">SpeechBrain ECAPA 不需要 Token；pyannote/embedding、Community-1、Diarization 3.1 下载时使用此 Token。Token 由后端加密存储，页面只保留脱敏标记。</p>
           </div>
         </div>
         <div class="option-row-full" style="font-size:0.75rem;color:var(--text-tertiary);padding:6px 0;" id="speaker-embedding-hint">
@@ -2225,18 +2343,18 @@ const App = {
         </div>
       `;
 
-      // 监听模型切换：pyannote 时显示 token 输入框和文档链接
+      // 监听模型切换：保持共享 Token 输入框可见，只更新提示信息
       const selectEl = document.getElementById('speaker-embedding-model-select');
       if (selectEl) {
         selectEl.addEventListener('change', function() {
           const isPy = this.value === 'pyannote/embedding';
           const tokenRow = document.getElementById('speaker-hf-token-row');
           const hint = document.getElementById('speaker-embedding-hint');
-          if (tokenRow) tokenRow.style.display = isPy ? '' : 'none';
+          if (tokenRow) tokenRow.style.display = '';
           if (hint) {
             hint.innerHTML = isPy
               ? '⚠️ pyannote 模型需签署协议。详见 <a href="speaker-embedding-guide.html" target="_blank" style="color:var(--accent);text-decoration:underline;">📖 配置指南</a>'
-              : '✅ 首次运行将自动下载模型 (~80MB)，请确保网络通畅';
+              : '✅ SpeechBrain ECAPA 无需 Token；全局 pyannote 模型下载时会使用上方 Token';
           }
         });
       }
@@ -2306,7 +2424,7 @@ const App = {
         <div class="option-row-full" style="margin-top:8px;">
           <label>LLM API 密钥（Ollama 本地可留空）</label>
           <div style="display:flex;align-items:center;gap:6px;">
-            <input id="llm-api-key" type="password" placeholder="sk-..." oninput="App.ui._onKeyChange(this)" style="flex:1;" value="${App.ui._escapeAttr(savedKey)}">
+            <input id="llm-api-key" name="llm-api-key" type="password" autocomplete="new-password" placeholder="sk-..." oninput="App.ui._onKeyChange(this)" style="flex:1;" value="${App.ui._escapeAttr(savedKey)}">
             <span class="llm-status ${hasKey?'ok':'pending'}" id="llm-key-status">${hasKey?'✓ '+keyMasked:'未配置'}</span>
           </div>
           <div class="llm-hint">输入密钥后点击"获取模型"自动拉取可用模型列表</div>
@@ -2743,6 +2861,10 @@ const App = {
         <div class="stat-card"><div class="stat-value">${stats.segment_count || 0}</div><div class="stat-label">语音片段</div></div>
         <div class="stat-card"><div class="stat-value">${stats.subtitle_count || 0}</div><div class="stat-label">字幕条数</div></div>
         <div class="stat-card"><div class="stat-value">${stats.duration_seconds ? (stats.duration_seconds/60).toFixed(1)+'min' : '—'}</div><div class="stat-label">音频时长</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.speaker_count || 0}</div><div class="stat-label">说话人数</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.local_speaker_split_count || 0}</div><div class="stat-label">局部换人切分</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.speaker_conflict_count || 0}</div><div class="stat-label">说话人冲突</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.unknown_speaker_count || 0}</div><div class="stat-label">未确认</div></div>
       `;
 
       // Render subtitle timeline
@@ -2963,26 +3085,87 @@ const App = {
             '<td class="col-play"><span class="play-btn" data-play="' + e.index + '" title="播放此段音频">▶</span></td>';
         }
 
-        // 为最终版本列添加双击编辑（所有视图模式）
+        // ---- Click / DblClick 交互模型 ----
+        // 单击行任意位置 → 播放；双击文本列 → 编辑对应文本；
+        // 双击时间/说话人区域 → 编辑该行最终字幕；播放按钮仅播放不编辑。
+        //
+        // 行级 click：立即播放（无延迟）。
+        // 行级 dblclick：停止播放，对非文本列区域打开最终字幕编辑。
+        // 列级 dblclick：停止播放，对该列文本打开编辑。
+        // 播放按钮：stopPropagation 阻止事件冒泡到行级。
+
+        tr.addEventListener('click', function(ev) {
+          var target = ev.target;
+          if (target && target.closest && target.closest('.play-btn, input, button, select, textarea')) return;
+          var rowPlayBtn = tr.querySelector('.play-btn');
+          App.ui.playSegment(e, rowPlayBtn);
+        });
+
+        tr.addEventListener('dblclick', function(ev) {
+          var target = ev.target;
+          // 播放按钮 / 表单元素区域：消隐到行级不做任何事
+          if (target && target.closest && target.closest('.play-btn, input, button, select, textarea')) return;
+          // 文本列由各自的列级 dblclick 处理
+          if (target && target.closest && target.closest('.col-original, .col-optimized, .col-final')) return;
+          // 停止当前音频
+          if (App.state._audioPlayer) {
+            App.state._audioPlayer.pause();
+            App.state._audioPlayer = null;
+            document.querySelectorAll('.play-btn.playing').forEach(function(b) { b.classList.remove('playing'); });
+          }
+          var rowFinalCell = tr.querySelector('.col-final');
+          if (rowFinalCell) App.ui.editSubtitle(rowFinalCell, e.index);
+        });
+
         var finalCell = tr.querySelector('.col-final');
         if (finalCell) {
-          finalCell.addEventListener('dblclick', function() { App.ui.editSubtitle(finalCell, e.index); });
+          finalCell.addEventListener('dblclick', function() {
+            // 停止当前音频
+            if (App.state._audioPlayer) {
+              App.state._audioPlayer.pause();
+              App.state._audioPlayer = null;
+              document.querySelectorAll('.play-btn.playing').forEach(function(b) { b.classList.remove('playing'); });
+            }
+            App.ui.editSubtitle(finalCell, e.index);
+          });
         }
 
         // 为原文和优化列也添加双击编辑（对比视图）
         if (useCompare) {
           var origCell = tr.querySelector('.col-original');
           var optCell = tr.querySelector('.col-optimized');
-          if (origCell) origCell.addEventListener('dblclick', function() { App.ui.editSubtitle(origCell, e.index); });
-          if (optCell) optCell.addEventListener('dblclick', function() { App.ui.editSubtitle(optCell, e.index); });
+          if (origCell) origCell.addEventListener('dblclick', function() {
+            if (App.state._audioPlayer) {
+              App.state._audioPlayer.pause();
+              App.state._audioPlayer = null;
+              document.querySelectorAll('.play-btn.playing').forEach(function(b) { b.classList.remove('playing'); });
+            }
+            App.ui.editSubtitle(origCell, e.index);
+          });
+          if (optCell) optCell.addEventListener('dblclick', function() {
+            if (App.state._audioPlayer) {
+              App.state._audioPlayer.pause();
+              App.state._audioPlayer = null;
+              document.querySelectorAll('.play-btn.playing').forEach(function(b) { b.classList.remove('playing'); });
+            }
+            App.ui.editSubtitle(optCell, e.index);
+          });
         }
 
-        // 播放按钮事件
+        // 播放按钮：双击也仅播放，不进入编辑
         var playBtn = tr.querySelector('.play-btn');
         if (playBtn) {
           playBtn.addEventListener('click', function(ev) {
             ev.stopPropagation();
+            // 防抖：双击时避免重复触发播放
+            var now = Date.now();
+            var lastPlay = parseInt(this.getAttribute('data-last-play') || '0');
+            if (now - lastPlay < 400) return;
+            this.setAttribute('data-last-play', now);
             App.ui.playSegment(e, this);
+          });
+          playBtn.addEventListener('dblclick', function(ev) {
+            ev.stopPropagation();
           });
         }
 
@@ -3037,6 +3220,16 @@ const App = {
       const isFinalCol = cell.classList.contains('col-final');
       cell.classList.add('editing');
       const input = document.createElement('input');
+      input.type = 'text';
+      input.name = 'subtitle-edit-' + index;
+      input.autocomplete = 'off';
+      input.setAttribute('autocomplete', 'off');
+      input.setAttribute('data-lpignore', 'true');
+      input.setAttribute('aria-autocomplete', 'none');
+      input.setAttribute('role', 'textbox');
+      input.setAttribute('data-form-type', 'other');
+      input.placeholder = '编辑字幕文本…';
+      input.setAttribute('aria-label', '编辑第' + index + '行字幕文本');
       input.value = originalText;
       cell.textContent = '';
       cell.appendChild(input);

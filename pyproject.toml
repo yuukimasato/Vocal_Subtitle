@@ -95,6 +95,7 @@ webui = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "python-multipart>=0.0.9",
+    "cryptography>=41.0",
     "websockets>=12.0",
 ]
 # 说话人分离 (含声学特征提取 + 凝聚聚类 + LLM 角色标注)

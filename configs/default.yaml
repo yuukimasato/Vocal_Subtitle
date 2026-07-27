@@ -186,6 +186,13 @@ pipeline:
     pca_variance: 0.95
     text_fallback: true                     # 声学聚类失败时启用文本模式降级
     backend: "auto"
+    fusion_mode: "auto"
+    global_model: "auto"
+    diarization_scope: "hierarchical"
+    local_refinement: "embedding"
+    local_context_seconds: 0.6
+    min_local_segment_seconds: 0.25
+    min_change_confidence: 0.70
     # expected_speakers: null                # 自动推断说话人数
 
   # Stage 4: ASR 识别

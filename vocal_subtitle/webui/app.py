@@ -10,6 +10,26 @@ from .api import router as api_router
 from .websocket import router as ws_router
 
 
+def _mark_stale_running_tasks():
+    """将启动前残留的 "running" 任务标记为 "failed"。
+
+    服务器重启时会中断所有正在运行的任务，历史记录中此前的
+    running 状态若不清理将永远无法完成（孤儿状态）。
+    """
+    try:
+        from ..utils.task_history import TaskHistoryManager
+
+        history = TaskHistoryManager()
+        fixed = history.fixup_stale_running_tasks()
+        if fixed > 0:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.info("Marked %d stale running task(s) as failed after restart", fixed)
+    except Exception:
+        pass
+
+
 def create_app() -> FastAPI:
     """创建并配置 FastAPI 应用
 
@@ -45,5 +65,10 @@ def create_app() -> FastAPI:
         StaticFiles(directory=str(static_dir), html=True),
         name="static",
     )
+
+    # 启动事件：清理因服务器重启而残留的 running 状态任务
+    @app.on_event("startup")
+    async def _startup_cleanup():
+        _mark_stale_running_tasks()
 
     return app

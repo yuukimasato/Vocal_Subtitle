@@ -74,6 +74,9 @@ class PipelineStats:
     diarization_status: str = ""
     mixed_event_count: int = 0
     atomic_span_count: int = 0
+    local_speaker_split_count: int = 0
+    speaker_conflict_count: int = 0
+    unknown_speaker_count: int = 0
 
     def to_dict(self) -> dict:
         result = {
@@ -96,6 +99,9 @@ class PipelineStats:
             "diarization_status": self.diarization_status,
             "mixed_event_count": self.mixed_event_count,
             "atomic_span_count": self.atomic_span_count,
+            "local_speaker_split_count": self.local_speaker_split_count,
+            "speaker_conflict_count": self.speaker_conflict_count,
+            "unknown_speaker_count": self.unknown_speaker_count,
             "quality_diagnostics": self.quality_diagnostics,
             "hallucination_filter_version": getattr(self, "hallucination_filter_version", ""),
             "hallucination_dropped_count": getattr(self, "hallucination_dropped_count", 0),
@@ -129,6 +135,9 @@ class PipelineStats:
         stats.diarization_status = payload.get("diarization_status", "")
         stats.mixed_event_count = payload.get("mixed_event_count", 0)
         stats.atomic_span_count = payload.get("atomic_span_count", 0)
+        stats.local_speaker_split_count = payload.get("local_speaker_split_count", 0)
+        stats.speaker_conflict_count = payload.get("speaker_conflict_count", 0)
+        stats.unknown_speaker_count = payload.get("unknown_speaker_count", 0)
         stats.speaker_count = payload.get("speaker_count", 0)
         stats.diarization_silhouette = payload.get("diarization_silhouette")
         stats.diagnostic_report = payload.get("diagnostic_report")
@@ -523,7 +532,7 @@ class Pipeline:
         if requested_backend == "auto":
             return backend != "legacy-global-fallback"
         if requested_backend == "pyannote":
-            return backend in ("pyannote", "pyannote-community-1")
+            return backend in ("pyannote", "pyannote-community-1", "fused")
         if requested_backend == "legacy":
             return True
         return backend == requested_backend
@@ -1312,6 +1321,17 @@ class Pipeline:
         clean_subtitle_paths: Dict[str, str] = {}
         clean_subtitle_path = str(output_path)
 
+        # Preserve the pre-LLM ASR output so the UI can offer a genuine
+        # clean-vs-optimized download when LLM optimization is enabled.
+        if self.config.llm_optimize.enabled:
+            clean_subtitle_paths = self._export_subtitles_multi_format(
+                builder, events, output_path, output_format, session_dir, label="asr"
+            )
+            clean_subtitle_path = clean_subtitle_paths.get(
+                "srt" if session_dir else output_format,
+                str(output_path),
+            )
+
         # ---- 导出骨架段音频（独立于 skeleton_mode，供人工验证） ----
         if self.config.acoustic_validation.export_skeleton_segments:
             try:
@@ -1444,6 +1464,7 @@ class Pipeline:
 
         return {
             "subtitle_path": final_subtitle_path,
+            "clean_subtitle_path": clean_subtitle_path,
             "llm_subtitle_path": llm_subtitle_path,
             "stats": stats,
             "events": events,
@@ -2503,7 +2524,7 @@ class Pipeline:
         """获取说话人嵌入引擎（惰性初始化 + 缓存）
 
         Returns:
-            SpeakerEmbeddingEngine 或 None（降级到音高特征）
+            SpeakerEmbeddingEngine 或 None（无法加载时保留 unknown）
         """
         if self._embedding_engine is not None:
             return self._embedding_engine
@@ -2519,7 +2540,7 @@ class Pipeline:
             )
 
             engine = create_embedding_engine(emb_cfg)
-            # Dummy 引擎表示加载失败，返回 None 以降级到音高+间隙方案
+            # Dummy 引擎表示加载失败，返回 None 以保留 unknown。
             if engine is None or isinstance(engine, DummyEmbeddingEngine):
                 return None
             if engine.model_loaded:
@@ -2532,7 +2553,7 @@ class Pipeline:
         except Exception as e:
             logger.warning(
                 "Failed to load speaker embedding engine: %s. "
-                "Falling back to pitch+energy features.", e,
+                "Speaker identity will remain unknown unless global diarization is available.", e,
             )
 
         return None
@@ -2553,10 +2574,10 @@ class Pipeline:
         """
         if len(events) <= 1:
             for e in events:
-                e.speaker_id = 0
-                e.speaker_label = self._make_speaker_label(
-                    self._resolved_language_or_config(), 0
-                )
+                e.speaker_id = None
+                e.speaker_label = None
+                e.speaker_status = "unknown"
+                e.speaker_source = "unknown"
             return events
 
         try:
@@ -2570,8 +2591,8 @@ class Pipeline:
         HOP_SEC = 1.0
         audio_duration = len(audio) / sample_rate
 
-        # 尝试加载说话人嵌入引擎（pyannote 等），
-        # 加载失败时自动降级到音高+能量特征
+        # 尝试加载说话人嵌入引擎（pyannote 等）。
+        # 加载失败时不使用停顿或序号伪造身份。
         embedding_engine = self._get_embedding_engine()
 
         window_features = []
@@ -2596,10 +2617,11 @@ class Pipeline:
 
         if len(window_features) < 2:
             logger.warning("Too few windows for clustering")
-            lang = self._resolved_language_or_config()
             for ev in events:
-                ev.speaker_id = 0
-                ev.speaker_label = self._make_speaker_label(lang, 0)
+                ev.speaker_id = None
+                ev.speaker_label = None
+                ev.speaker_status = "unknown"
+                ev.speaker_source = "unknown"
             return events
 
         feature_matrix = np.vstack(window_features)
@@ -2646,14 +2668,19 @@ class Pipeline:
                     n_window_speakers, silhouette,
                 )
 
-        # 质量门控：聚类质量太差 → 间隙交替兜底
+        # 质量门控：聚类质量太差时保留 unknown，禁止伪造 speaker。
         if n_window_speakers < 2 or silhouette < 0.1:
             logger.warning(
                 "Window clustering quality insufficient "
-                "(silhouette=%.3f, %d speakers). Using gap-based alternation.",
+                "(silhouette=%.3f, %d speakers). Keeping speakers unknown.",
                 silhouette, n_window_speakers,
             )
-            return self._gap_based_speaker_assignment(events)
+            for ev in events:
+                ev.speaker_id = None
+                ev.speaker_label = None
+                ev.speaker_status = "unknown"
+                ev.speaker_source = "unknown"
+            return events
 
         logger.info(
             "Window clustering: %d windows → %d speakers (silhouette=%.3f)",
@@ -3950,7 +3977,13 @@ class Pipeline:
                     "start": evt.start,
                     "end": evt.end,
                     "text": evt.text,
-                    "speaker": evt.speaker_label or "unknown",
+                    # Use the stable numeric identity as the merge key. The
+                    # display label may be changed by role labeling and must
+                    # not decide whether acoustic speaker boundaries merge.
+                    "speaker": (
+                        str(evt.speaker_id)
+                        if evt.speaker_id is not None else "unknown"
+                    ),
                     "gap_to_next_sec": round(gap, 3) if gap is not None else None,
                     "gap_is_silent": gap_is_silent,
                 })
@@ -3962,20 +3995,46 @@ class Pipeline:
             )
 
             if merged_fragments and len(merged_fragments) < len(events):
+                import copy
+
                 new_events = []
                 for frag in merged_fragments:
                     frag_id = frag.get("id", 0)
                     orig_idx = frag_id - 1 if frag_id > 0 else 0
                     if orig_idx < len(events):
-                        base = events[orig_idx]
-                        new_events.append(SubtitleEvent(
-                            index=len(new_events) + 1,
-                            start=frag.get("start", base.start),
-                            end=frag.get("end", base.end),
-                            text=frag.get("text", base.text),
-                            speaker_id=base.speaker_id,
-                            speaker_label=base.speaker_label,
+                        member_ids = frag.get("_merged_ids", [frag_id])
+                        members = [
+                            events[item_id - 1]
+                            for item_id in member_ids
+                            if isinstance(item_id, int) and 0 < item_id <= len(events)
+                        ] or [events[orig_idx]]
+                        base = copy.deepcopy(members[0])
+                        base.index = len(new_events) + 1
+                        base.start = frag.get("start", base.start)
+                        base.end = frag.get("end", base.end)
+                        base.text = frag.get("text", base.text)
+                        base.original_text = base.text
+                        base.words = [word for member in members for word in member.words]
+                        base.source_word_ids = list(dict.fromkeys(
+                            word_id
+                            for member in members
+                            for word_id in member.source_word_ids
                         ))
+                        physical_starts = [
+                            member.physical_start
+                            for member in members
+                            if member.physical_start is not None
+                        ]
+                        physical_ends = [
+                            member.physical_end
+                            for member in members
+                            if member.physical_end is not None
+                        ]
+                        if physical_starts:
+                            base.physical_start = min(physical_starts)
+                        if physical_ends:
+                            base.physical_end = max(physical_ends)
+                        new_events.append(base)
                 if new_events:
                     logger.info(
                         "LLM merge: %d → %d events",
@@ -4022,19 +4081,36 @@ class Pipeline:
         Returns:
             后处理完成的事件列表
         """
-        # ---- 0. 事件级说话人聚类（全局集合） ----
-        # 在单块/多块/骨架三种路径的事件拼接完成后统一聚类，
-        # 确保骨架模式下每个小段产出的单个事件也能参与全局聚类。
-        if self.config.diarization.enabled and len(events) > 1:
+        # ---- 0. 两条主线说话人融合 ----
+        # 在单块/多块/骨架三种路径的事件拼接完成后统一处理，
+        # 让完整音频的全局 turns 跨越所有宏观块和骨架段。
+        if self.config.diarization.enabled and events:
             try:
-                events = self._run_event_speaker_clustering(
-                    events, audio, sample_rate,
+                from .diarization.speaker_fusion import run_speaker_fusion
+
+                fusion = run_speaker_fusion(
+                    events,
+                    audio,
+                    sample_rate,
+                    self.config,
+                    embedding_engine=self._get_embedding_engine(),
                 )
-                stats.speaker_count = len(set(
-                    e.speaker_id for e in events if e.speaker_id is not None
-                ))
+                events = fusion.events
+                stats.speaker_count = fusion.speaker_count
+                stats.diarization_backend = fusion.backend
+                stats.diarization_status = fusion.status
+                stats.diarization_silhouette = fusion.diagnostics.get(
+                    "embedding_silhouette"
+                )
+                stats.local_speaker_split_count = fusion.local_split_count
+                stats.speaker_conflict_count = fusion.conflict_count
+                stats.unknown_speaker_count = fusion.unknown_count
+                stats.quality_diagnostics.update(fusion.diagnostics)
             except Exception as e:
-                logger.warning("Event-level speaker clustering failed: %s", e)
+                logger.warning("Speaker fusion failed; preserving unknown speakers: %s", e)
+                stats.diarization_backend = "unknown"
+                stats.diarization_status = "failed"
+                stats.quality_diagnostics["speaker_fusion_error"] = str(e)
 
             # 事件级角色标注
             if self.config.speaker_role.enabled:
