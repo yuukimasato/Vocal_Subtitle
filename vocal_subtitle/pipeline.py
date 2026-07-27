@@ -1397,8 +1397,25 @@ class Pipeline:
         """
         try:
             from .vad.ffmpeg_vad import unified_ffmpeg_pass
+            from .config import AcousticValidationConfig
 
-            ctx.ffmpeg_unified_result = unified_ffmpeg_pass(vocals_path)
+            acoustic_cfg = self.config.acoustic_validation
+            noise_db = (
+                acoustic_cfg.skeleton_noise_db
+                if isinstance(acoustic_cfg, AcousticValidationConfig)
+                else AcousticValidationConfig().skeleton_noise_db
+            )
+            min_silence = (
+                acoustic_cfg.skeleton_min_silence
+                if isinstance(acoustic_cfg, AcousticValidationConfig)
+                else AcousticValidationConfig().skeleton_min_silence
+            )
+
+            ctx.ffmpeg_unified_result = unified_ffmpeg_pass(
+                vocals_path,
+                noise_db=noise_db,
+                min_silence_duration=min_silence,
+            )
             ffmpeg_segments = ctx.ffmpeg_unified_result["coarse_speech"]
             # 存储声学骨架供方案七复用
             if "skeleton" in ctx.ffmpeg_unified_result:

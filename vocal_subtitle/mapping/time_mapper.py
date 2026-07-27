@@ -60,20 +60,159 @@ def _merge_distinct_texts(first: str, second: str) -> str:
 
 @dataclass
 class SubtitleEvent:
-    """字幕事件（单条字幕）"""
+    """字幕事件（单条字幕）
+
+    Fields:
+        index: 序列编号
+        start: 显示开始时间（秒）
+        end: 显示结束时间（秒）
+        text: 显示文本
+        words: 词级时间戳列表
+        original_text: LLM 优化前的原始文本
+        speaker_id: 说话人编号
+        speaker_label: 说话人标签
+
+        # 双时间轴字段（物理证据 vs 显示时间）
+        physical_start: 冻结的人声证据起始时间（秒），语义阶段后不可变
+        physical_end: 冻结的人声证据结束时间（秒），语义阶段后不可变
+        physical_spans: 声学证据跨度列表 (SpeechEvidenceSpan)
+        source_word_ids: 来源词 ID 列表
+        logical_sentence_id: 逻辑句 ID
+        alignment_warning: 对齐警告信息
+
+        # 物理归属
+        physical_region_id: 物理区域 ID
+        physical_bin_id: 物理字幕仓 ID
+        physical_bin_start: 物理字幕仓起始时间
+        physical_bin_end: 物理字幕仓结束时间
+        time_source: 时间来源标识
+        hard_split_before: 前方是否硬拆分
+
+        # 说话人溯源
+        speaker_status: 说话人状态 (confirmed/unknown/inferred)
+        speaker_source: 说话人来源
+        speaker_repair_reason: 说话人修复原因
+        asr_text: ASR 原始文本（覆盖前）
+
+        # 重叠对白
+        genuine_overlap: 是否真实重叠
+        overlap_group_id: 重叠组 ID
+        overlap_tracks: 重叠轨道列表
+
+        # 修订追溯
+        revision_trace: 修订记录列表
+    """
 
     index: int
-    start: float  # 全局时间（秒）
-    end: float  # 全局时间（秒）
+    start: float  # 显示时间（秒）
+    end: float  # 显示时间（秒）
     text: str
     words: List = field(default_factory=list)
-    original_text: Optional[str] = None  # LLM 优化前的原始文本（None = 未优化）
-    speaker_id: Optional[int] = None  # 说话人编号 (0, 1, 2, ...)
-    speaker_label: Optional[str] = None  # 说话人标签: "张三(嘉宾)", "主持人", etc.
+    original_text: Optional[str] = None
+    speaker_id: Optional[int] = None
+    speaker_label: Optional[str] = None
+
+    # 双时间轴
+    physical_start: Optional[float] = None
+    physical_end: Optional[float] = None
+    physical_spans: List = field(default_factory=list)
+    source_word_ids: List[str] = field(default_factory=list)
+    logical_sentence_id: Optional[str] = None
+    alignment_warning: Optional[str] = None
+
+    # 物理归属
+    physical_region_id: Optional[str] = None
+    physical_bin_id: Optional[str] = None
+    physical_bin_start: Optional[float] = None
+    physical_bin_end: Optional[float] = None
+    time_source: str = ""
+    hard_split_before: bool = False
+
+    # 说话人溯源
+    speaker_status: str = ""
+    speaker_source: str = ""
+    speaker_repair_reason: str = ""
+    asr_text: Optional[str] = None
+
+    # 重叠对白
+    genuine_overlap: bool = False
+    overlap_group_id: Optional[str] = None
+    overlap_tracks: List = field(default_factory=list)
+
+    # 修订追溯
+    revision_trace: List = field(default_factory=list)
 
     @property
     def duration(self) -> float:
         return self.end - self.start
+
+    def to_dict(self) -> dict:
+        """序列化为字典，复制可变集合字段避免共享引用。"""
+        import copy
+        return {
+            "index": self.index,
+            "start": self.start,
+            "end": self.end,
+            "text": self.text,
+            "words": copy.deepcopy(self.words),
+            "original_text": self.original_text,
+            "speaker_id": self.speaker_id,
+            "speaker_label": self.speaker_label,
+            "physical_start": self.physical_start,
+            "physical_end": self.physical_end,
+            "physical_spans": copy.deepcopy(self.physical_spans),
+            "source_word_ids": list(self.source_word_ids),
+            "logical_sentence_id": self.logical_sentence_id,
+            "alignment_warning": self.alignment_warning,
+            "physical_region_id": self.physical_region_id,
+            "physical_bin_id": self.physical_bin_id,
+            "physical_bin_start": self.physical_bin_start,
+            "physical_bin_end": self.physical_bin_end,
+            "time_source": self.time_source,
+            "hard_split_before": self.hard_split_before,
+            "speaker_status": self.speaker_status,
+            "speaker_source": self.speaker_source,
+            "speaker_repair_reason": self.speaker_repair_reason,
+            "asr_text": self.asr_text,
+            "genuine_overlap": self.genuine_overlap,
+            "overlap_group_id": self.overlap_group_id,
+            "overlap_tracks": copy.deepcopy(self.overlap_tracks),
+            "revision_trace": copy.deepcopy(self.revision_trace),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "SubtitleEvent":
+        """从字典反序列化，处理缺失字段的默认值。"""
+        return cls(
+            index=payload["index"],
+            start=payload["start"],
+            end=payload["end"],
+            text=payload["text"],
+            words=payload.get("words", []),
+            original_text=payload.get("original_text"),
+            speaker_id=payload.get("speaker_id"),
+            speaker_label=payload.get("speaker_label"),
+            physical_start=payload.get("physical_start"),
+            physical_end=payload.get("physical_end"),
+            physical_spans=payload.get("physical_spans", []),
+            source_word_ids=payload.get("source_word_ids", []),
+            logical_sentence_id=payload.get("logical_sentence_id"),
+            alignment_warning=payload.get("alignment_warning"),
+            physical_region_id=payload.get("physical_region_id"),
+            physical_bin_id=payload.get("physical_bin_id"),
+            physical_bin_start=payload.get("physical_bin_start"),
+            physical_bin_end=payload.get("physical_bin_end"),
+            time_source=payload.get("time_source", ""),
+            hard_split_before=payload.get("hard_split_before", False),
+            speaker_status=payload.get("speaker_status", ""),
+            speaker_source=payload.get("speaker_source", ""),
+            speaker_repair_reason=payload.get("speaker_repair_reason", ""),
+            asr_text=payload.get("asr_text"),
+            genuine_overlap=payload.get("genuine_overlap", False),
+            overlap_group_id=payload.get("overlap_group_id"),
+            overlap_tracks=payload.get("overlap_tracks", []),
+            revision_trace=payload.get("revision_trace", []),
+        )
 
     def __repr__(self) -> str:
         spk = f", speaker={self.speaker_label}" if self.speaker_label else ""

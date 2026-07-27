@@ -238,6 +238,10 @@ class FasterWhisperEngine(ASREngine):
                         end=seg.end,
                         words=words,
                         avg_logprob=seg.avg_logprob,
+                        language=getattr(info, "language", None),
+                        language_probability=getattr(info, "language_probability", None),
+                        no_speech_prob=getattr(seg, "no_speech_prob", None),
+                        compression_ratio=getattr(seg, "compression_ratio", None),
                     )
                 )
 

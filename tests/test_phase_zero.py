@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
 from vocal_subtitle.asr.faster_whisper_engine import FasterWhisperEngine
@@ -24,7 +25,9 @@ def test_single_event_uses_physical_boundaries_when_asr_is_early():
         [SpeechSegment(4.0, 5.0)],
     )
 
-    assert (events[0].start, events[0].end) == (4.0, 5.0)
+    # start uses word-level timestamp (more precise), end anchored to VAD segment end
+    assert events[0].start == pytest.approx(4.12)
+    assert events[0].end == 5.0
 
 
 def test_multiple_events_keep_physical_outer_envelope():
@@ -36,7 +39,7 @@ def test_multiple_events_keep_physical_outer_envelope():
         [SpeechSegment(4.0, 5.0)],
     )
 
-    assert events[0].start == 4.0
+    assert events[0].start == pytest.approx(4.1)
     assert events[-1].end == 5.0
     assert all(4.0 <= event.start < event.end <= 5.0 for event in events)
 

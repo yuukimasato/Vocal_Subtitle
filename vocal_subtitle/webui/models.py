@@ -72,6 +72,15 @@ class SubtitleEventResponse(BaseModel):
     original_text: Optional[str] = None  # LLM 优化前的原始文本
     speaker_id: Optional[int] = None  # 说话人编号
     speaker_label: Optional[str] = None  # 说话人标签: "张三(嘉宾)"
+    # 物理时间轴与溯源字段（前端可选渲染，保持旧响应兼容）
+    physical_start: Optional[float] = None
+    physical_end: Optional[float] = None
+    source_word_ids: Optional[List[str]] = None
+    speaker_status: Optional[str] = None
+    speaker_source: Optional[str] = None
+    alignment_warning: Optional[str] = None
+    genuine_overlap: Optional[bool] = None
+    overlap_group_id: Optional[str] = None
 
 
 class DeviceInfoResponse(BaseModel):

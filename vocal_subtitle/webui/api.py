@@ -320,6 +320,12 @@ def _run_pipeline_in_thread(
                 "original_text": e.original_text,
                 "speaker_id": e.speaker_id,
                 "speaker_label": e.speaker_label,
+                "physical_start": e.physical_start,
+                "physical_end": e.physical_end,
+                "source_word_ids": e.source_word_ids,
+                "speaker_status": e.speaker_status,
+                "speaker_source": e.speaker_source,
+                "alignment_warning": e.alignment_warning,
             }
             for e in events
         ]
@@ -1023,6 +1029,16 @@ async def get_subtitles(task_id: str):
     return [SubtitleEventResponse(**e) for e in events]
 
 
+def _subtitle_event_from_payload(payload: dict) -> SubtitleEvent:
+    """Reconstruct a SubtitleEvent from a dict payload, preserving all provenance fields."""
+    return SubtitleEvent.from_dict(payload)
+
+
+def _subtitle_event_to_payload(event: SubtitleEvent) -> dict:
+    """Serialize a SubtitleEvent to a dict, preserving all provenance fields."""
+    return event.to_dict()
+
+
 def _rewrite_subtitle_files(task_result: Dict[str, Any]) -> None:
     """将内存中的字幕事件写回磁盘文件
 
@@ -1045,6 +1061,12 @@ def _rewrite_subtitle_files(task_result: Dict[str, Any]) -> None:
             original_text=e.get("original_text"),
             speaker_id=e.get("speaker_id"),
             speaker_label=e.get("speaker_label"),
+            physical_start=e.get("physical_start"),
+            physical_end=e.get("physical_end"),
+            source_word_ids=e.get("source_word_ids", []),
+            speaker_status=e.get("speaker_status", ""),
+            speaker_source=e.get("speaker_source", ""),
+            alignment_warning=e.get("alignment_warning"),
         )
         for e in events
     ]
