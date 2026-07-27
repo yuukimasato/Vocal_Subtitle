@@ -68,6 +68,12 @@ class PipelineStats:
     speaker_merge_map: Dict = field(default_factory=dict)
     canonicalization_status: str = ""
 
+    # diarization diagnostics
+    diarization_backend: str = ""
+    diarization_status: str = ""
+    mixed_event_count: int = 0
+    atomic_span_count: int = 0
+
     def to_dict(self) -> dict:
         result = {
             "input_path": str(self.input_path),
@@ -85,6 +91,10 @@ class PipelineStats:
             "canonical_speaker_count": self.canonical_speaker_count,
             "speaker_merge_map": self.speaker_merge_map,
             "canonicalization_status": self.canonicalization_status,
+            "diarization_backend": self.diarization_backend,
+            "diarization_status": self.diarization_status,
+            "mixed_event_count": self.mixed_event_count,
+            "atomic_span_count": self.atomic_span_count,
         }
         if self.speaker_count:
             result["speaker_count"] = self.speaker_count
@@ -111,6 +121,10 @@ class PipelineStats:
         stats.canonical_speaker_count = payload.get("canonical_speaker_count", 0)
         stats.speaker_merge_map = payload.get("speaker_merge_map", {})
         stats.canonicalization_status = payload.get("canonicalization_status", "")
+        stats.diarization_backend = payload.get("diarization_backend", "")
+        stats.diarization_status = payload.get("diarization_status", "")
+        stats.mixed_event_count = payload.get("mixed_event_count", 0)
+        stats.atomic_span_count = payload.get("atomic_span_count", 0)
         stats.speaker_count = payload.get("speaker_count", 0)
         stats.diarization_silhouette = payload.get("diarization_silhouette")
         stats.diagnostic_report = payload.get("diagnostic_report")
@@ -208,6 +222,10 @@ class Pipeline:
         """Determine whether to use global or segmented ASR path."""
         if self.config.mode == "streaming":
             return "segmented"
+        # Respect explicit override from merge_with_overrides or config
+        explicit = getattr(self.config, "asr_path", None)
+        if explicit:
+            return str(explicit)
         if self._requested_asr_path:
             return self._requested_asr_path
         if self.config.asr.global_asr.enabled:
@@ -244,6 +262,212 @@ class Pipeline:
                 event.start = max(event.start, physical_start)
                 event.end = min(event.end, physical_end)
         return events
+
+    @staticmethod
+    def _is_usable_diarization_cache(diarization, requested_backend: str) -> bool:
+        """Check whether a cached diarization result matches the requested backend.
+
+        A legacy/fallback result must not be reused when pyannote is available,
+        and vice-versa.
+        """
+        backend = getattr(diarization, "backend", "")
+        if requested_backend == "auto":
+            return backend != "legacy-global-fallback"
+        if requested_backend == "pyannote":
+            return backend in ("pyannote", "pyannote-community-1")
+        if requested_backend == "legacy":
+            return True
+        return backend == requested_backend
+
+    def _project_global_speakers(
+        self,
+        segments: list,
+        time_offset: float = 0.0,
+        duration: float = 0.0,
+    ):
+        """Project global diarization turns onto VAD speech segments.
+
+        Returns (projected_segments, speaker_ids) where each input segment is
+        split at speaker turn boundaries.
+        """
+        turns = getattr(self, "_global_turns", []) or []
+        projected_segments = []
+        speaker_ids = []
+        for seg in segments:
+            seg_start = seg.start + time_offset
+            seg_end = seg.end + time_offset
+            # Clip to audio duration
+            seg_start = max(0.0, seg_start)
+            seg_end = min(duration if duration > 0 else float("inf"), seg_end)
+            relevant = [
+                t for t in turns
+                if t.end > seg_start and t.start < seg_end
+            ]
+            if not relevant:
+                # No diarization data — return segment as-is with unknown speaker
+                projected_segments.append(type(seg)(seg_start, seg_end))
+                speaker_ids.append(-1)
+                continue
+            # When only one speaker covers the entire segment, don't split
+            speakers_in_seg = {t.speaker_id for t in relevant}
+            if len(speakers_in_seg) == 1:
+                projected_segments.append(type(seg)(seg_start, seg_end))
+                speaker_ids.append(speakers_in_seg.pop())
+                continue
+            # Split at turn boundaries
+            boundaries = sorted(set(
+                [max(seg_start, t.start) for t in relevant]
+                + [min(seg_end, t.end) for t in relevant]
+            ))
+            for b_start, b_end in zip(boundaries, boundaries[1:]):
+                if b_end <= b_start:
+                    continue
+                # Find the speaker at the midpoint of this sub-segment
+                midpoint = (b_start + b_end) / 2.0
+                speaker = next(
+                    (t.speaker_id for t in turns if t.start <= midpoint < t.end),
+                    -1,
+                )
+                projected_segments.append(type(seg)(b_start, b_end))
+                speaker_ids.append(speaker)
+        return projected_segments, speaker_ids
+
+    def _enforce_speaker_boundaries(
+        self,
+        events: list,
+        stats,
+    ):
+        """Split subtitle events at speaker-turn boundaries.
+
+        When an event spans a speaker change, it is split so each piece
+        carries the correct speaker label and only the words that belong
+        to that speaker.
+        """
+        from .asr.base import WordTimestamp
+        turns = getattr(self, "_global_turns", []) or []
+        if not turns or not events:
+            return events
+
+        result = []
+        for event in events:
+            words = list(getattr(event, "words", []) or [])
+            if not words:
+                # No word timestamps — can't split by speaker. When the event
+                # crosses a speaker boundary, mark it as UNKNOWN.
+                crosses_boundary = any(
+                    t.start > event.start and t.start < event.end
+                    for t in turns
+                )
+                if crosses_boundary:
+                    first_turn = next(
+                        (t for t in turns if t.start <= event.start < t.end),
+                        None,
+                    )
+                    event.end = min(event.end, first_turn.end if first_turn else turns[0].start)
+                    event.speaker_id = None
+                    event.speaker_label = None
+                else:
+                    for turn in turns:
+                        if turn.start <= event.start < turn.end:
+                            event.speaker_id = turn.speaker_id
+                            break
+                    if event.speaker_id is not None:
+                        event.speaker_label = self._make_speaker_label(
+                            self._resolved_language_or_config(), event.speaker_id
+                        )
+                stats.mixed_event_count += 1
+                result.append(event)
+                continue
+
+            # Split at speaker boundary
+            split_points = sorted(set(
+                [event.start]
+                + [t.start for t in turns if event.start < t.start < event.end]
+                + [t.end for t in turns if event.start < t.end < event.end]
+                + [event.end]
+            ))
+            piece_index = 0
+            for b_start, b_end in zip(split_points, split_points[1:]):
+                if b_end <= b_start:
+                    continue
+                midpoint = (b_start + b_end) / 2.0
+                turn_speaker = next(
+                    (t.speaker_id for t in turns if t.start <= midpoint < t.end),
+                    None,
+                )
+                # Find words whose midpoint falls in this sub-segment
+                piece_words = [
+                    w for w in words
+                    if (event.start + float(getattr(w, "start", 0.0)) + event.start + float(getattr(w, "end", 0.0))) / 2.0 < b_end
+                    and (event.start + float(getattr(w, "start", 0.0)) + event.start + float(getattr(w, "end", 0.0))) / 2.0 > b_start
+                ]
+                if not piece_words:
+                    continue
+                piece_text = " ".join(str(getattr(w, "word", "")) for w in piece_words)
+                # Build a piece event
+                import copy
+                piece = copy.copy(event)
+                piece.index = piece_index
+                piece.start = b_start
+                piece.end = b_end
+                piece.text = piece_text or event.text
+                piece.speaker_id = turn_speaker
+                piece.speaker_label = self._make_speaker_label(
+                    self._resolved_language_or_config(), turn_speaker
+                )
+                # Adjust word timestamps relative to the new piece start.
+                # For the first piece, b_start == event.start so offsets are zero.
+                offset = b_start - event.start
+                piece.words = []
+                for w in piece_words:
+                    copied = copy.copy(w)
+                    copied.start = max(0.0, float(getattr(w, "start", 0.0)) - offset)
+                    copied.end = float(getattr(w, "end", 0.0)) - offset
+                    piece.words.append(copied)
+                # Filter source_word_ids to words in this piece
+                all_words = list(getattr(event, "words", []) or [])
+                all_source_ids = list(getattr(event, "source_word_ids", []) or [])
+                piece.source_word_ids = []
+                for w in piece_words:
+                    try:
+                        idx = all_words.index(w)
+                        if idx < len(all_source_ids):
+                            piece.source_word_ids.append(all_source_ids[idx])
+                    except ValueError:
+                        pass
+                if not piece.source_word_ids:
+                    piece.source_word_ids = all_source_ids
+                piece_index += 1
+                result.append(piece)
+            if piece_index > 1:
+                stats.mixed_event_count += 1
+
+        return result
+
+    def _prepare_task_language(self, audio, sample_rate: int) -> str | None:
+        """Detect language once from the full task audio.
+
+        Used by downstream stages (e.g. ASR, speaker labels) to avoid
+        unreliable per-segment auto-detection.
+        """
+        if getattr(self.config.asr, "language", None):
+            return self.config.asr.language
+        engine = self._get_asr_engine()
+        engine.load_model()
+        detector = getattr(engine, "detect_language", None)
+        if callable(detector):
+            result = detector(audio, sample_rate)
+            if result:
+                self._resolved_language = result
+                return result
+        detect = getattr(engine, "detect_language_info", None)
+        if callable(detect):
+            lang_info = detect(audio, sample_rate)
+            lang = getattr(lang_info, "language", None) or lang_info
+            if lang:
+                self._resolved_language = lang
+                return lang
+        return None
 
     def _setup_logging(self) -> None:
         """初始化日志"""
@@ -362,6 +586,7 @@ class Pipeline:
 
             self._asr_engine = WhisperCppEngine(
                 model=asr_cfg.model,
+                language=asr_cfg.language,
             )
         elif engine_name == "funasr":
             from .asr.funasr_engine import FunASREngine
@@ -1533,8 +1758,20 @@ class Pipeline:
         # 经常将英文/日文误判为中文。解决方案：从完整音频
         # 中一次性检测语言，然后应用于所有片段。
         resolved_language: Optional[str] = asr_cfg.language
+        # 如果 _prepare_task_language 已预先检测，则跳过重复检测
+        if resolved_language is None and hasattr(self, "_resolved_language") and self._resolved_language is not None:
+            resolved_language = self._resolved_language
         if resolved_language is None:
-            resolved_language = engine.detect_language(audio, sample_rate)
+            # 首先尝试 detect_language（引擎可能不支持完整音频语言检测）
+            detector = getattr(engine, "detect_language", None)
+            if callable(detector):
+                resolved_language = detector(audio, sample_rate)
+            else:
+                # 回退到 detect_language_info（旧 API）
+                detect = getattr(engine, "detect_language_info", None)
+                if callable(detect):
+                    lang_info = detect(audio, sample_rate)
+                    resolved_language = getattr(lang_info, "language", None) or lang_info
             if resolved_language:
                 logger.info(
                     "Global language detected: %s (will use for all %d segments)",
@@ -1615,6 +1852,7 @@ class Pipeline:
                 if (
                     resolved_language is not None
                     and seg_results
+                    and self.config.asr.language_mode != "single"
                     and self._should_fallback_language(seg_results)
                 ):
                     logger.info(
@@ -1630,8 +1868,11 @@ class Pipeline:
                             sample_rate,
                             language=None,  # 自动检测
                         )
-                        # 取置信度更高的结果
-                        if self._segment_confidence(fallback_results) > self._segment_confidence(seg_results):
+                        # 取置信度更高的结果，但只在回退结果有语言证据时才接受
+                        if (
+                            self._segment_confidence(fallback_results) > self._segment_confidence(seg_results)
+                            and self._should_accept_fallback_language(fallback_results, self.config.asr.language_mode)
+                        ):
                             logger.info(
                                 "Segment %d: fallback accepted (auto-detect better)",
                                 i,
@@ -1673,6 +1914,74 @@ class Pipeline:
             )
 
         return results
+
+    @staticmethod
+    def _should_accept_fallback_language(fallback_results: list, language_mode: str) -> bool:
+        """Only accept fallback if the results carry language evidence.
+
+        In ``mixed`` mode, auto-detected language evidence is the signal to switch;
+        without it the fallback is no better than guessing.
+        """
+        if language_mode != "mixed":
+            return True
+        return all(
+            getattr(s, "language", None) is not None for s in fallback_results
+        )
+
+    @staticmethod
+    def _build_safe_optimizer(llm_cfg):
+        """Build a SubtitleOptimizer with min_similarity / max_length_ratio validation.
+
+        The external ``llm_subtitle_optimizer`` library does not expose
+        threshold sanitisation or cross-speaker guards, so we re-export
+        the underlying class with those additions.  Tests in
+        ``test_language_policy.py`` verify the wrapper behaviour.
+        """
+        from llm_subtitle_optimizer.optimizer import SubtitleOptimizer as _Base
+
+        class SafeOptimizer(_Base):
+            def __init__(self, **kwargs):
+                # Sanitise threshold parameters
+                min_similarity = kwargs.pop("min_similarity", None)
+                max_length_ratio = kwargs.pop("max_length_ratio", None)
+                try:
+                    self.min_similarity = float(min_similarity)
+                except (TypeError, ValueError):
+                    self.min_similarity = 0.75
+                try:
+                    self.max_length_ratio = float(max_length_ratio)
+                    self.max_length_ratio = max(0.0, self.max_length_ratio)
+                except (TypeError, ValueError):
+                    self.max_length_ratio = 1.0
+                super().__init__(**kwargs)
+
+            def _validate(self, original_chunk, optimized_chunk, event_metadata=None):
+                valid, reason = super()._validate(original_chunk, optimized_chunk)
+                if not valid:
+                    return valid, reason
+                if event_metadata:
+                    for key in original_chunk:
+                        optimized_text = str(optimized_chunk.get(key, "") or "")
+                        for other_key in original_chunk:
+                            if other_key == key:
+                                continue
+                            other_original = str(original_chunk.get(other_key, "") or "")
+                            if (
+                                len(other_original) >= 4
+                                and other_original in optimized_text
+                            ):
+                                if event_metadata.get(key, {}).get("speaker") != event_metadata.get(other_key, {}).get("speaker"):
+                                    return False, "cross_speaker_text_transfer"
+                return True, reason
+
+        return SafeOptimizer(
+            model=llm_cfg.model,
+            thread_num=llm_cfg.thread_num,
+            batch_num=llm_cfg.batch_num,
+            temperature=llm_cfg.temperature,
+            base_url=llm_cfg.base_url,
+            api_key=llm_cfg.api_key,
+        )
 
     @staticmethod
     def _segment_confidence(seg_results: list) -> float:
@@ -2346,7 +2655,14 @@ class Pipeline:
         if boundary_language is None:
             asr_engine = self._get_asr_engine()
             asr_engine.load_model()
-            boundary_language = asr_engine.detect_language(audio, sample_rate)
+            detector = getattr(asr_engine, "detect_language", None)
+            if callable(detector):
+                boundary_language = detector(audio, sample_rate)
+            else:
+                detect = getattr(asr_engine, "detect_language_info", None)
+                if callable(detect):
+                    lang_info = detect(audio, sample_rate)
+                    boundary_language = getattr(lang_info, "language", None) or lang_info
             if boundary_language:
                 logger.info(
                     "Boundary re-ASR: using detected language=%s", boundary_language,
@@ -2594,14 +2910,8 @@ class Pipeline:
                     meta["next_speaker"] = next_label
                 event_metadata[idx_str] = meta
 
-            optimizer = SubtitleOptimizer(
-                model=llm_cfg.model,
-                thread_num=llm_cfg.thread_num,
-                batch_num=llm_cfg.batch_num,
-                temperature=llm_cfg.temperature,
-                base_url=llm_cfg.base_url,
-                api_key=llm_cfg.api_key,
-            )
+            # Use the SubtitleOptimizer wrapper with enhanced validation
+            optimizer = self._build_safe_optimizer(llm_cfg)
 
             optimized = optimizer.optimize(subtitle_dict, event_metadata)
 

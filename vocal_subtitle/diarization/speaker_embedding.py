@@ -358,13 +358,29 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
                     "Install with: pip install pyannote.audio"
                 )
 
-            logger.info("Pyannote embedding using device: %s", device)
+            logger.info("Pyannote embedding using device: %s", device_str)
             try:
-                self._inference = Inference(
-                    model=model_ref,
-                    device=device,
-                    use_auth_token=use_auth_token,
-                )
+                # Authenticate model first when Model class is available
+                try:
+                    from pyannote.audio.core.model import Model
+                except ImportError:
+                    Model = None
+
+                if Model is not None:
+                    loaded_model = Model.from_pretrained(
+                        model_ref,
+                        token=use_auth_token,
+                    )
+                    self._inference = Inference(
+                        model=loaded_model,
+                        device=device_str,
+                    )
+                else:
+                    self._inference = Inference(
+                        model=model_ref,
+                        device=device_str,
+                        use_auth_token=use_auth_token,
+                    )
                 self._model_loaded = True
                 self._model_type = "pyannote"
                 logger.info(

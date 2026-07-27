@@ -51,7 +51,7 @@ def test_runtime_target_failed_probe_falls_back_to_cpu() -> None:
 def test_install_script_is_noninteractive_for_help() -> None:
     result = run("bash", "install.sh", "--help")
     assert result.returncode == 0, result.stdout
-    assert "--profile whisperx" in result.stdout
+    assert "--cpu" in result.stdout
     assert "--no-torch" in result.stdout
 
 

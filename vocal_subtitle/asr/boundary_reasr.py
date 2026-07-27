@@ -117,11 +117,35 @@ class SlidingWindowReASR:
         asr_engine=None,
         cache=None,
         language: Optional[str] = None,
+        cache_params: Optional[Dict] = None,
     ):
         self.config = config or SlidingWindowConfig()
         self._asr_engine = asr_engine
         self._cache = cache
         self._language = language  # 预检测的语言代码，避免短窗口语言误判
+        self._cache_params = cache_params or {}
+
+    def _cache_key(self, window: SlidingWindow) -> str:
+        """Compute a deterministic cache key for a sliding window.
+
+        Incorporates audio identity and decode policy from ``cache_params``
+        so that different inputs or decode settings never collide.
+        """
+        if self._cache is None:
+            import hashlib
+            return hashlib.md5(
+                f"{window.boundary_index}_{window.window_type}_{window.start_time}_{window.end_time}".encode()
+            ).hexdigest()
+        from pathlib import Path
+        params = dict(self._cache_params)
+        params["boundary_index"] = window.boundary_index
+        params["window_type"] = window.window_type
+        params["start"] = window.start_time
+        params["end"] = window.end_time
+        return self._cache.make_key(
+            Path(f"boundary_window_{window.boundary_index}_{window.window_type}"),
+            **params,
+        )
 
     def set_asr_engine(self, engine) -> None:
         """延迟设置 ASR 引擎（pipeline 中惰性初始化后调用）"""

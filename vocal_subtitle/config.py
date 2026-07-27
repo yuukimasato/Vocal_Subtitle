@@ -206,6 +206,11 @@ class ASRConfig:
     vad_filter: bool = False
     language_mode: str = "single"  # single | mixed | auto
     global_asr: "GlobalASRConfig" = field(default_factory=GlobalASRConfig)
+    # Hallucination filter thresholds
+    no_speech_threshold: float = 0.6
+    log_prob_threshold: float = -1.0
+    compression_ratio_threshold: float = 2.4
+    hallucination_filter_version: str = "v1"
 
 
 @dataclass
@@ -500,6 +505,9 @@ class PipelineConfig:
 
     # 反馈学习
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
+
+    # Transient / override-only fields — not persisted to YAML profiles
+    asr_path: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -969,6 +977,8 @@ class ConfigLoader:
             "asr_model": "asr.model",
             "asr_engine": "asr.engine",
             "language": "asr.language",
+            "language_mode": "asr.language_mode",
+            "mixed_language": "asr.language_mode",
             "device": "asr.device",
             "llm_optimize": "llm_optimize.enabled",
             "llm_model": "llm_optimize.model",
@@ -997,8 +1007,23 @@ class ConfigLoader:
         for key, value in overrides.items():
             if value is None:
                 continue
+
+            # Normalize boolean overrides: True → "mixed", False → "single"
+            if key == "mixed_language":
+                if value is True or (isinstance(value, str) and value.lower() == "true"):
+                    value = "mixed"
+                elif value is False or (isinstance(value, str) and value.lower() == "false"):
+                    value = "single"
+
+            # Normalize other boolean string overrides
+            normalized = value
+            if isinstance(value, str):
+                low = value.lower()
+                if low in ("true", "false"):
+                    normalized = low == "true"
+
             path = field_map.get(key, key)
-            _set_nested_attr(new_config, path, value)
+            _set_nested_attr(new_config, path, normalized)
 
         return new_config
 

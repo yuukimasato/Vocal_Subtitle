@@ -40,8 +40,12 @@ class TextNormalizer:
     def __init__(
         self,
         custom_corrections: Optional[Dict[str, str]] = None,
+        safe_mode: bool = False,
     ):
-        self.corrections = {**_DEFAULT_CORRECTIONS}
+        self.safe_mode = safe_mode
+        self.corrections = {}
+        if not safe_mode:
+            self.corrections.update(_DEFAULT_CORRECTIONS)
         if custom_corrections:
             self.corrections.update(custom_corrections)
 

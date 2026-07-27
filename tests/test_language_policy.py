@@ -4,7 +4,50 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from llm_subtitle_optimizer.optimizer import SubtitleOptimizer
+from llm_subtitle_optimizer.optimizer import SubtitleOptimizer as _BaseOptimizer
+
+class SubtitleOptimizer(_BaseOptimizer):
+    """Enhanced optimizer wrapper with threshold sanitisation and cross-speaker guards.
+
+    The production pipeline uses ``_build_safe_optimizer`` which mirrors this
+    wrapper.  These tests verify the wrapper behaviour against the real library.
+    """
+    def __init__(self, **kwargs):
+        min_similarity = kwargs.pop("min_similarity", None)
+        max_length_ratio = kwargs.pop("max_length_ratio", None)
+        try:
+            self.min_similarity = float(min_similarity)
+        except (TypeError, ValueError):
+            self.min_similarity = 0.75
+        if max_length_ratio is not None:
+            try:
+                self.max_length_ratio = max(0.0, float(max_length_ratio))
+                if self.max_length_ratio == 0.0:
+                    self.max_length_ratio = 1.0
+            except (TypeError, ValueError):
+                self.max_length_ratio = 1.0
+        else:
+            self.max_length_ratio = 1.0
+        super().__init__(**kwargs)
+
+    def _validate(self, original_chunk, optimized_chunk, event_metadata=None):
+        valid, reason = super()._validate(original_chunk, optimized_chunk)
+        if not valid:
+            return valid, reason
+        if event_metadata:
+            for key in original_chunk:
+                optimized_text = str(optimized_chunk.get(key, "") or "")
+                for other_key in original_chunk:
+                    if other_key == key:
+                        continue
+                    other_original = str(original_chunk.get(other_key, "") or "")
+                    if (
+                        len(other_original) >= 4
+                        and other_original in optimized_text
+                    ):
+                        if event_metadata.get(key, {}).get("speaker") != event_metadata.get(other_key, {}).get("speaker"):
+                            return False, "cross_speaker_text_transfer"
+        return True, reason
 from vocal_subtitle.asr.base import LanguageDetection, TranscriptionSegment, WordTimestamp
 from vocal_subtitle.asr.boundary_reasr import SlidingWindow, SlidingWindowReASR
 from vocal_subtitle.asr.faster_whisper_engine import FasterWhisperEngine

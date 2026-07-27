@@ -89,6 +89,8 @@ def main():
 @click.option("--uvr-model", default=None, help="UVR 模型文件名")
 @click.option("--vad-threshold", type=float, default=None, help="VAD 阈值 (0.0–1.0)")
 @click.option("--asr-model", default=None, help="ASR 模型 (large-v3 / medium / small)")
+@click.option("--asr-path", default=None, type=click.Choice(["auto", "global", "segmented"]),
+              help="ASR 路径: global (全音频一次识别) 或 segmented (VAD 分段识别，默认)")
 @click.option("--llm-optimize", is_flag=True, default=None, help="启用 LLM 字幕优化")
 @click.option("--diarization/--no-diarization", default=None, help="启用/禁用说话人分离")
 @click.option("--speaker-role/--no-speaker-role", default=None, help="启用/禁用 LLM 角色标注")
@@ -111,6 +113,7 @@ def run(
     uvr_model: Optional[str],
     vad_threshold: Optional[float],
     asr_model: Optional[str],
+    asr_path: Optional[str],
     llm_optimize: Optional[bool],
     diarization: Optional[bool],
     speaker_role: Optional[bool],
@@ -145,6 +148,8 @@ def run(
         overrides["vad_threshold"] = vad_threshold
     if asr_model:
         overrides["asr_model"] = asr_model
+    if asr_path:
+        overrides["asr_path"] = asr_path
     if device:
         overrides["device"] = device
     if language:

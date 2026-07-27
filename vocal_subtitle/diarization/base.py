@@ -69,6 +69,7 @@ class DiarizationResult:
     backend: str = "unknown"
     status: str = "unknown"
     diagnostics: dict = field(default_factory=dict)
+    overlap_duration: float = 0.0
 
 
 @dataclass

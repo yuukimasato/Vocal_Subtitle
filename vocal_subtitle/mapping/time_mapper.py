@@ -394,7 +394,9 @@ class TimeMapper:
             # ★ 不同说话人：间隙是说话人切换的自然停顿，不扩展 prev.end
             prev_spk = getattr(prev, "speaker_id", None)
             curr_spk = getattr(curr, "speaker_id", None)
-            if prev_spk is not None and curr_spk is not None and prev_spk != curr_spk:
+            if (prev_spk is not None and curr_spk is not None and prev_spk != curr_spk) or (
+                (prev_spk is None) != (curr_spk is None)
+            ):
                 result.append(curr)
                 continue
 
@@ -567,6 +569,9 @@ class TimeMapper:
                 spk_a = getattr(a, "speaker_id", None)
                 spk_b = getattr(b, "speaker_id", None)
                 if spk_a is not None and spk_b is not None and spk_a != spk_b:
+                    continue
+                # Also protect unknown-speaker events from being merged into known-speaker ones
+                if (spk_a is None) != (spk_b is None):
                     continue
 
                 # 文本相似度检查
