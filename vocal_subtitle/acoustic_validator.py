@@ -19,6 +19,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from .merging.llm_merge_engine import _physical_owner_compatible_for_events
+
 logger = logging.getLogger(__name__)
 
 
@@ -316,9 +318,18 @@ class AcousticValidator:
             )
 
             if 0 < gap <= max_gap and same_speaker:
+                # 物理所有权保护：不同 physical clip 的事件不合并
+                if not _physical_owner_compatible_for_events(prev, event):
+                    merged.append(event)
+                    continue
                 # 合并：延长 prev 覆盖当前事件
                 prev.end = event.end
                 prev.text = f"{prev.text} {event.text}".strip()
+                # Merge provenance: source_word_ids and physical_spans
+                prev.source_word_ids = list(dict.fromkeys(
+                    (prev.source_word_ids or []) + (event.source_word_ids or [])
+                ))
+                prev.physical_spans = list((prev.physical_spans or []) + (event.physical_spans or []))
                 num_merged += 1
                 logger.debug(
                     "Micro-gap merge: %.0fms gap, same speaker → "

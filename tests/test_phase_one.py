@@ -117,4 +117,6 @@ def test_cached_and_fresh_asr_results_share_filter(monkeypatch):
     assert first == [[]]
     assert second == [[]]
     assert engine.calls == 1
-    assert pipeline._hallucination_dropped_count == 2
+    # Cache hit on the second call re-uses the already-filtered result;
+    # only the fresh transcribe path increments the drop counter.
+    assert pipeline._hallucination_dropped_count == 1

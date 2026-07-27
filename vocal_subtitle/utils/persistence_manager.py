@@ -217,6 +217,7 @@ class PersistenceManager:
                         "original_text": e.get("original_text"),
                         "speaker_id": e.get("speaker_id"),
                         "speaker_label": e.get("speaker_label"),
+                        "duration": e["end"] - e["start"],
                     })
                     for e in events
                 ]

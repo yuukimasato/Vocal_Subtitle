@@ -197,6 +197,150 @@ class Pipeline:
             return "resource_unavailable"
         return "execution_failed"
 
+    def _get_global_asr_engine(self):
+        """Return the global ASR engine.
+
+        Tests monkeypatch this method; the default returns the standard engine.
+        """
+        return self._get_asr_engine()
+
+    def _run_global_transcription_path(self, audio, sample_rate, shadow, stats):
+        """Execute the global transcription path.
+
+        Transcribes the full audio, allocates words to physical bins,
+        builds SubtitleEvents, audits coverage, and attempts tail recovery.
+        The tests in test_coverage_recovery and test_phase_three verify
+        this integration path.
+        """
+        from .physical.ir import GlobalTranscript, GlobalTranscriptSegment, GlobalWord
+        from .physical.subtitle_bins import build_physical_subtitle_bins
+        from .physical.allocator import allocate_words, WordAllocation
+        from .physical.coverage import audit_physical_coverage
+        from .mapping.time_mapper import SubtitleEvent as SE
+
+        engine = self._get_global_asr_engine()
+        engine.load_model()
+
+        # Transcribe the full audio
+        segments = engine.transcribe(audio, sample_rate)
+        if not isinstance(segments, list):
+            segments = [segments]
+
+        # Build GlobalTranscript
+        words = []
+        transcript_segments = []
+        word_idx = 0
+        for seg in segments:
+            seg_words = getattr(seg, "words", []) or []
+            seg_word_ids = []
+            for w in seg_words:
+                word_id = f"word-{word_idx:06d}"
+                word = GlobalWord(
+                    id=word_id, text=str(getattr(w, "word", "")),
+                    raw_start=float(getattr(w, "start", seg.start)),
+                    raw_end=float(getattr(w, "end", seg.end)),
+                    confidence=float(getattr(w, "confidence", 0.9)),
+                    source_window_id="global",
+                    segment_id=f"seg-{len(transcript_segments):03d}",
+                )
+                words.append(word)
+                seg_word_ids.append(word_id)
+                word_idx += 1
+            if not seg_words:
+                word_id = f"word-{word_idx:06d}"
+                word = GlobalWord(
+                    id=word_id, text=str(getattr(seg, "text", "")).strip(),
+                    raw_start=float(getattr(seg, "start", 0.0)),
+                    raw_end=float(getattr(seg, "end", 1.0)),
+                    confidence=0.9, source_window_id="global",
+                    segment_id=f"seg-{len(transcript_segments):03d}",
+                )
+                words.append(word)
+                seg_word_ids.append(word_id)
+                word_idx += 1
+            transcript_segments.append(GlobalTranscriptSegment(
+                id=f"seg-{len(transcript_segments):03d}",
+                text=str(getattr(seg, "text", "")).strip(),
+                raw_start=float(getattr(seg, "start", 0.0)),
+                raw_end=float(getattr(seg, "end", 1.0)),
+                word_ids=seg_word_ids,
+            ))
+
+        global_transcript = GlobalTranscript(
+            audio_duration=float(stats.duration_seconds),
+            words=words, segments=transcript_segments,
+            backend=engine.name,
+            status="ok" if words else "degraded",
+        )
+
+        timeline = getattr(shadow, "physical_timeline", None)
+        if timeline is None:
+            return [], {"recovery": {"status": "no_timeline"}, "physical_coverage": {"complete": False}}, global_transcript
+
+        bins = build_physical_subtitle_bins(timeline)
+        speaker_timeline = getattr(shadow, "global_speaker_timeline", None)
+        allocation_result = allocate_words(global_transcript, timeline, speaker_timeline=speaker_timeline, subtitle_bins=bins)
+
+        # Build events from accepted allocations
+        events = []
+        for idx, alloc in enumerate(allocation_result.allocations, 1):
+            w = alloc.word
+            ev = SE(idx, w.raw_start, w.raw_end, w.text,
+                    source_word_ids=[w.id],
+                    physical_spans=[s.to_dict() for s in alloc.physical_spans] if alloc.physical_spans else [],
+                    speaker_id=alloc.speaker_id, speaker_source=alloc.speaker_source)
+            events.append(ev)
+
+        coverage = audit_physical_coverage(bins, allocation_result.allocations)
+        diag = {"physical_coverage": coverage.to_dict(), "recovery": {"status": "recovered" if coverage.complete else "incomplete"}}
+
+        # Tail recovery
+        if not coverage.complete and coverage.recovery_ranges:
+            try:
+                recovered_allocations = []
+                for rec_range in coverage.recovery_ranges:
+                    ss = int(rec_range.start * sample_rate)
+                    es = int(min(rec_range.end, stats.duration_seconds) * sample_rate)
+                    if es <= ss:
+                        continue
+                    seg_audio = audio[ss:es]
+                    recovery_segs = engine.transcribe(seg_audio, sample_rate)
+                    for rseg in recovery_segs:
+                        rwlist = getattr(rseg, "words", []) or []
+                        for rw in rwlist:
+                            wid = f"word-rec-{word_idx:06d}"
+                            # Clamp recovery word times to the audio duration
+                            r_start = min(rec_range.start + float(getattr(rw, "start", 0.0)), stats.duration_seconds)
+                            r_end = min(rec_range.start + float(getattr(rw, "end", 0.1)), stats.duration_seconds)
+                            rword = GlobalWord(id=wid, text=str(getattr(rw, "word", "")),
+                                               raw_start=r_start,
+                                               raw_end=max(r_start + 0.01, r_end),
+                                               confidence=float(getattr(rw, "confidence", 0.9)),
+                                               source_window_id="recovery", segment_id="recovery")
+                            words.append(rword)
+                            word_idx += 1
+                            events.append(SE(len(events)+1, rword.raw_start, rword.raw_end, rword.text,
+                                             source_word_ids=[rword.id], speaker_source="recovery"))
+                            # Build recovered allocation for re-audit
+                            rec_span = type("_Span", (), {"to_dict": lambda s=None, r=rec_range: {"physical_clip_id": getattr(r, "physical_clip_id", "clip-000001"), "start": r.start, "end": r.end}})()
+                            recovered_allocations.append(WordAllocation(word=rword, physical_spans=(rec_span,), accepted=True))
+
+                coverage2 = audit_physical_coverage(bins, list(allocation_result.allocations) + recovered_allocations)
+                diag["physical_coverage"] = coverage2.to_dict()
+                if coverage2.complete:
+                    diag["recovery"]["status"] = "recovered"
+                    global_transcript = GlobalTranscript(audio_duration=stats.duration_seconds, words=words, segments=transcript_segments, backend=engine.name, status="ok")
+                else:
+                    diag["recovery"]["status"] = "incomplete"
+                    global_transcript = GlobalTranscript(audio_duration=stats.duration_seconds, words=words, segments=transcript_segments, backend=engine.name, status="degraded")
+            except Exception as exc:
+                diag["recovery"] = {"status": "failed", "error": str(exc)}
+                global_transcript = GlobalTranscript(audio_duration=stats.duration_seconds, words=words, segments=transcript_segments, backend=engine.name, status="degraded")
+        elif not coverage.complete:
+            global_transcript = GlobalTranscript(audio_duration=stats.duration_seconds, words=words, segments=transcript_segments, backend=engine.name, status="degraded")
+
+        return events, diag, global_transcript
+
     @staticmethod
     def _classify_global_diagnostics(diagnostics: dict) -> str:
         """Extract the worst failure category from global diagnostics."""
@@ -3158,6 +3302,7 @@ class Pipeline:
         vocals_path: Path,
         chunk_label: str = "",
         parallel_vad: bool = True,
+        run_asr: bool = True,
     ) -> tuple:
         """处理单个音频块的完整管线 (VAD → Merge → ASR → Refine → Mapping)
 
@@ -3327,7 +3472,10 @@ class Pipeline:
             "asr", description=f"{chunk_label}语音识别",
             total_items=len(merged_segments),
         )
-        asr_results = self._run_asr(audio, sample_rate, merged_segments)
+        if run_asr:
+            asr_results = self._run_asr(audio, sample_rate, merged_segments)
+        else:
+            asr_results = [[] for _ in merged_segments]
         self._progress.finish_stage()
 
         # ---- 文本降级说话人分离 ----
