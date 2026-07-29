@@ -22,8 +22,6 @@ def main(host: str, port: int, no_browser: bool, reload: bool):
     在浏览器中打开图形界面，提供文件上传、Pipeline 进度
     可视化、字幕预览编辑和格式导出功能。
     """
-    import uvicorn
-
     if not no_browser:
         import webbrowser
         import threading
@@ -37,6 +35,8 @@ def main(host: str, port: int, no_browser: bool, reload: bool):
 
     # 启动方式
     if reload:
+        import uvicorn
+
         uvicorn.run(
             "vocal_subtitle.webui.app:create_app",
             host=host,
@@ -47,8 +47,10 @@ def main(host: str, port: int, no_browser: bool, reload: bool):
         )
     else:
         from .app import create_app
+        from .runtime import run_server
+
         app = create_app()
-        uvicorn.run(app, host=host, port=port, log_level="info")
+        run_server(app, host=host, port=port)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import PlainTextResponse
 
+from ..asr.funasr_manager import (
+    FunASRPrepareError,
+    ensure_funasr_ready,
+    funasr_status,
+)
 from ..config import ConfigLoader, PipelineConfig
 from ..mapping.time_mapper import SubtitleEvent
 from ..pipeline import Pipeline
@@ -32,6 +37,7 @@ from .models import (
     FingerprintInfo,
     FingerprintListResponse,
     FingerprintMatchResponse,
+    FunASRPrepareRequest,
     HealthScoreDetail,
     HealthTrendEntry,
     ImpactPredictionInfo,
@@ -39,12 +45,14 @@ from .models import (
     ProfileInfo,
     ShadowModeStatus,
     ShadowModeToggleRequest,
+    SubtitleBatchEditRequest,
     SubtitleEditRequest,
     SubtitleEventResponse,
     TaskHistoryItem,
     TaskStatus,
 )
 from .websocket import ws_manager
+from .subtitle_editing import SubtitleBatchEditError, apply_batch_edit
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +355,27 @@ async def download_speaker_model(model_id: str, token: str = Form(default="")):
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
+@router.get("/asr/funasr/status")
+async def get_funasr_status(model: str = Query(default="")):
+    """Check FunASR package/model readiness without network access."""
+    return await asyncio.to_thread(funasr_status, model)
+
+
+@router.post("/asr/funasr/prepare")
+async def prepare_funasr(body: FunASRPrepareRequest):
+    """Install FunASR if needed and download only a missing local model."""
+    try:
+        return await asyncio.to_thread(ensure_funasr_ready, body.model)
+    except FunASRPrepareError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Unexpected FunASR preparation failure")
+        raise HTTPException(
+            status_code=500,
+            detail="FunASR 准备失败，请查看服务日志",
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Pipeline 执行
 # ---------------------------------------------------------------------------
@@ -589,6 +618,12 @@ async def run_pipeline(
     loader = ConfigLoader()
     config = loader.load_profile(profile)
     config = loader.merge_with_overrides(config, **overrides_dict)
+
+    if config.asr.engine == "funasr":
+        try:
+            await asyncio.to_thread(ensure_funasr_ready, config.asr.model)
+        except FunASRPrepareError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     # 计算文件哈希和配置哈希
     file_hash = compute_file_hash(pipeline_input)
@@ -1135,14 +1170,55 @@ def _subtitle_event_to_payload(event: SubtitleEvent) -> dict:
     return event.to_dict()
 
 
-def _rewrite_subtitle_files(task_result: Dict[str, Any]) -> None:
+def _load_completed_subtitle_task(task_id: str) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Load a completed task from memory, falling back to persisted history."""
+    task = _task_store.get(task_id)
+    if not task:
+        hist_task = _task_history.get(task_id)
+        if hist_task and hist_task.get("result_json"):
+            try:
+                result = json.loads(hist_task["result_json"])
+            except (json.JSONDecodeError, TypeError) as exc:
+                raise HTTPException(status_code=404, detail=f"Task not found: {task_id}") from exc
+            task = {
+                "task_id": task_id,
+                "status": "completed",
+                "result": result,
+            }
+            _task_store[task_id] = task
+        else:
+            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+
+    if task.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="Task not completed yet")
+    result = task.get("result", {})
+    if not isinstance(result, dict) or not isinstance(result.get("events"), list):
+        raise HTTPException(status_code=404, detail="Task has no subtitle events")
+    return task, result
+
+
+def _persist_subtitle_result(task_id: str, task: Dict[str, Any], result: Dict[str, Any]) -> None:
+    """Persist the final event list used by the UI and every subtitle export."""
+    task["status"] = "completed"
+    task["result"] = result
+    _task_store[task_id] = task
+    _task_history.update(
+        task_id,
+        status="completed",
+        result_json=json.dumps(result, default=str),
+    )
+
+
+def _rewrite_subtitle_files(task_result: Dict[str, Any]) -> List[str]:
     """将内存中的字幕事件写回磁盘文件
 
     同时更新主字幕文件和 LLM 字幕文件（如果存在）。
     """
     events = task_result.get("events", [])
     if not events:
-        return
+        return []
+
+    errors: List[str] = []
 
     # 重建 SubtitleEvent 对象
     from ..mapping.subtitle_builder import SubtitleBuilder, SubtitleRule
@@ -1177,6 +1253,7 @@ def _rewrite_subtitle_files(task_result: Dict[str, Any]) -> None:
             logger.info("Rewrote subtitle file: %s", subtitle_path)
         except Exception as e:
             logger.warning("Failed to rewrite subtitle file: %s", e)
+            errors.append(f"主字幕文件: {e}")
 
     # 写回 LLM 字幕文件（如果存在）
     llm_path = task_result.get("llm_subtitle_path")
@@ -1187,33 +1264,60 @@ def _rewrite_subtitle_files(task_result: Dict[str, Any]) -> None:
             logger.info("Rewrote LLM subtitle file: %s", llm_path)
         except Exception as e:
             logger.warning("Failed to rewrite LLM subtitle file: %s", e)
+            errors.append(f"LLM 字幕文件: {e}")
+    return errors
+
+
+@router.put("/subtitle/{task_id}/batch")
+async def update_subtitles_batch(task_id: str, body: SubtitleBatchEditRequest):
+    """批量修改最终字幕事件并同步历史与导出文件。"""
+    task, result = _load_completed_subtitle_task(task_id)
+    try:
+        updated_events = apply_batch_edit(
+            result.get("events", []),
+            action=body.action,
+            indexes=body.indexes,
+            speaker_id=body.speaker_id,
+            speaker_label=body.speaker_label,
+            separator=body.separator,
+        )
+    except SubtitleBatchEditError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # The edited event list is authoritative for the final version.  Keep
+    # intermediate ASR/LLM source files out of this state transition.
+    result["events"] = updated_events
+    result["subtitle_count"] = len(updated_events)
+    stats = result.get("stats")
+    if isinstance(stats, dict):
+        stats["subtitle_count"] = len(updated_events)
+    _persist_subtitle_result(task_id, task, result)
+
+    rewrite_errors = _rewrite_subtitle_files(result)
+    if rewrite_errors:
+        raise HTTPException(
+            status_code=500,
+            detail="字幕事件已更新，但文件写回失败: " + "; ".join(rewrite_errors),
+        )
+    return {
+        "status": "ok",
+        "action": body.action,
+        "events": updated_events,
+        "subtitle_count": len(updated_events),
+    }
 
 
 @router.put("/subtitle/{task_id}/{index}")
 async def update_subtitle(task_id: str, index: int, body: SubtitleEditRequest):
     """编辑单条字幕文本，并自动保存到磁盘文件"""
-    task = _task_store.get(task_id)
-    if not task:
-        # 尝试从历史记录中查找
-        hist_task = _task_history.get(task_id)
-        if hist_task and hist_task.get("result_json"):
-            try:
-                r = json.loads(hist_task["result_json"])
-                # 构建临时任务结构
-                task = {"task_id": task_id, "status": "completed", "result": r}
-                _task_store[task_id] = task
-            except (json.JSONDecodeError, TypeError):
-                raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
-        else:
-            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
-
-    result = task.get("result", {})
+    task, result = _load_completed_subtitle_task(task_id)
     events = result.get("events", [])
 
     for e in events:
         if e["index"] == index:
             e["text"] = body.text
             e["original_text"] = None  # 手动编辑后清除原始文本标记
+            _persist_subtitle_result(task_id, task, result)
             # 自动保存到磁盘
             _rewrite_subtitle_files(result)
             return {"status": "ok", "index": index, "text": body.text}

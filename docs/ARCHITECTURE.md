@@ -1,6 +1,6 @@
 # Vocal Subtitle 技术架构文档
 
-> 版本: 0.1.0 | 更新日期: 2026-07-07 | 协议: MIT
+> 版本: 0.1.0 | 更新日期: 2026-07-29 | 协议: MIT
 
 ---
 
@@ -11,15 +11,16 @@
 3. [模块详细设计](#3-模块详细设计)
 4. [数据流与数据模型](#4-数据流与数据模型)
 5. [七层优化方案 (Plan 0-7)](#5-七层优化方案-plan-0-7)
-6. [引擎抽象与多态设计](#6-引擎抽象与多态设计)
-7. [运行模式架构](#7-运行模式架构)
-8. [缓存架构](#8-缓存架构)
-9. [Web GUI 与实时通信](#9-web-gui-与实时通信)
-10. [LLM 集成架构](#10-llm-集成架构)
-11. [自适应反馈学习 (Phase 5)](#11-自适应反馈学习-phase-5)
-12. [配置系统](#12-配置系统)
-13. [测试架构](#13-测试架构)
-14. [部署与运维](#14-部署与运维)
+6. [物理优先架构 (Phase 0-3)](#6-物理优先架构-phase-0-3)
+7. [引擎抽象与多态设计](#7-引擎抽象与多态设计)
+8. [运行模式架构](#8-运行模式架构)
+9. [缓存架构](#9-缓存架构)
+10. [Web GUI 与实时通信](#10-web-gui-与实时通信)
+11. [LLM 集成架构](#11-llm-集成架构)
+12. [自适应反馈学习 (Phase 5)](#12-自适应反馈学习-phase-5)
+13. [配置系统](#13-配置系统)
+14. [测试架构](#14-测试架构)
+15. [部署与运维](#15-部署与运维)
 
 ---
 
@@ -39,7 +40,10 @@ Vocal Subtitle 是一个**模块化多阶段音频处理管道**，将原始音�
 ├──────────────────────────────────────────────────┤
 │  处理层    │ Separation │ VAD │ Merging │ ASR │ Mapping  │
 ├──────────────────────────────────────────────────┤
-│  优化层    │ Plans 0-7 │ LLM Optimizer │ Diarization  │
+│  处理层    │ Separation │ VAD │ Merging │ ASR │ Mapping  │
+│            │ Diarization │ Physical IR               │
+├──────────────────────────────────────────────────┤
+│  优化层    │ Plans 0-7 │ LLM Optimizer │ Feedback   │
 ├──────────────────────────────────────────────────┤
 │  基础设施  │ diskcache │ SQLite │ structlog │ ffmpeg  │
 ├──────────────────────────────────────────────────┤
@@ -127,6 +131,20 @@ def run(input_path, output_path, **overrides):
     # Stage 5: 时间轴映射 + 事件去重
     events = time_mapper.map(all_fragments)
 
+    # 物理优先中间层 (Phase 0-3)
+    # 构建全局坐标系，将碎片化时间轴统一映射
+    coord_mapper = CoordinateMapper(chunks)
+    # 构建物理时间线 IR，承载所有证据
+    physical_timeline = build_timeline_from_context(chunks)
+    # 词级物理分配
+    word_allocations = allocate_words(events, physical_timeline)
+    # 修复迟到词
+    word_allocations = repair_late_words(word_allocations)
+    # 物理覆盖审计
+    coverage_report = audit_physical_coverage(word_allocations, physical_timeline)
+    # 物理字幕分箱
+    bins = build_physical_subtitle_bins(word_allocations, physical_timeline)
+
     # 后处理层 (顺序经精心设计)
     # 0. 事件级说话人聚类 (全局集合, 替代段级 diarization)
     events = event_speaker_clustering.cluster(events, audio, sr)
@@ -176,7 +194,29 @@ pipeline.py ──────────────────────�
     │   ├── feature_extractor.py ─── librosa
     │   ├── speaker_clusterer.py ─── scikit-learn
     │   ├── speaker_embedding.py ─── SpeechBrain / pyannote
-    │   └── role_labeler.py ─── LLM API
+    │   ├── speaker_fusion.py ─── 全局 + 局部融合
+    │   ├── pyannote_engine.py ─── pyannote.audio
+    │   ├── speaker_change.py ─── 说话人变更检测
+    │   ├── role_labeler.py ─── LLM API
+    │   ├── turn_reconciler.py
+    │   ├── canonicalizer.py
+    │   └── model_registry.py
+    │
+    ├── physical/
+    │   ├── coordinate.py ─── CoordinateMapper (全局坐标系)
+    │   ├── timeline.py ─── PhysicalTimeline (物理时间线)
+    │   ├── ir.py ─── GlobalTranscript / GlobalWord (全局 IR)
+    │   ├── ir_cache.py ─── IR 持久化缓存
+    │   ├── evidence_adapter.py ─── 证据适配 (VAD/ffmpeg/diarization → IR)
+    │   ├── allocator.py ─── 词级物理分配 + 迟到词修复
+    │   ├── coverage.py ─── 物理覆盖审计
+    │   ├── subtitle_bins.py ─── 物理字幕分箱
+    │   ├── events.py ─── GlobalSubtitleEvent 构建
+    │   ├── context.py ─── 上下文窗口构建
+    │   ├── shadow.py ─── Shadow 制品构建
+    │   ├── boundary_arbiter.py
+    │   ├── noise_profile.py
+    │   └── word_alignment.py
     │
     ├── feedback/
     │   ├── aligner.py (SubtitleAligner)
@@ -195,6 +235,11 @@ pipeline.py ──────────────────────�
     │   ├── faster_whisper_engine.py ─── CTranslate2
     │   ├── whisper_cpp_engine.py ─── whisper.cpp subprocess
     │   ├── funasr_engine.py ─── FunASR
+    │   ├── funasr_manager.py ─── FunASR 自动准备
+    │   ├── whisperx_engine.py ─── WhisperX
+    │   ├── global_transcriber.py ─── 全局语言检测
+    │   ├── hallucination.py ─── 幻觉过滤
+    │   ├── local_recovery.py ─── 局部回退转录
     │   ├── boundary_refiner.py (Plan 4: 双向精修)
     │   ├── boundary_confidence.py (边界置信度评估)
     │   ├── boundary_reasr.py (滑动窗口冗余 ASR)
@@ -204,7 +249,18 @@ pipeline.py ──────────────────────�
     ├── mapping/
     │   ├── time_mapper.py (TimeMapper, SubtitleEvent)
     │   ├── subtitle_builder.py ─── pysubs2
-    │   └── end_time_validator.py
+    │   ├── strict_segmenter.py (严格分段)
+    │   ├── boundary_projection.py (边界投影)
+    │   ├── semantic_fragments.py (语义片段)
+    │   ├── event_ops.py (事件操作)
+    │   ├── quality_report.py (质量报告)
+    │   ├── display_timeline.py (展示时间轴)
+    │   ├── finalize.py (最终化)
+    │   ├── final_validator.py (最终校验)
+    │   ├── event_constraints.py (事件约束)
+    │   ├── overlap_export.py (重叠导出)
+    │   ├── end_time_validator.py
+    │   └── llm_guard.py
     │
     ├── utils/
     │   ├── audio_utils.py (AudioUtils)
@@ -219,12 +275,14 @@ pipeline.py ──────────────────────�
     │
     └── webui/
         ├── app.py (FastAPI factory)
-        ├── api.py (REST endpoints, ~1705 行)
+        ├── api.py (REST endpoints, ~2691 行)
         ├── websocket.py (WebSocketManager)
         ├── cli_runner.py (GUI 启动入口)
+        ├── runtime.py (运行时辅助)
+        ├── subtitle_editing.py (字幕批量编辑)
         ├── models.py (Pydantic)
         └── static/
-            ├── index.html (SPA frontend)
+            ├── index.html (SPA frontend, ~4207 行)
             └── speaker-embedding-guide.html
 ```
 
@@ -251,6 +309,7 @@ pipeline.py ──────────────────────�
 - 离线模式三种路径：单块路径、多块路径 (宏观切块后)、骨架分段路径
 - 宏观切块 (Plan 0) 在 Stage 1 (人声分离) 之后处理——先获取完整人声，再 >2s 静音处切分，每个 chunk 独立走 Stage 2-4.5，最后全局拼接
 - 后处理统一入口 `_post_process_events()`：事件级聚类 → 帧级无缝 → LLM 合并 → 声学校验 → LLM 优化，三种路径共用
+- 物理优先中间层 (Phase 0-3) 在处理后和后处理之间运行，提供全局坐标系的统一视图
 - `events` 属性公开暴露，供反馈学习模块 (feedback/) 获取自动版字幕用于对齐分析
 
 ### 3.2 配置管理 (`config.py`)
@@ -398,6 +457,7 @@ Stage 4: [Segments + Audio] → ASR → [List[TranscriptionSegment]]
 Stage 4.5: [TranscriptionSegments] → Boundary Refiner + Confidence + ReASR + Arbitration
           → [Refined TranscriptionSegments]
 Stage 5: [All Segments] → TimeMapper → [List[SubtitleEvent]] (去重 + 跨块拼接)
+Phase 0-3: [SubtitleEvents + Chunks] → Physical Layer → [PhysicalTimeline + WordAllocations + Bins]
 Post 0: [SubtitleEvents] → Event Speaker Clustering → [Events with speaker_id]
 Post 1: [SubtitleEvents] → Frame Seamless Stitching (Plan 6) → [Seamless Events]
 Post 2: [SubtitleEvents] → LLM Merge Engine (Plan 5) → [Merged Events]
@@ -623,11 +683,11 @@ subtitle:
   max_stitch_gap: 0.12       # 最多衔接 120ms (超过为自然停顿)
 ```
 
-### 5.8 Plan 7: 声学标尺校验 (`acoustic_validator.py`)
+### 5.8 Plan 7: 方向感知声学校验门控 (`acoustic_validator.py`)
 
 **问题**: 多轮后处理后的字幕边界可能与原始音频的物理静音不一致。
 
-**方案**: 以 ffmpeg silencedetect 声学骨架为物理基准 (ground truth)，双向 snap 修正。
+**方案**: 以 ffmpeg silencedetect 声学骨架为物理基准，方向感知查询 + 置信度门控，防止无证据跨静音改写。
 
 ```
                     ffmpeg 声学骨架 (物理基准)
@@ -638,31 +698,114 @@ SubtitleEvent:  [0.7s ────── 2.2s]
                       │                  │
                 snap 到 0.53s      snap 到 2.30s
 
-修正逻辑:
-- start 向前吸附: 如果 ffmpeg 骨架 start 早于字幕 start ≤ max_snap_distance
-  → snap start = skeleton.start + snap_start_margin
-- end 向后吸附: 如果 ffmpeg 骨架 end 晚于字幕 end ≤ max_snap_distance
-  → snap end = skeleton.end - snap_end_margin
-- RMS override: 如果能量 RMS > threshold，跳过吸附 (避免切到语音中间)
+方向感知逻辑:
+- start 端点: 只向后找下一个 speech_start (不对前一个 speech_end 吸附)
+- end 端点: 只向前找上一个 speech_end (禁止用后续 speech_start 跨静音延长)
+- 置信度门控: 有可靠词级时间戳 + 置信度 ≥ 阈值 → 保留 ASR 边界
+- 静音确认: 无音频时只允许 ≤30ms 结构性吸附
+- 诊断追踪: 每个端点决策纳入 boundary_diagnostics[] (方向/原因/原始/候选/距离)
 ```
 
 **配置**:
 ```yaml
 acoustic_validation:
   enabled: true
-  skeleton_mode: true            # 骨架分段独立处理
+  skeleton_mode: true
   max_snap_distance: 0.15
   snap_start_margin: 0.03
   snap_end_margin: 0.003
   allow_end_shorten: true
   allow_start_pull_earlier: true
+  preserve_high_confidence: true    # 置信度门控
+  max_structural_snap: 0.03         # 静音确认最大吸附
 ```
 
 ---
 
-## 6. 引擎抽象与多态设计
+## 6. 物理优先架构 (Phase 0-3)
 
-### 6.1 设计模式
+### 6.1 设计动机
+
+Pipeline 各阶段在不同坐标系中运行：宏观切块产生时间偏移，VAD 按全局音频时间，ASR 按片段内偏移。Phase 0-3 引入 **物理优先原则**：首先构建一个与原始输入对齐的全局物理时间线，然后将所有阶段的证据适配到该时间线上，最后用物理约束驱动字幕分箱。
+
+### 6.2 核心概念
+
+```
+原始音频 → ffmpeg/VAD 证据 → PhysicalTimeline (IR)
+                │
+    ┌───────────┼───────────┐
+    │           │           │
+CoordinateMapper  WordAllocation  CoverageAudit
+(统一坐标系)      (词级分配)       (覆盖审计)
+                   │
+            PhysicalSubtitleBin
+              (物理分箱)
+```
+
+### 6.3 模块职责
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| CoordinateMapper | `physical/coordinate.py` | 全局坐标系：将 macro chunk 内部的局部时间映射回原始音频时间 |
+| PhysicalTimeline | `physical/timeline.py` | 物理时间线：承载分离后音频、VAD 语音段、ffmpeg 骨干证据 |
+| GlobalTranscript | `physical/ir.py` | 全局 IR：统一表达跨块 ASR 转录、词级时间戳、说话人信息 |
+| EvidenceAdapter | `physical/evidence_adapter.py` | 证据适配：VAD segments, ffmpeg 骨架, diarization → IR |
+| WordAllocation | `physical/allocator.py` | 词级物理分配：将每个词的 start/end 分配到物理跨度，修复迟到词 |
+| CoverageAudit | `physical/coverage.py` | 物理覆盖审计：检测遮盖空白、过分配、欠分配 |
+| SubtitleBins | `physical/subtitle_bins.py` | 物理字幕分箱：按语音间隔自动分箱，替代启发式事件操作 |
+| BoundaryArbiter | `physical/boundary_arbiter.py` | 物理边界仲裁：当多个证据源对边界有分歧时做裁决 |
+| ShadowBuilder | `physical/shadow.py` | Shadow 制品构建：为对比评估生成影子输出 |
+| IRCache | `physical/ir_cache.py` | IR 持久化缓存：避免重建物理时间线 |
+| NoiseProfile | `physical/noise_profile.py` | 噪声画像 |
+| WordAlignment | `physical/word_alignment.py` | 词级对齐 |
+
+### 6.4 数据流
+
+```
+MacroChunk[]
+    │
+    ├→ CoordinateMapper.map(chunk) → MacroChunkCoordinate (原始音频时间)
+    │
+    ├→ EvidenceAdapter.adapt_ffmpeg(chunk) → SpeechEvidenceSpan[]
+    ├→ EvidenceAdapter.adapt_speech_segments(chunk) → SpeechEvidenceSpan[]
+    ├→ EvidenceAdapter.adapt_diarization(chunk) → GlobalSpeakerTimeline
+    │
+    ├→ PhysicalTimeline.build(chunks, coordinates) → PhysicalTimeline
+    │
+    ├→ GlobalTranscript.adapt(transcription_segments) → GlobalTranscript
+    │      └→ GlobalWord[] (每个词带全局开始/结束时间)
+    │
+    ├→ WordAllocation.allocate(words, timeline) → WordAllocation[]
+    │      ├→ repair_late_words() → 修复迟到词
+    │      └→ PhysicalSpan[] (每个词绑定的物理区间)
+    │
+    ├→ CoverageAudit.audit(allocations, timeline) → PhysicalCoverageReport
+    │      └→ 遮盖空白 / 过分配 / 欠分配 诊断
+    │
+    └→ SubtitleBins.build(allocations, timeline) → PhysicalSubtitleBin[]
+           └→ assign_word_to_bin() → 每词归入唯一 bin
+           └→ build_events(bins) → GlobalSubtitleEvent[]
+```
+
+### 6.5 配置
+
+```yaml
+physical:
+  enabled: true
+  coordinate_preserve_offset: true   # 保留 macro chunk 偏移信息
+  ir_cache_enabled: true             # IR 持久化缓存
+  allocation_repair_late: true       # 修复迟到词
+  allocation_repair_window: 0.5      # 迟到词修复窗口 (s)
+  coverage_min_threshold: 0.9        # 最小覆盖率阈值
+  coverage_max_overlap: 0.05         # 最大过分配比例
+  bin_min_silence_gap: 0.3           # 分箱最小静音间隔 (s)
+```
+
+---
+
+## 7. 引擎抽象与多态设计
+
+### 7.1 设计模式
 
 所有处理引擎遵循 **策略模式 (Strategy Pattern)**，通过 ABC 抽象基类定义统一接口：
 
@@ -678,7 +821,7 @@ DiarizationEngine (ABC)
 └── SpeakerDiarizer (agglomerative clustering)
 ```
 
-### 6.2 引擎延迟初始化
+### 7.2 引擎延迟初始化
 
 Pipeline 使用工厂方法模式 + 懒加载，避免启动时加载所有 ML 模型：
 
@@ -693,7 +836,7 @@ def _get_separation_engine(self) -> SeparationEngine:
     return self._separation_engine
 ```
 
-### 6.3 引擎选型矩阵
+### 7.3 引擎选型矩阵
 
 | 标准 | UVR (BS-RoFormer) | Spleeter | Open-Unmix | Silero VAD | WebRTC VAD | faster-whisper | whisper.cpp | FunASR |
 |------|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
@@ -707,9 +850,9 @@ def _get_separation_engine(self) -> SeparationEngine:
 
 ---
 
-## 7. 运行模式架构
+## 8. 运行模式架构
 
-### 7.1 离线模式 (Offline, 默认)
+### 8.1 离线模式 (Offline, 默认)
 
 ```
 输入 → [完整 Pipeline] → 输出
@@ -719,7 +862,7 @@ def _get_separation_engine(self) -> SeparationEngine:
      → 适合：音视频文件批处理
 ```
 
-### 7.2 流式模式 (Streaming)
+### 8.2 流式模式 (Streaming)
 
 ```
 实时音频流 → [滑动窗口 Pipeline] → 实时字幕流
@@ -742,7 +885,7 @@ def _get_separation_engine(self) -> SeparationEngine:
 | Plan 6 (帧无缝) | ✅ | ✅ | 窗口内 |
 | Plan 7 (声学标尺) | ✅ | ❌ | 无全局标尺 |
 
-### 7.3 骨架分段模式 (Skeleton Mode)
+### 8.3 骨架分段模式 (Skeleton Mode)
 
 跳过 VAD，直接以 ffmpeg 声学骨架为分段依据：
 
@@ -752,7 +895,7 @@ def _get_separation_engine(self) -> SeparationEngine:
      → 适用场景: 纯净人声、已有高质量人声分离结果
 ```
 
-### 7.4 降级模式
+### 8.4 降级模式
 
 通过 `degradation.mode` 控制应对异常：
 
@@ -768,9 +911,9 @@ degradation:
 
 ---
 
-## 8. 缓存架构
+## 9. 缓存架构
 
-### 8.1 三层缓存
+### 9.1 三层缓存
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -791,7 +934,7 @@ degradation:
 └─────────────────────────────────────────────────────┘
 ```
 
-### 8.2 缓存键生成
+### 9.2 缓存键生成
 
 ```python
 # L1 分离缓存键
@@ -804,7 +947,7 @@ cache_key = f"{segment_hash}:{model}:{language}:{beam_size}"
 cache_key = f"{file_hash}:{config_hash}"
 ```
 
-### 8.3 缓存目录结构
+### 9.3 缓存目录结构
 
 ```
 cache/
@@ -820,9 +963,9 @@ cache/
 
 ---
 
-## 9. Web GUI 与实时通信
+## 10. Web GUI 与实时通信
 
-### 9.1 系统架构
+### 10.1 系统架构
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -851,7 +994,7 @@ cache/
 └──────────────────────────────────────────────────┘
 ```
 
-### 9.2 REST API 端点 (46 个)
+### 10.2 REST API 端点 (46+)
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
@@ -901,7 +1044,7 @@ cache/
 | POST | `/api/feedback/conflicts/{profile_name}/resolve` | 手动解决震荡 |
 | POST | `/api/feedback/impact/preview` | 预览参数变更影响 |
 
-### 9.3 WebSocket 协议
+### 10.3 WebSocket 协议
 
 **连接**: `ws://host:port/ws/tasks/{task_id}`
 
@@ -918,7 +1061,7 @@ cache/
 **跨线程广播**:
 Pipeline 在后台线程运行，WebSocket 广播在主事件循环执行。`WebSocketManager.broadcast()` 使用 `asyncio.run_coroutine_threadsafe()` 实现跨线程安全投递。
 
-### 9.4 前端 (SPA)
+### 10.4 前端 (SPA)
 
 单文件 SPA (`static/index.html`)，零构建步骤：
 - 暗色主题 UI
@@ -931,9 +1074,9 @@ Pipeline 在后台线程运行，WebSocket 广播在主事件循环执行。`Web
 
 ---
 
-## 10. LLM 集成架构
+## 11. LLM 集成架构
 
-### 10.1 LLM 功能矩阵
+### 11.1 LLM 功能矩阵
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -956,7 +1099,7 @@ Pipeline 在后台线程运行，WebSocket 广播在主事件循环执行。`Web
 └─────────────────┴───────────────────────────────────┘
 ```
 
-### 10.2 LLM Client (`llm_subtitle_optimizer/llm_client.py`)
+### 11.2 LLM Client (`llm_subtitle_optimizer/llm_client.py`)
 
 **协议**: OpenAI 兼容 API (Chat Completions)
 
@@ -980,7 +1123,7 @@ Pipeline 在后台线程运行，WebSocket 广播在主事件循环执行。`Web
 - API 不可用 → 自动降级到规则/本地模式
 - 超时控制 (llm_timeout: 15s)
 
-### 10.3 Subtitle Optimizer Agent Loop
+### 11.3 Subtitle Optimizer Agent Loop
 
 ```
 输入: 原始字幕
@@ -1011,9 +1154,9 @@ Pipeline 在后台线程运行，WebSocket 广播在主事件循环执行。`Web
 
 ---
 
-## 11. 自适应反馈学习 (Phase 5)
+## 12. 自适应反馈学习 (Phase 5)
 
-### 11.1 概述
+### 12.1 概述
 
 自适应反馈学习引擎允许系统从用户修订的字幕中学习偏好，自动调整管道参数。用户上传手动修订的字幕文件 (.srt/.ass) + 原始音频，系统自动对齐、分析差异，并将学习到的参数偏离量持久化到用户配置中。
 
@@ -1028,7 +1171,7 @@ Pipeline 在后台线程运行，WebSocket 广播在主事件循环执行。`Web
 - Few-shot 示例缓存 (为 LLM 合并/优化提供适配用户的上下文)
 - CLI + Web GUI 双通道
 
-### 11.2 模块架构
+### 12.2 模块架构
 
 ```
 vocal_subtitle/feedback/
@@ -1054,7 +1197,7 @@ vocal_subtitle/feedback/
                              #   JSON 配置存储 / 备份 / 回滚
 ```
 
-### 11.3 学习流程
+### 12.3 学习流程
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -1095,7 +1238,7 @@ vocal_subtitle/feedback/
 └─────────────────────────────────────────────────────┘
 ```
 
-### 11.4 CLI 接口
+### 12.4 CLI 接口
 
 ```bash
 # 学习用户偏好
@@ -1118,7 +1261,7 @@ vocal-subtitle feedback export -o my_profile.yaml
 vocal-subtitle feedback import -i friend_profile.yaml
 ```
 
-### 11.5 Web GUI 集成
+### 12.5 Web GUI 集成
 
 反馈学习通过 REST API + WebSocket 集成到 Web GUI：
 
@@ -1140,7 +1283,7 @@ vocal-subtitle feedback import -i friend_profile.yaml
 - `POST /api/feedback/conflicts/{profile}/resolve` — 手动解决震荡
 - `POST /api/feedback/impact/preview` — 预览参数变更影响
 
-### 11.6 配置项
+### 12.6 配置项
 
 ```yaml
 feedback:
@@ -1171,9 +1314,9 @@ feedback:
 
 ---
 
-## 12. 配置系统
+## 13. 配置系统
 
-### 12.1 配置解析流程
+### 13.1 配置解析流程
 
 ```
 configs/*.yaml ──→ ConfigLoader.load_profile(name)
@@ -1195,7 +1338,7 @@ configs/*.yaml ──→ ConfigLoader.load_profile(name)
     │         └─────────────────────┘
 ```
 
-### 12.2 配置覆盖机制
+### 13.2 配置覆盖机制
 
 ```python
 # 优先级: CLI 参数 > overrides > 模板 YAML > 默认值
@@ -1209,7 +1352,7 @@ pipeline.run(
 )
 ```
 
-### 12.3 YAML 模板变体
+### 13.3 YAML 模板变体
 
 5 个场景模板的关键差异：
 
@@ -1224,65 +1367,101 @@ pipeline.run(
 
 ---
 
-## 13. 测试架构
+## 14. 测试架构
 
-### 13.1 测试分层
+### 14.1 测试分层
 
 ```
 tests/
-├── test_pipeline.py            # 全链路集成测试
-├── test_cli.py                 # CLI 端到端测试
-├── test_webui.py               # Web GUI API 测试
-├── test_audio_preprocessor.py  # 预处理模块测试
-├── test_acoustic_validator.py  # 声学标尺校验测试
-├── test_macro_chunker.py       # 宏观切块测试
-├── test_end_time_fixes.py      # 结束时间修正测试
-├── test_streaming.py           # 流式架构测试
-├── test_session_manager.py     # 会话管理器测试
-├── test_feedback.py            # 反馈学习模块测试
-├── test_separation/            # 分离引擎测试 (3 文件)
+├── test_pipeline.py               # 全链路集成测试
+├── test_cli.py                    # CLI 端到端测试
+├── test_webui.py                  # Web GUI API 测试
+├── test_webui_batch.py            # Web GUI 批量操作测试
+├── test_webui_runtime.py          # Web GUI 运行时测试
+├── test_subtitle_editing.py       # 字幕批量编辑测试
+├── test_feedback.py               # 反馈学习模块测试
+├── test_phase_five.py             # Phase 5 集成测试
+├── test_global_asr_path.py        # 全局 ASR 路径测试
+├── test_audio_preprocessor.py     # 降噪模块测试
+├── test_acoustic_validator.py     # 声学校验测试
+├── test_acoustic_gold.py          # 声学 Gold 标准测试
+├── test_macro_chunker.py          # 宏观切块测试
+├── test_end_time_fixes.py         # 结束时间修正测试
+├── test_streaming.py              # 流式架构测试
+├── test_session_manager.py        # 会话管理器测试
+├── test_persistence_manager.py    # 持久化管理器测试
+├── test_benchmark_rollout.py      # Benchmark 展开测试
+├── test_quality_benchmark.py      # 质量基准测试
+├── test_compare_timeline.py       # 时间轴对比测试
+├── test_deployment_defaults.py    # 部署默认值测试
+├── test_install_scripts.py        # 安装脚本测试
+├── test_language_policy.py        # 语言策略测试
+├── test_separation/               # 分离引擎测试 (3 文件)
 │   ├── test_uvr_engine.py
 │   ├── test_spleeter_engine.py
 │   └── test_openunmix_engine.py
-├── test_vad/                   # VAD 引擎测试 (5 文件)
+├── test_vad/                      # VAD 引擎测试 (5 文件)
 │   ├── test_silero_vad.py
 │   ├── test_webrtc_vad.py
 │   ├── test_ten_vad.py
 │   ├── test_ffmpeg_vad.py
 │   └── test_boundary_fusion.py
-├── test_merging/               # 合并模块测试 (2 文件)
+├── test_merging/                  # 合并模块测试 (3 文件)
 │   ├── test_merge_strategy.py
-│   └── test_llm_merge_engine.py
-├── test_asr/                   # ASR 引擎测试 (4 文件)
+│   ├── test_llm_merge_engine.py
+│   └── test_semantic_window.py
+├── test_asr/                      # ASR 引擎测试 (8 文件)
 │   ├── test_faster_whisper_engine.py
 │   ├── test_whisper_cpp_engine.py
 │   ├── test_funasr_engine.py
-│   └── test_boundary_refiner.py
-├── test_mapping/               # 映射模块测试 (2 文件)
+│   ├── test_funasr_manager.py
+│   ├── test_whisperx_engine.py
+│   ├── test_boundary_refiner.py
+│   ├── test_hallucination.py
+│   └── test_local_recovery.py
+├── test_mapping/                  # 映射模块测试 (8 文件)
 │   ├── test_time_mapper.py
-│   └── test_subtitle_builder.py
-├── test_diarization/           # 说话人分离测试 (3 文件)
+│   ├── test_subtitle_builder.py
+│   ├── test_boundary_projection.py
+│   ├── test_display_timeline.py
+│   ├── test_event_ops.py
+│   ├── test_finalize.py
+│   ├── test_overlap_export.py
+│   └── test_semantic_fragments.py
+├── test_diarization/              # 说话人分离测试 (10 文件)
 │   ├── test_feature_extractor.py
 │   ├── test_speaker_clusterer.py
-│   └── test_role_labeler.py
-├── test_utils/                 # 工具模块测试 (3 文件)
+│   ├── test_speaker_embedding.py
+│   ├── test_speaker_fusion.py
+│   ├── test_pyannote_engine.py
+│   ├── test_speaker_change.py
+│   ├── test_role_labeler.py
+│   ├── test_turn_reconciler.py
+│   ├── test_model_registry.py
+│   └── test_global_pipeline_contract.py
+├── test_physical/                 # 物理层测试 (11 文件)
+│   ├── test_coordinate.py
+│   ├── test_timeline.py
+│   ├── test_ir.py
+│   ├── test_ir_cache.py
+│   ├── test_evidence_adapter.py
+│   ├── test_context.py
+│   ├── test_shadow.py
+│   ├── test_boundary_arbiter.py
+│   ├── test_noise_profile.py
+│   ├── test_word_alignment.py
+│   ├── test_coverage_recovery.py
+│   └── test_phase_three.py
+├── test_utils/                    # 工具模块测试 (5 文件)
 │   ├── test_audio_utils.py
 │   ├── test_cache_manager.py
-│   └── test_gpu_detector.py
-├── benchmarks/                 # Benchmark 场景 (6 目录)
-│   ├── podcast_conversation/
-│   ├── studio_monologue/
-│   ├── hotel_front_desk/
-│   ├── music_voiceover/
-│   ├── outdoor_interview/
-│   └── meeting_3_speakers/
-└── fixtures/                   # 测试配置 + 数据 fixtures
-    ├── audio/
-    ├── expected/
-    └── configs/
+│   ├── test_gpu_detector.py
+│   └── test_hf_token_store.py
+├── benchmarks/                    # Benchmark 场景 (6 目录)
+└── fixtures/                      # 测试配置 + 数据 fixtures
 ```
 
-### 13.2 测试策略
+### 14.2 测试策略
 
 - **单元测试**: 每个引擎/模块独立测试，使用 mock 外部依赖
 - **集成测试**: `test_pipeline.py` 覆盖完整 Pipeline
@@ -1292,9 +1471,9 @@ tests/
 
 ---
 
-## 14. 部署与运维
+## 15. 部署与运维
 
-### 14.1 安装方式
+### 15.1 安装方式
 
 | 方式 | 命令 | 适用场景 |
 |------|------|---------|
@@ -1304,13 +1483,13 @@ tests/
 | 全量安装 | `pip install -e ".[all]"` | 开发/全功能 |
 | Docker | (计划中) | 服务器部署 |
 
-### 14.2 系统依赖
+### 15.2 系统依赖
 
 - **ffmpeg >= 4.4**: 音频解码、视频解复用、silencedetect
   - 依赖方式: subprocess 调用 (非动态链接，规避 GPL 传染)
 - **libsndfile**: Open-Unmix 音频 I/O (可选)
 
-### 14.3 GPU 支持
+### 15.3 GPU 支持
 
 ```python
 # gpu_detector.py 自动检测
@@ -1327,7 +1506,7 @@ def get_best_device() -> Device:
 - float16 在 CPU 上不可用，自动降级 int8
 - Spleeter 仅支持 Python < 3.12 (已于 2022 年停维)
 
-### 14.4 日志系统
+### 15.4 日志系统
 
 基于 `structlog` 的结构化日志：
 
@@ -1348,7 +1527,7 @@ JSON 格式输出示例：
 }
 ```
 
-### 14.5 运行时目录
+### 15.5 运行时目录
 
 ```
 Vocal_Subtitle/
@@ -1373,53 +1552,65 @@ Vocal_Subtitle/
 
 | 文件 | 行数 | 职责 |
 |------|------|------|
-| `vocal_subtitle/pipeline.py` | 3537 | 管道编排器 |
-| `vocal_subtitle/config.py` | 1110 | 配置管理 (24 个 dataclass) |
-| `vocal_subtitle/webui/api.py` | 2452 | REST API (46 端点) |
-| `vocal_subtitle/cli.py` | 817 | CLI 命令行入口 (含 feedback 子命令组) |
-| `vocal_subtitle/acoustic_validator.py` | 823 | 声学标尺校验 + 诊断报告 (Plan 7) |
+| `vocal_subtitle/pipeline.py` | 4,628 | 管道编排器 |
+| `vocal_subtitle/webui/api.py` | 2,691 | REST API (46+ 端点) |
+| `vocal_subtitle/config.py` | 1,221 | 配置管理 (24 个 dataclass) |
+| `vocal_subtitle/merging/llm_merge_engine.py` | 1,131 | LLM 语义合并 (Plan 5) + 帧级无缝 (Plan 6) |
+| `vocal_subtitle/acoustic_validator.py` | 1,037 | 方向感知声学校验门控 + 诊断报告 (Plan 7) |
+| `vocal_subtitle/cli.py` | 898 | CLI 命令行入口 (含 feedback 子命令组) |
+| `vocal_subtitle/mapping/strict_segmenter.py` | 789 | 严格分段器 |
 | `vocal_subtitle/merging/merge_strategy.py` | 728 | 合并策略 + Plan 3 段内预切分 |
-| `vocal_subtitle/merging/llm_merge_engine.py` | 1167 | LLM 语义合并 (Plan 5) + 帧级无缝 (Plan 6) |
-| `vocal_subtitle/utils/audio_utils.py` | 753 | 音频加载/转换/重采样 |
-| `vocal_subtitle/mapping/subtitle_builder.py` | 729 | 字幕构建输出 (SRT/VTT/ASS) |
+| `vocal_subtitle/mapping/subtitle_builder.py` | 720 | 字幕构建输出 (SRT/VTT/ASS) |
+| `vocal_subtitle/mapping/time_mapper.py` | 712 | 时间轴映射 + 事件去重 |
 | `vocal_subtitle/asr/boundary_arbitration.py` | 681 | LLM 语义仲裁器 |
-| `llm_subtitle_optimizer/optimizer.py` | 640 | LLM Agent Loop 优化器 |
-| `vocal_subtitle/diarization/speaker_clusterer.py` | 633 | 说话人聚类 |
-| `vocal_subtitle/mapping/time_mapper.py` | 562 | 时间轴映射 + 事件去重 |
+| `vocal_subtitle/diarization/speaker_clusterer.py` | 647 | 说话人聚类 |
+| `vocal_subtitle/llm_subtitle_optimizer/optimizer.py` | 640 | LLM Agent Loop 优化器 |
+| `vocal_subtitle/diarization/speaker_fusion.py` | 632 | 全局 + 局部说话人融合 |
+| `vocal_subtitle/diarization/speaker_embedding.py` | 604 | 声学嵌入提取 (SpeechBrain) |
 | `vocal_subtitle/asr/boundary_refiner.py` | 528 | ASR 边界双向精修 (Plan 4) |
-| `vocal_subtitle/diarization/speaker_embedding.py` | 522 | 声学嵌入提取 (SpeechBrain) |
+| `vocal_subtitle/asr/boundary_reasr.py` | 483 | 滑动窗口冗余 ASR |
 | `vocal_subtitle/audio_preprocessor.py` | 477 | 预 VAD 降噪 (Stage 1.5) |
-| `vocal_subtitle/asr/boundary_reasr.py` | 459 | 滑动窗口冗余 ASR |
-| `vocal_subtitle/utils/persistence_manager.py` | 405 | 持久化文件管理 |
-| `vocal_subtitle/streaming.py` | 402 | 流式处理架构 |
+| `vocal_subtitle/asr/local_recovery.py` | 434 | 局部回退转录恢复 |
+| `vocal_subtitle/diarization/speaker_change.py` | 434 | 说话人变更检测 |
+| `vocal_subtitle/mapping/boundary_projection.py` | 433 | 边界投影 |
+| `vocal_subtitle/diarization/pyannote_engine.py` | 415 | pyannote 全局聚类 |
 | `vocal_subtitle/asr/boundary_confidence.py` | 400 | 边界置信度评估 (5维度) |
+| `vocal_subtitle/mapping/semantic_fragments.py` | 369 | 语义片段 |
 | `vocal_subtitle/diarization/feature_extractor.py` | 369 | 87维声学特征提取 |
-| `vocal_subtitle/utils/task_history.py` | 354 | SQLite 任务历史 |
+| `vocal_subtitle/mapping/event_ops.py` | 368 | 事件操作 |
+| `vocal_subtitle/webui/models.py` | 362 | Pydantic 数据模型 |
 | `vocal_subtitle/macro_chunker.py` | 345 | 宏观静音切块 (Plan 0) |
-| `vocal_subtitle/utils/cache_manager.py` | 345 | diskcache 缓存管理 |
+| `vocal_subtitle/asr/whisperx_engine.py` | 335 | WhisperX 引擎 |
 | `vocal_subtitle/diarization/role_labeler.py` | 334 | LLM 角色标注 |
+| `vocal_subtitle/streaming.py` | 316 | 流式处理架构 |
+| `vocal_subtitle/mapping/quality_report.py` | 294 | 质量报告 |
+| `vocal_subtitle/asr/global_transcriber.py` | 272 | 全局语言检测 |
 | `vocal_subtitle/vad/boundary_fusion.py` | 268 | 三方法边界融合 (Plan 2) |
-| `vocal_subtitle/utils/session_manager.py` | 245 | 会话管理 (hash 目录 + 去重) |
-| `vocal_subtitle/feedback/aligner.py` | 420 | 自动版/修订版字幕对齐 |
-| `vocal_subtitle/feedback/diff_analyzer.py` | 350 | 差异分析 + 参数归因 |
-| `vocal_subtitle/feedback/param_learner.py` | 220 | EMA 参数学习 |
-| `vocal_subtitle/feedback/audio_fingerprint.py` | 380 | 音频指纹提取与匹配 |
-| `vocal_subtitle/feedback/health_scorer.py` | 250 | 5维度健康度评分 |
-| `vocal_subtitle/feedback/conflict_detector.py` | 200 | 参数震荡检测 |
-| `vocal_subtitle/feedback/impact_estimator.py` | 180 | 变更影响预估 |
-| `vocal_subtitle/feedback/shadow_mode.py` | 230 | Shadow Mode 安全试错 |
-| `vocal_subtitle/feedback/user_profile.py` | 200 | 用户配置管理 |
-| `vocal_subtitle/webui/websocket.py` | 156 | WebSocket 实时通信 |
-| `vocal_subtitle/asr/text_normalizer.py` | 152 | 文本后处理标准化 |
-| `vocal_subtitle/webui/models.py` | 220 | Pydantic 数据模型 |
+| `vocal_subtitle/asr/hallucination.py` | 253 | 幻觉过滤 |
+| `vocal_subtitle/mapping/overlap_export.py` | 236 | 重叠导出 |
+| `vocal_subtitle/diarization/model_registry.py` | 231 | 说话人模型注册 |
+| `vocal_subtitle/diarization/turn_reconciler.py` | 227 | 话轮协调 |
+| `vocal_subtitle/webui/subtitle_editing.py` | 205 | 字幕批量编辑 |
+| `vocal_subtitle/asr/funasr_manager.py` | 205 | FunASR 自动安装 + 模型准备 |
+| `vocal_subtitle/llm_subtitle_optimizer/llm_client.py` | 202 | OpenAI 兼容 API 客户端 |
+| `vocal_subtitle/mapping/event_constraints.py` | 200 | 事件约束 |
+| `vocal_subtitle/mapping/finalize.py` | 198 | 最终化 |
+| `vocal_subtitle/mapping/display_timeline.py` | 197 | 展示时间轴 |
 | `vocal_subtitle/utils/progress.py` | 186 | 进度管理器 (CLI + WebSocket) |
 | `vocal_subtitle/utils/gpu_detector.py` | 185 | CUDA/MPS/CPU 自动检测 |
+| `vocal_subtitle/llm_subtitle_optimizer/aligner.py` | 179 | Diff 对齐修复 |
+| `vocal_subtitle/asr/text_normalizer.py` | 152 | 文本后处理标准化 |
+| `vocal_subtitle/diarization/canonicalizer.py` | 151 | 规范标签 |
 | `vocal_subtitle/utils/file_hasher.py` | 133 | SHA256 文件哈希 |
+| `vocal_subtitle/mapping/final_validator.py` | 126 | 最终校验 |
 | `vocal_subtitle/mapping/end_time_validator.py` | 104 | 结束时间校验 |
 | `vocal_subtitle/utils/logger.py` | 103 | structlog 结构化日志 |
-| `llm_subtitle_optimizer/llm_client.py` | 202 | OpenAI 兼容 API 客户端 |
-| `llm_subtitle_optimizer/aligner.py` | 179 | Diff 对齐修复 |
-| `install.sh` | 1111 | 一键安装脚本 |
+| `vocal_subtitle/mapping/llm_guard.py` | 55 | LLM 保护 |
+| `vocal_subtitle/physical/` (15 文件) | 4,187 | 物理优先中间层 (Phase 0-3) |
+| `vocal_subtitle/feedback/` (10 文件) | 4,184 | 自适应反馈学习引擎 (Phase 5) |
+| `vocal_subtitle/utils/` (其余文件) | ~2,500 | 工具层 (缓存/会话/持久化/音频) |
+| `vocal_subtitle/webui/websocket.py` | 156 | WebSocket 实时通信 |
+| `install.sh` | 1,111 | 一键安装脚本 |
 
 ## 附录 B: 外部依赖协议合规
 

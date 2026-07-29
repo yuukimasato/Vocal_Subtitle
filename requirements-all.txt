@@ -3,16 +3,22 @@
 # =============================================================
 # 安装: pip install -r requirements-all.txt
 #
-# 包含: CLI + GPU 加速 + Silero VAD + LLM 优化 + 本地 NLP +
-#       UVR 分离 + Spleeter + Open-Unmix + WebRTC VAD +
-#       faster-whisper ASR + Web GUI + 说话人分离 + 开发工具
+# 包含: CLI + GPU 加速 + Silero VAD + WebRTC VAD + LLM 优化 +
+#       本地 NLP + UVR 分离 + Spleeter + Open-Unmix +
+#       faster-whisper ASR + FunASR ASR + Web GUI + 说话人分离 +
+#       说话人嵌入 + 开发工具
 #
 # 说明:
-#   - Spleeter 仅在 Python < 3.12 时安装
+#   - Spleeter 仅在 Python < 3.12 时安装（已于 2022 年停维）
 #   - torch/torchaudio 请根据 GPU 情况选择安装源:
-#       GPU (CUDA): pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126
-#       CPU:        pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-#       或使用 install.sh 自动检测
+#       GPU (CUDA 12.6): pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126
+#       GPU (CUDA 12.4): pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+#       GPU (CUDA 11.8): pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
+#       GPU (ROCm):      pip install torch torchaudio --index-url https://download.pytorch.org/whl/rocm6
+#       CPU:             pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+#       Apple Silicon:   pip install torch torchaudio (标准 PyPI, MPS 已内置)
+#       或使用 install.sh 自动检测 GPU 并选择合适的源
+#   - WhisperX 需要单独安装: pip install whisperx (不在 pyproject.toml extras 中)
 # =============================================================
 
 # ---- 核心数值计算 ----
@@ -39,25 +45,28 @@ pyyaml>=6.0
 # ---- 磁盘缓存 ----
 diskcache>=5.6
 
-# ---- GPU 显存监控 ----
+# ---- GPU 显存监控 (Python < 3.12) ----
 GPUtil>=1.4; python_version < '3.12'
+
+# ---- GPU 推理加速 (CTranslate2) ----
+ctranslate2>=4.0
 
 # ---- 核心 ASR 引擎 (CTranslate2 加速) ----
 faster-whisper>=1.0
 
+# ---- FunASR 中文 ASR 引擎 (WebUI 选择时自动准备模型) ----
+funasr>=1.0
+
 # ---- Silero VAD 引擎 (PyTorch) ----
 torch>=2.0
 torchaudio>=2.0
-
-# ---- GPU 推理加速 ----
-ctranslate2>=4.0
 
 # ---- LLM 字幕优化 + 云端合并裁决 ----
 openai>=1.0
 tenacity>=8.0
 json-repair>=0.25
 
-# ---- 本地 NLP 语义合并 (方案五 Fast-Slow Path, CPU 推理) ----
+# ---- 本地 NLP 语义合并 (方案五 Fast-Slow Path, CPU 推理 ~120MB) ----
 sentence-transformers>=3.0
 
 # ---- UVR 高品质分离 (BS-RoFormer, 默认推荐) ----

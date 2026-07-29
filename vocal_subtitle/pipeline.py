@@ -190,6 +190,10 @@ class Pipeline:
         # ASR 路径追踪
         self._requested_asr_path: str = ""
 
+    # Direct full-audio ASR is intentionally bounded until the existing
+    # GlobalTranscriber windowing path is promoted to the main route.
+    GLOBAL_ASR_MAX_DURATION_SECONDS = 180.0
+
     # ------------------------------------------------------------------
     # ASR path resolution (global vs. segmented)
     # ------------------------------------------------------------------
@@ -250,8 +254,19 @@ class Pipeline:
         engine = self._get_global_asr_engine()
         engine.load_model()
 
+        language = self._resolved_language_or_config()
+        if language is None:
+            detector = getattr(engine, "detect_language", None)
+            if callable(detector):
+                try:
+                    language = detector(audio, sample_rate)
+                except Exception as exc:
+                    logger.warning("Global language detection failed: %s", exc)
+            if language:
+                self._resolved_language = language
+
         # Transcribe the full audio
-        segments = engine.transcribe(audio, sample_rate)
+        segments = engine.transcribe(audio, sample_rate, language=language)
         if not isinstance(segments, list):
             segments = [segments]
 
@@ -390,7 +405,9 @@ class Pipeline:
                     if es <= ss:
                         continue
                     seg_audio = audio[ss:es]
-                    recovery_segs = engine.transcribe(seg_audio, sample_rate)
+                    recovery_segs = engine.transcribe(
+                        seg_audio, sample_rate, language=language
+                    )
                     for rseg in recovery_segs:
                         rwlist = getattr(rseg, "words", []) or []
                         for rw in rwlist:
@@ -477,7 +494,11 @@ class Pipeline:
         return msg
 
     def _resolve_asr_path(self) -> str:
-        """Determine whether to use global or segmented ASR path."""
+        """Determine the requested offline ASR route.
+
+        ``auto`` is kept as a distinct route so the caller can record whether
+        global ASR actually succeeded or whether it fell back to segmented.
+        """
         if self.config.mode == "streaming":
             return "segmented"
         # Respect explicit override from merge_with_overrides or config
@@ -489,7 +510,7 @@ class Pipeline:
         if self.config.asr.global_asr.enabled:
             routing = self.config.asr.global_asr.routing
             if routing in ("global", "auto"):
-                return "global"
+                return routing
         return "segmented"
 
     @staticmethod
@@ -506,9 +527,99 @@ class Pipeline:
     def _is_usable_full_pipeline_cache(self, cache_entry: dict) -> bool:
         """Check whether a cached full-pipeline result matches the current ASR path."""
         cached_path = cache_entry.get("stats", {}).get("asr_path", "")
-        if self._requested_asr_path == "global":
+        requested_path = self._resolve_asr_path()
+        if requested_path in ("global", "auto"):
             return cached_path == "global"
-        return True
+        # Old cache entries did not carry asr_path; retain compatibility for
+        # explicitly requested segmented/legacy runs.
+        return cached_path in ("", "legacy", "legacy_degraded")
+
+    def _run_early_detection(
+        self,
+        audio: np.ndarray,
+        sample_rate: int,
+        vocals_path: Path,
+    ) -> Tuple[PipelineContext, List[SpeechSegment], Optional[Dict], NoiseProfile]:
+        """Run one full-audio detector pass for the physical shadow.
+
+        This deliberately reuses the existing detector implementations and
+        does not change their thresholds or default fusion/denoise policy.
+        """
+        chunk_duration = len(audio) / max(sample_rate, 1)
+        ctx = PipelineContext(
+            audio_path=vocals_path,
+            audio=audio,
+            sample_rate=sample_rate,
+        )
+        noise = AudioUtils.estimate_noise_floor_per_chunk(
+            audio, sample_rate, chunk_duration=chunk_duration,
+        )
+        noise_profile = NoiseProfile(
+            noise_rms=noise["noise_rms"],
+            speech_threshold=noise["speech_threshold"],
+            is_noisy_environment=noise["is_noisy_environment"],
+        )
+        ctx.noise_profile = noise_profile
+
+        silero_segments = self._run_vad(audio, sample_rate)
+        ctx.silero_segments = list(silero_segments)
+        ffmpeg_result = None
+        if self.config.vad.ffmpeg_enabled:
+            ffmpeg_result = self._run_ffmpeg_vad(vocals_path, ctx, "[global] ")
+        ctx.ffmpeg_unified_result = ffmpeg_result
+        if ffmpeg_result:
+            ctx.ffmpeg_segments = list(ffmpeg_result.get("coarse_speech", []) or [])
+
+        selected_segments = list(silero_segments)
+        if ffmpeg_result and self.config.fusion.enabled:
+            from .vad.boundary_fusion import BoundaryFusion
+
+            fused_segments = BoundaryFusion(self.config.fusion).fuse(
+                silero_segments,
+                ffmpeg_result.get("coarse_speech", []) or [],
+                audio,
+                sample_rate,
+            )
+            ctx.fused_segments = list(fused_segments)
+            selected_segments = list(fused_segments)
+
+        ctx.add_diagnostic(
+            "Global shadow detection: silero=%d, ffmpeg=%d, fused=%d"
+            % (
+                len(ctx.silero_segments),
+                len(ctx.ffmpeg_segments),
+                len(ctx.fused_segments),
+            )
+        )
+        return ctx, selected_segments, ffmpeg_result, noise_profile
+
+    def _build_physical_shadow(
+        self,
+        audio: np.ndarray,
+        sample_rate: int,
+        vocals_path: Path,
+        context: PipelineContext,
+        vad_segments: List[SpeechSegment],
+        ffmpeg_result: Optional[Dict],
+        noise_profile: NoiseProfile,
+    ):
+        """Adapt detector output into one validated physical shadow."""
+        from .physical.shadow import build_shadow_artifacts
+
+        duration = len(audio) / max(sample_rate, 1)
+        shadow = build_shadow_artifacts([context], duration)
+        timeline_errors = shadow.physical_timeline.validate()
+        if timeline_errors:
+            raise ValueError("invalid global physical timeline: " + "; ".join(timeline_errors))
+
+        # Keep detector artifacts available to the alignment and acoustic
+        # validation stages without changing the ShadowBuildResult schema.
+        shadow.ffmpeg_unified_result = ffmpeg_result
+        shadow.vad_segments = vad_segments
+        shadow.noise_profile = noise_profile
+        shadow.diagnostics.setdefault("early_detection", list(context.diagnostics))
+        shadow.diagnostics["statistics"] = dict(shadow.statistics)
+        return shadow
 
     @staticmethod
     def _clamp_to_physical_envelopes(events: list) -> list:
@@ -961,13 +1072,21 @@ class Pipeline:
                         subtitle_text = cached_subtitle_path.read_text(encoding="utf-8")
                         output_path.write_text(subtitle_text, encoding="utf-8")
 
-                        # 重建 result dict
-                        stats = PipelineStats(
-                            input_path=input_path,
-                            duration_seconds=cached_task.get("total_duration_seconds", 0),
-                            total_time=0,
-                            segment_count=cached_result.get("segment_count", 0),
-                            subtitle_count=cached_result.get("subtitle_count", 0),
+                        # 重建 result dict，并保留实际 ASR 路径诊断。
+                        cached_stats = cached_result.get("stats", {})
+                        stats = PipelineStats.from_dict(
+                            input_path,
+                            cached_stats if isinstance(cached_stats, dict) else {},
+                            duration_seconds=cached_task.get(
+                                "total_duration_seconds", 0
+                            ),
+                        )
+                        stats.total_time = 0
+                        stats.segment_count = cached_result.get(
+                            "segment_count", stats.segment_count
+                        )
+                        stats.subtitle_count = cached_result.get(
+                            "subtitle_count", stats.subtitle_count
                         )
 
                         cached_events = [
@@ -989,6 +1108,7 @@ class Pipeline:
 
         start_time = time.time()
         stats = PipelineStats(input_path=input_path, duration_seconds=0)
+        self._resolved_language = None
 
         # 解析活跃模块（受降级模式控制）
         active = self._resolve_active_modules()
@@ -1099,8 +1219,114 @@ class Pipeline:
                     macro_chunks = None
                     self._progress.finish_stage()
 
+        # ---- ASR 路径分发：global/auto 优先于 skeleton_mode ----
+        if "audio" not in locals() or "sample_rate" not in locals():
+            audio, sample_rate = AudioUtils.load_audio(vocals_path)
+            stats.duration_seconds = len(audio) / sample_rate
+
+        requested_asr_path = self._resolve_asr_path()
+        stats.asr_path = "legacy" if requested_asr_path == "segmented" else requested_asr_path
+        global_completed = False
+
+        if requested_asr_path in ("global", "auto"):
+            stats.global_attempted = True
+            global_diag = {
+                "route": requested_asr_path,
+                "duration_seconds": stats.duration_seconds,
+            }
+            stats.global_diagnostics = dict(global_diag)
+            duration_limit = self.GLOBAL_ASR_MAX_DURATION_SECONDS
+            if stats.duration_seconds > duration_limit:
+                global_diag.update({
+                    "status": "skipped",
+                    "reason": "duration_limit",
+                    "max_duration_seconds": duration_limit,
+                })
+                stats.global_diagnostics = global_diag
+                stats.fallback_category = "resource_unavailable"
+                stats.fallback_reason = "duration_limit"
+                if requested_asr_path == "global":
+                    stats.asr_path = "global"
+                    raise RuntimeError(
+                        "Global ASR is limited to %.1fs in this phase; "
+                        "long-audio windowing is not enabled" % duration_limit
+                    )
+                stats.asr_path = "legacy_degraded"
+            else:
+                try:
+                    shadow_context, shadow_vad, shadow_ffmpeg, shadow_noise = (
+                        self._run_early_detection(audio, sample_rate, vocals_path)
+                    )
+                    shadow = self._build_physical_shadow(
+                        audio,
+                        sample_rate,
+                        vocals_path,
+                        shadow_context,
+                        shadow_vad,
+                        shadow_ffmpeg,
+                        shadow_noise,
+                    )
+                    events, global_diag, global_transcript = (
+                        self._run_global_transcription_path(
+                            audio=audio,
+                            sample_rate=sample_rate,
+                            shadow=shadow,
+                            stats=stats,
+                            vad_segments=shadow_vad,
+                            ffmpeg_result=shadow_ffmpeg,
+                            noise_profile=shadow_noise,
+                        )
+                    )
+                    global_diag = dict(global_diag or {})
+                    global_diag["shadow"] = {
+                        "status": getattr(shadow, "status", "unknown"),
+                        "diagnostics": getattr(shadow, "diagnostics", {}),
+                        "statistics": getattr(shadow, "statistics", {}),
+                    }
+                    stats.global_diagnostics = global_diag
+                    coverage = global_diag.get("physical_coverage", {})
+                    if not events:
+                        raise RuntimeError("global ASR returned no usable events")
+                    if not self._is_usable_global_transcript(global_transcript):
+                        raise RuntimeError("global ASR returned an invalid transcript")
+                    if coverage and coverage.get("complete") is False:
+                        raise RuntimeError("global ASR physical coverage is incomplete")
+
+                    stats.asr_path = "global"
+                    stats.segment_count = len(global_transcript.segments)
+                    stats.subtitle_count = len(events)
+                    events = self._post_process_events(
+                        events,
+                        vocals_path,
+                        audio,
+                        sample_rate,
+                        stats,
+                        ffmpeg_unified_result=shadow_ffmpeg,
+                    )
+                    global_completed = True
+                except Exception as exc:
+                    category = self._classify_global_failure(exc)
+                    reason = self._safe_failure_reason(exc)
+                    stats.fallback_category = category
+                    stats.fallback_reason = reason
+                    stats.global_diagnostics = {
+                        **stats.global_diagnostics,
+                        "status": "failed",
+                        "failure_category": category,
+                        "failure_reason": reason,
+                    }
+                    logger.warning(
+                        "Global ASR failed (%s): %s", category, reason,
+                    )
+                    if requested_asr_path == "global":
+                        stats.asr_path = "global"
+                        raise
+                    stats.asr_path = "legacy_degraded"
+
         # ---- 骨架分段独立处理模式（跳过 VAD 分段，按声学骨架逐段处理） ----
-        if self.config.acoustic_validation.skeleton_mode:
+        if global_completed:
+            pass
+        elif self.config.acoustic_validation.skeleton_mode:
             logger.info("Skeleton segmentation mode enabled")
             if 'audio' not in dir() or 'sample_rate' not in dir():
                 audio, sample_rate = AudioUtils.load_audio(vocals_path)
@@ -3782,7 +4008,7 @@ class Pipeline:
         audio: np.ndarray,
         sample_rate: int,
         vocals_path: Path,
-    ) -> Tuple[List[Any], int]:
+    ) -> Tuple[List[Any], int, Optional[Dict]]:
         """按声学骨架分段，每段独立处理（骨架分段模式）。
 
         与 VAD 分段不同，此方法使用 ffmpeg silencedetect 的物理
@@ -3796,7 +4022,7 @@ class Pipeline:
         4. 拼接所有事件
 
         Returns:
-            (events: List[SubtitleEvent], total_segment_count: int)
+            (events: List[SubtitleEvent], total_segment_count: int, ffmpeg_result: Optional[Dict])
         """
         import tempfile
 
@@ -3831,7 +4057,7 @@ class Pipeline:
                 audio=audio, sample_rate=sample_rate,
                 vocals_path=vocals_path, chunk_label="",
             )
-            return events, seg_count
+            return events, seg_count, ffmpeg_result
 
         # 过滤过短的段（< min_speech_duration 的孤立爆发可能是噪音）
         filtered_skeleton = [

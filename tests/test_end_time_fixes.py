@@ -249,8 +249,8 @@ class TestEndTimePrecision:
         # end=1.2 落在语音段 (1.05, 2.0) 内 → is_end_in_speech=True → 不触发吸附
         assert report["snapped_ends"] == 0
 
-    def test_acoustic_validator_snap_end_extends_when_truncated(self):
-        """切尾场景：end 在静音且后面有语音 → 延长"""
+    def test_acoustic_validator_does_not_extend_end_across_silence(self):
+        """静音间隙中的 end 不得延长到后续语音段"""
         from vocal_subtitle.acoustic_validator import (
             AcousticValidationConfig,
             AcousticValidator,
@@ -265,7 +265,8 @@ class TestEndTimePrecision:
 
         # 骨架: 0.0-1.0 (语音), 1.3-2.0 (语音), 中间 0.3s 静音
         # 字幕 end=0.85 → 在语音段内 → 不触发
-        # 字幕 end=1.15 → 在静音区 1.0-1.3，nearest_end=1.3 → 延长
+        # 字幕 end=1.15 → 在静音区 1.0-1.3。
+        # 旧逻辑会把 end 吸附到 1.3 附近，跨过整段静音；新逻辑禁止延长。
         skeleton = [(0.0, 1.0), (1.3, 2.0)]
         events = [
             SubtitleEvent(index=1, start=0.5, end=1.15, text="Truncated end"),
@@ -273,12 +274,12 @@ class TestEndTimePrecision:
         result, report = validator._physical_snap_validation(
             events, skeleton, audio=None, sample_rate=16000,
         )
-        # end=1.15 在静音区，nearest_end=1.3 > 1.15
-        # candidate = 1.3 - 0.003 = 1.297 > 1.15 → 执行吸附
-        # 距离 = |1.3 - 1.15| = 0.15 ≤ max_snap_distance(0.25) → 允许吸附
-        # 0.15 > 0.03 → 需要 RMS 确认（无 audio → rms_confirmed=True）
-        assert report["snapped_ends"] == 1
-        assert result[0].end > 1.15
+        assert report["snapped_ends"] == 0
+        assert result[0].end == pytest.approx(1.15)
+        assert any(
+            item["reason"] == "silence_not_confirmed"
+            for item in report["boundary_diagnostics"]
+        )
 
     # ------------------------------------------------------------------
     # TimeMapper: 反向能量扫描（_find_speech_end_backward）

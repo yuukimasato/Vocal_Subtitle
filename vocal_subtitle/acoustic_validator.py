@@ -116,7 +116,11 @@ class AcousticValidator:
         # Step 3: 生成诊断报告
         if cfg.generate_report:
             diagnostic = self.generate_diagnostic_report(validated, speech_skeleton)
+            snap_events_flagged = report.get("events_flagged", [])
             report.update(diagnostic)
+            report["events_flagged"] = snap_events_flagged + diagnostic.get(
+                "events_flagged", []
+            )
 
         logger.info(
             "Acoustic validation: %d events, %d snapped (start=%d, end=%d), "
@@ -183,43 +187,68 @@ class AcousticValidator:
             "snapped_ends": 0,
             "rms_overrides": 0,
             "skipped_low_confidence": 0,
+            "skipped_high_confidence": 0,
             "events_flagged": [],
+            "boundary_diagnostics": [],
         }
 
         for event in events:
-            # ---- Start 校验（双向吸附） ----
-            is_start_in_speech, nearest_start = _find_boundary_in_skeleton(
-                event.start, speech_skeleton,
+            # ---- Start 校验（只向后寻找下一个语音起点） ----
+            is_start_in_speech, next_start, _ = _find_directional_boundary(
+                event.start, speech_skeleton, "start",
             )
-            if not is_start_in_speech:
-                distance = abs(nearest_start - event.start)
-                if distance <= cfg.max_snap_distance:
-                    # 当前逻辑：snap to nearest_start + margin（start 延后）
-                    if nearest_start > event.start:
+            if not is_start_in_speech and next_start is not None:
+                distance = abs(next_start - event.start)
+                if _preserve_reliable_asr_boundary(
+                    event, "start", self.config,
+                ):
+                    report["skipped_high_confidence"] += 1
+                    _record_boundary_diagnostic(
+                        report, event, "start", "skipped",
+                        reason="reliable_word_boundary",
+                        original_time=event.start,
+                        candidate_time=next_start,
+                        distance=distance,
+                    )
+                elif distance <= cfg.max_snap_distance:
+                    candidate_start = next_start + cfg.snap_start_margin
+                    if candidate_start < event.end:
                         rms_confirmed = True
-                        if audio is not None and distance > 0.03:
+                        if audio is None:
+                            rms_confirmed = distance <= 0.03
+                        elif distance > 0.03:
                             rms_confirmed = _rms_energy_check(
-                                audio, sample_rate, nearest_start,
+                                audio, sample_rate, next_start,
                                 window_ms=50, threshold_ratio=2.0,
                             )
                         if rms_confirmed:
-                            event.start = nearest_start + cfg.snap_start_margin
+                            original_time = event.start
+                            event.start = candidate_start
                             report["snapped_starts"] += 1
+                            _record_boundary_diagnostic(
+                                report, event, "start", "snapped",
+                                reason="next_speech_start",
+                                original_time=original_time,
+                                candidate_time=candidate_start,
+                                distance=distance,
+                            )
                         else:
                             report["rms_overrides"] += 1
-                    # ★ 新增：向前吸附。start 在语音爆发内部但更接近爆发起点时拉回
-                    elif cfg.allow_start_pull_earlier and nearest_start < event.start - 0.01:
-                        candidate_start = nearest_start + cfg.snap_start_margin
-                        if candidate_start < event.start:
-                            rms_confirmed = True
-                            if audio is not None and distance > 0.03:
-                                rms_confirmed = _rms_energy_check(
-                                    audio, sample_rate, nearest_start,
-                                    window_ms=50, threshold_ratio=2.0,
-                                )
-                            if rms_confirmed:
-                                event.start = candidate_start
-                                report["snapped_starts"] += 1
+                            _record_boundary_diagnostic(
+                                report, event, "start", "skipped",
+                                reason="rms_not_confirmed",
+                                original_time=event.start,
+                                candidate_time=candidate_start,
+                                distance=distance,
+                            )
+                    else:
+                        _record_boundary_diagnostic(
+                            report, event, "start", "skipped",
+                            reason="candidate_would_invalidate_event",
+                            original_time=event.start,
+                            candidate_time=candidate_start,
+                            distance=distance,
+                        )
                 elif distance <= 0.5:
                     report["events_flagged"].append({
                         "id": getattr(event, "index", 0),
@@ -227,44 +256,98 @@ class AcousticValidator:
                         "deviation_ms": round(distance * 1000),
                     })
 
-            # ---- End 校验（双向：可延长也可缩短） ----
-            is_end_in_speech, nearest_end = _find_boundary_in_skeleton(
-                event.end, speech_skeleton,
-            )
-            if not is_end_in_speech:
-                distance = abs(nearest_end - event.end)
-                candidate_end = nearest_end - cfg.snap_end_margin
+            # ---- End 校验（只向前寻找上一个语音终点） ----
+            (
+                is_end_in_speech,
+                previous_end,
+                containing_speech,
+            ) = _find_directional_boundary(event.end, speech_skeleton, "end")
+            if is_end_in_speech:
+                # End 在连续语音内部时，物理层只报告疑似截尾，不自动延长。
+                if containing_speech is not None:
+                    speech_end = containing_speech[1]
+                    remaining = speech_end - event.end
+                    if 0.02 < remaining <= cfg.max_snap_distance:
+                        _record_boundary_diagnostic(
+                            report, event, "end", "flagged",
+                            reason="possible_truncation_inside_speech",
+                            original_time=event.end,
+                            candidate_time=speech_end,
+                            distance=remaining,
+                        )
+                        report["events_flagged"].append({
+                            "id": getattr(event, "index", 0),
+                            "issue": "possible_truncation",
+                            "deviation_ms": round(remaining * 1000),
+                            "text_preview": getattr(event, "text", "")[:50],
+                        })
+                continue
+
+            if previous_end is not None:
+                distance = abs(event.end - previous_end)
+                candidate_end = previous_end - cfg.snap_end_margin
+
+                if _preserve_reliable_asr_boundary(
+                    event, "end", self.config,
+                ):
+                    report["skipped_high_confidence"] += 1
+                    _record_boundary_diagnostic(
+                        report, event, "end", "skipped",
+                        reason="reliable_word_boundary",
+                        original_time=event.end,
+                        candidate_time=candidate_end,
+                        distance=distance,
+                    )
+                    continue
 
                 if distance <= cfg.max_snap_distance:
-                    if candidate_end > event.end:
-                        # 延长：字幕结束在声学骨架边界之前（防切尾，现有行为）
-                        if nearest_end > event.end:
-                            event.end = candidate_end
-                            report["snapped_ends"] += 1
-                        elif distance < 0.05:
-                            # 微小偏差，微调
-                            event.end = candidate_end
-                            report["snapped_ends"] += 1
-                    # ★ 新增：缩短。字幕延伸到静音区时回缩到骨架边界
-                    elif cfg.allow_end_shorten and candidate_end < event.end - 0.03:
-                        # RMS 确认：被切区域确实为静音（防止截断真实语音）
-                        rms_confirmed = True
-                        if audio is not None:
-                            rms_confirmed = not _rms_energy_check(
-                                audio, sample_rate,
-                                (candidate_end + event.end) / 2,
-                                window_ms=50, threshold_ratio=2.0,
-                            )
+                    # End 只能回缩到前一个语音终点，禁止跨静音延长到后续语音。
+                    if (
+                        cfg.allow_end_shorten
+                        and candidate_end < event.end - 0.03
+                        and candidate_end > event.start
+                    ):
+                        rms_confirmed = _silence_confirmed(
+                            audio,
+                            sample_rate,
+                            (candidate_end + event.end) / 2,
+                            distance=distance,
+                        )
                         if rms_confirmed:
+                            original_time = event.end
                             event.end = candidate_end
                             report["snapped_ends"] += 1
                             report["ends_shortened"] = (
                                 report.get("ends_shortened", 0) + 1
                             )
-                elif distance <= 0.5 and nearest_end > event.end:
+                            _record_boundary_diagnostic(
+                                report, event, "end", "snapped",
+                                reason="previous_speech_end",
+                                original_time=original_time,
+                                candidate_time=candidate_end,
+                                distance=distance,
+                            )
+                        else:
+                            report["rms_overrides"] += 1
+                            _record_boundary_diagnostic(
+                                report, event, "end", "skipped",
+                                reason="silence_not_confirmed",
+                                original_time=event.end,
+                                candidate_time=candidate_end,
+                                distance=distance,
+                            )
+                    else:
+                        _record_boundary_diagnostic(
+                            report, event, "end", "skipped",
+                            reason="end_extension_forbidden",
+                            original_time=event.end,
+                            candidate_time=candidate_end,
+                            distance=distance,
+                        )
+                elif distance <= 0.5:
                     report["events_flagged"].append({
                         "id": getattr(event, "index", 0),
-                        "issue": "possible_truncation",
+                        "issue": "end_deviation",
                         "deviation_ms": round(distance * 1000),
                         "text_preview": (
                             getattr(event, "text", "")[:50]
@@ -376,10 +459,12 @@ class AcousticValidator:
             is_start_ok = _is_time_in_speech(event.start, speech_skeleton)
             if not is_start_ok:
                 report["start_in_silence"] += 1
-                _, nearest = _find_boundary_in_skeleton(
-                    event.start, speech_skeleton,
+                _, nearest, _ = _find_directional_boundary(
+                    event.start, speech_skeleton, "start",
                 )
-                if abs(nearest - event.start) > 0.2:
+                if nearest is not None and abs(nearest - event.start) > (
+                    self.config.flag_threshold_ms / 1000.0
+                ):
                     report["start_out_of_range"] += 1
 
             # 检查 end
@@ -401,10 +486,12 @@ class AcousticValidator:
                         ),
                     })
 
-                _, nearest = _find_boundary_in_skeleton(
-                    event.end, speech_skeleton,
+                _, nearest, _ = _find_directional_boundary(
+                    event.end, speech_skeleton, "end",
                 )
-                if abs(nearest - event.end) > 0.2:
+                if nearest is not None and abs(nearest - event.end) > (
+                    self.config.flag_threshold_ms / 1000.0
+                ):
                     report["end_out_of_range"] += 1
 
         # 计算健康度评分
@@ -438,6 +525,122 @@ def _find_boundary_in_skeleton(
 
     # t 在所有语音段之后
     return False, skeleton[-1][1] if skeleton else t
+
+
+def _find_directional_boundary(
+    t: float,
+    skeleton: List[Tuple[float, float]],
+    boundary_type: str,
+) -> Tuple[bool, Optional[float], Optional[Tuple[float, float]]]:
+    """Find the boundary appropriate for a start or end endpoint.
+
+    The legacy helper above returns the next boundary in a gap for both
+    endpoint types. That is valid for a start, but an end must use the
+    previous speech end or it can be extended across an entire silence gap.
+
+    Returns ``(inside_speech, candidate_boundary, containing_speech)``.
+    ``candidate_boundary`` is ``None`` when no boundary exists in the
+    direction that is safe for this endpoint.
+    """
+    if boundary_type not in {"start", "end"}:
+        raise ValueError("boundary_type must be 'start' or 'end'")
+
+    previous_end: Optional[float] = None
+    for speech_start, speech_end in skeleton:
+        if speech_start <= t <= speech_end:
+            return True, t, (speech_start, speech_end)
+        if t < speech_start:
+            if boundary_type == "start":
+                return False, speech_start, None
+            return False, previous_end, None
+        previous_end = speech_end
+
+    if boundary_type == "end":
+        return False, previous_end, None
+    return False, None, None
+
+
+def _boundary_confidence(event: object, boundary_type: str) -> Optional[float]:
+    """Return confidence for the word anchoring one event endpoint."""
+    words = list(getattr(event, "words", []) or [])
+    if words:
+        word = words[0] if boundary_type == "start" else words[-1]
+        value = getattr(word, "confidence", None)
+        if value is not None:
+            try:
+                return max(0.0, min(1.0, float(value)))
+            except (TypeError, ValueError):
+                pass
+
+    for name in (f"{boundary_type}_confidence", "boundary_confidence"):
+        value = getattr(event, name, None)
+        if value is not None:
+            try:
+                return max(0.0, min(1.0, float(value)))
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def _preserve_reliable_asr_boundary(
+    event: object,
+    boundary_type: str,
+    config: AcousticValidationConfig,
+) -> bool:
+    """Keep a reliable word-level endpoint ahead of physical snapping."""
+    words = list(getattr(event, "words", []) or [])
+    confidence = _boundary_confidence(event, boundary_type)
+    return bool(
+        words
+        and confidence is not None
+        and confidence >= config.confidence_threshold
+    )
+
+
+def _silence_confirmed(
+    audio: Optional[np.ndarray],
+    sample_rate: int,
+    time_point: float,
+    *,
+    distance: float,
+) -> bool:
+    """Confirm a gap is silent, with a conservative no-audio fallback."""
+    if audio is None:
+        # Without samples, only a tiny structural correction is safe.
+        return distance <= 0.03
+    return not _rms_energy_check(
+        audio, sample_rate, time_point,
+        window_ms=50, threshold_ratio=2.0,
+    )
+
+
+def _record_boundary_diagnostic(
+    report: Dict,
+    event: object,
+    boundary_type: str,
+    action: str,
+    *,
+    reason: str,
+    original_time: float,
+    candidate_time: Optional[float],
+    distance: Optional[float],
+) -> None:
+    """Append a compact, auditable endpoint decision."""
+    report.setdefault("boundary_diagnostics", []).append({
+        "id": getattr(event, "index", 0),
+        "boundary": boundary_type,
+        "action": action,
+        "reason": reason,
+        "original_time": round(float(original_time), 6),
+        "candidate_time": (
+            round(float(candidate_time), 6)
+            if candidate_time is not None else None
+        ),
+        "distance_ms": (
+            round(float(distance) * 1000, 3)
+            if distance is not None else None
+        ),
+    })
 
 
 def _is_time_in_speech(

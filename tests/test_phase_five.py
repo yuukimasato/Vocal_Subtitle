@@ -15,7 +15,7 @@ def test_offline_default_prefers_global_path():
 
     assert config.asr.global_asr.enabled is True
     assert config.asr.global_asr.routing == "auto"
-    assert pipeline._resolve_asr_path() == "global"
+    assert pipeline._resolve_asr_path() == "auto"
 
 
 def test_explicit_segmented_path_is_legacy():

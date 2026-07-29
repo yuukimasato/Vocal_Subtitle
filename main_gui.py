@@ -22,9 +22,8 @@ def main(host: str, port: int, no_browser: bool):
     import time
     import webbrowser
 
-    import uvicorn
-
     from vocal_subtitle.webui.app import create_app
+    from vocal_subtitle.webui.runtime import run_server
 
     if not no_browser:
         def _open_browser():
@@ -34,7 +33,7 @@ def main(host: str, port: int, no_browser: bool):
         threading.Thread(target=_open_browser, daemon=True).start()
 
     app = create_app()
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    run_server(app, host=host, port=port)
 
 
 if __name__ == "__main__":

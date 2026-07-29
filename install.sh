@@ -44,7 +44,7 @@ banner() {
     echo ""
     echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║${NC}     ${CYAN}Vocal Subtitle — 人声分离 + 字幕生成工具${NC}       ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}              一键安装脚本 v0.3.0                    ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}              一键安装脚本 v0.4.0                    ${GREEN}║${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -57,7 +57,7 @@ show_help() {
     echo ""
     echo "安装选项:"
     echo "  (无参数)        基础安装 (自动检测 GPU, 智能选择 VAD + 加速方案)"
-    echo "  --cpu           强制 CPU 模式，使用 CPU 版 PyTorch + WebRTC VAD"
+    echo "  --cpu           强制 CPU 模式，使用 CPU 版 PyTorch + Silero VAD"
     echo "  --no-torch      跳过 PyTorch，仅用 WebRTC VAD (最轻量, ~100MB)"
     echo "  --llm           基础 + LLM 字幕优化 (openai, tenacity, json-repair)"
     echo "  --uvr           基础 + UVR 分离引擎 (audio-separator, 默认推荐)"
@@ -67,6 +67,9 @@ show_help() {
     echo "  --local-nlp     基础 + 本地 NLP 语义合并 (sentence-transformers, CPU)"
     echo "  --webui         基础 + Web GUI 图形界面 (fastapi, uvicorn)"
     echo "  --diarization   基础 + 说话人分离 (librosa, scikit-learn, scipy)"
+    echo "  --speaker-embedding  基础 + 说话人声学嵌入 (speechbrain, 提高聚类精度)"
+    echo "  --whisperx      基础 + WhisperX 引擎 (词级时间戳增强, 强制音素对齐)"
+    echo "  --funasr        显式安装 FunASR (默认已含, 此选项供单独安装)"
     echo "  --gui           一键部署 CLI + Web GUI (同 --webui)"
     echo "  --all           全量安装 (包含以上全部)"
     echo "  --dev           开发环境 (基础 + 测试 + Lint 工具)"
@@ -102,7 +105,8 @@ show_help() {
     echo "  bash install.sh --all --download-models            # 全量 + 模型预下载"
     echo "  bash install.sh --gui                              # CLI + 浏览器界面"
     echo "  bash install.sh --dev --venv myenv                 # 开发环境 + 自定义 venv"
-    echo "  bash install.sh --no-torch                         # 保留现有 PyTorch"
+    echo "  bash install.sh --no-torch                         # 最轻量 (WebRTC VAD only)"
+    echo "  bash install.sh --webui --diarization --whisperx   # Web GUI + 说话人分离 + WhisperX"
     exit 0
 }
 
@@ -161,6 +165,15 @@ while [[ $# -gt 0 ]]; do
             shift ;;
         --diarization)
             INSTALL_MODE="${INSTALL_MODE},diarization"
+            shift ;;
+        --speaker-embedding)
+            INSTALL_MODE="${INSTALL_MODE},speaker-embedding"
+            shift ;;
+        --whisperx)
+            INSTALL_MODE="${INSTALL_MODE},whisperx"
+            shift ;;
+        --funasr)
+            INSTALL_MODE="${INSTALL_MODE},funasr-explicit"
             shift ;;
         --all)
             INSTALL_MODE="all"
@@ -714,7 +727,7 @@ _build_base_extras() {
     #   GPU + torch   → silero-vad (GPU) + gpu (CTranslate2 CUDA)    [最强]
     #   CPU + torch   → silero-vad (CPU PyTorch, --cpu 模式)         [中等]
     #   无 torch       → webrtcvad (纯 CPU, 轻量, 默认/--no-torch)    [最轻]
-    local extras="faster-whisper"
+    local extras="faster-whisper,funasr"
     if [ "$SKIP_TORCH" = true ]; then
         extras="${extras},webrtcvad"
         info "VAD: WebRTC VAD (纯 CPU, 轻量, --no-torch)" >&2
@@ -743,7 +756,7 @@ case "$INSTALL_MODE" in
         if [ "$HAS_GPU" = true ] && [ "$SKIP_TORCH" = false ]; then
             install_pip_deps "all"
         else
-            install_pip_deps "gpu,llm,local-nlp,uvr,spleeter,openunmix,webrtcvad,faster-whisper,webui,diarization"
+            install_pip_deps "gpu,llm,local-nlp,uvr,spleeter,openunmix,webrtcvad,faster-whisper,funasr,webui,diarization"
         fi
         ;;
     dev)
@@ -752,8 +765,8 @@ case "$INSTALL_MODE" in
         ;;
     *)
         # 组合模式: 自动补充 GPU 相关 extras
-        # 始终包含 faster-whisper (ASR 核心) 作为基础
-        EXTRAS="faster-whisper"
+        # 始终包含 faster-whisper (ASR 核心) 和 funasr 作为基础
+        EXTRAS="faster-whisper,funasr"
         # GPU 加速: 检测到 GPU 且未显式指定 webrtcvad → 自动启用 silero-vad
         if [ "$HAS_GPU" = true ] && [ "$SKIP_TORCH" = false ]; then
             if [[ "$INSTALL_MODE" != *webrtcvad* ]]; then
@@ -770,6 +783,8 @@ case "$INSTALL_MODE" in
         [[ "$INSTALL_MODE" == *local-nlp* ]] && EXTRAS="${EXTRAS},local-nlp"
         [[ "$INSTALL_MODE" == *webui* ]] && EXTRAS="${EXTRAS},webui"
         [[ "$INSTALL_MODE" == *diarization* ]] && EXTRAS="${EXTRAS},diarization"
+        [[ "$INSTALL_MODE" == *speaker-embedding* ]] && EXTRAS="${EXTRAS},speaker-embedding"
+        [[ "$INSTALL_MODE" == *whisperx* ]] && EXTRAS="${EXTRAS},whisperx"
         install_pip_deps "$EXTRAS"
         ;;
 esac
@@ -850,6 +865,9 @@ optional = [
     ('webrtcvad', 'webrtcvad', 'WebRTC VAD'),
     ('librosa', 'librosa', '说话人分离'),
     ('sklearn', 'scikit-learn', '说话人聚类'),
+    ('speechbrain', 'speechbrain', '说话人嵌入'),
+    ('whisperx', 'whisperx', 'WhisperX 引擎'),
+    ('funasr', 'funasr', 'FunASR 引擎'),
 ]
 for mod, pkg, desc in optional:
     try:
