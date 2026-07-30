@@ -1198,72 +1198,16 @@ class Pipeline:
     # ------------------------------------------------------------------
 
     def _get_separation_engine(self) -> SeparationEngine:
-        if self._separation_engine is not None:
-            return self._separation_engine
-
-        engine_name = self.config.separation.engine
-        if engine_name == "spleeter":
-            import sys
-
-            if sys.version_info >= (3, 12):
-                raise RuntimeError(
-                    "Spleeter 不支持 Python 3.12+（已于 2022 年停止维护）。"
-                    " 请改用 UVR 引擎：--separator uvr，"
-                    " 或使用 UVR BS-RoFormer 模型获得更高品质："
-                    " --separator uvr --uvr-model model_bs_roformer_ep_317_sdr_12.9755.ckpt"
-                )
-            from .separation.spleeter_engine import SpleeterEngine
-
-            self._separation_engine = SpleeterEngine()
-        elif engine_name == "openunmix":
-            from .separation.openunmix_engine import OpenUnmixEngine
-
-            self._separation_engine = OpenUnmixEngine()
-        elif engine_name == "uvr":
-            from .separation.uvr_engine import UVREngine
-
-            self._separation_engine = UVREngine()
-        else:
-            raise ValueError(
-                f"Unknown separation engine: {engine_name}. "
-                f"Options: uvr, openunmix, spleeter"
-            )
-
-        return self._separation_engine
+        """Backward-compat thin wrapper that delegates to PipelineServiceFactory."""
+        return self._services.get_separation_engine()
 
     def _get_sep_model_name(self) -> str:
-        """根据当前引擎类型返回对应的模型名称"""
-        sep = self.config.separation
-        if sep.engine == "uvr":
-            return sep.uvr_model
-        elif sep.engine == "openunmix":
-            return "umxhq"
-        return ""
+        """Backward-compat thin wrapper that delegates to PipelineServiceFactory."""
+        return self._services.get_sep_model_name()
 
     def _get_vad_engine(self) -> VADEngine:
-        if self._vad_engine is not None:
-            return self._vad_engine
-
-        engine_name = self.config.vad.engine
-        if engine_name == "silero":
-            from .vad.silero_vad import SileroVAD
-
-            self._vad_engine = SileroVAD()
-        elif engine_name == "ten":
-            from .vad.ten_vad import TENVAD
-
-            self._vad_engine = TENVAD()
-        elif engine_name == "webrtc":
-            from .vad.webrtc_vad import WebRTCVAD
-
-            self._vad_engine = WebRTCVAD()
-        else:
-            raise ValueError(
-                f"Unknown VAD engine: {engine_name}. "
-                f"Options: silero, ten, webrtc"
-            )
-
-        return self._vad_engine
+        """Backward-compat thin wrapper that delegates to PipelineServiceFactory."""
+        return self._services.get_vad_engine()
 
     def _get_asr_engine_for(
         self,
@@ -1271,80 +1215,20 @@ class Pipeline:
         model: Optional[str] = None,
         cache: bool = True,
     ) -> ASREngine:
-        """Construct one concrete engine; ``auto`` never reaches this method."""
-        if cache and engine_name in self._services._asr_engines:
-            return self._services._asr_engines[engine_name]
-
-        asr_cfg = self.config.asr
-        model = model or asr_cfg.model
-
-        # 自动检测设备
-        device = asr_cfg.device
-        if device == "auto":
-            from .utils.gpu_detector import GPUDetector
-
-            best = GPUDetector.get_best_device()
-            device = best.value  # "cuda" | "mps" | "cpu"
-            if device == "mps":
-                # CTranslate2 / faster-whisper 不支持 MPS，回退到 CPU
-                device = "cpu"
-            logger.info("Auto device detection: %s → %s", best.value, device)
-
-        if engine_name == "faster-whisper":
-            from .asr.faster_whisper_engine import FasterWhisperEngine
-
-            engine = FasterWhisperEngine(
-                model=model,
-                device=device,
-                compute_type=asr_cfg.compute_type,
-                beam_size=asr_cfg.beam_size,
-                word_timestamps=asr_cfg.word_timestamps,
-                condition_on_previous_text=asr_cfg.condition_on_previous_text,
-                vad_filter=asr_cfg.vad_filter,
-            )
-        elif engine_name == "whisper-cpp":
-            from .asr.whisper_cpp_engine import WhisperCppEngine
-
-            engine = WhisperCppEngine(
-                model=model,
-                language=asr_cfg.language,
-                model_path=getattr(asr_cfg, "whisper_cpp_model_path", None),
-                whisper_cpp_bin=getattr(asr_cfg, "whisper_cpp_bin", None),
-            )
-        elif engine_name == "funasr":
-            from .asr.funasr_engine import FunASREngine
-
-            engine = FunASREngine(
-                model=model,
-                device=device,
-            )
-        else:
-            raise ValueError(
-                f"Unknown ASR engine: {engine_name}. "
-                "Options: auto, faster-whisper, whisper-cpp, funasr"
-            )
-        if cache:
-            self._services._asr_engines[engine_name] = engine
-        return engine
+        """Backward-compat thin wrapper that delegates to PipelineServiceFactory."""
+        return self._services.get_asr_engine_for(engine_name, model=model, cache=cache)
 
     def _get_asr_engine(self) -> ASREngine:
         """Backward-compat thin wrapper that delegates to PipelineServiceFactory."""
         return self._services.get_asr_engine()
 
     def _get_cache(self) -> CacheManager:
-        if self._cache is None:
-            cache_cfg = self.config.cache
-            self._cache = CacheManager(
-                cache_dir=cache_cfg.directory,
-                ttl_separation=cache_cfg.ttl_separation,
-                ttl_transcription=cache_cfg.ttl_transcription,
-            )
-        return self._cache
+        """Backward-compat thin wrapper that delegates to PipelineServiceFactory."""
+        return self._services.get_cache()
 
     def _get_history(self) -> TaskHistoryManager:
-        if self._history is None:
-            self._history = TaskHistoryManager()
-        return self._history
+        """Backward-compat thin wrapper that delegates to PipelineServiceFactory."""
+        return self._services.get_history()
 
     # ------------------------------------------------------------------
     # 核心处理流程
