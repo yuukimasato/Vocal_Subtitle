@@ -87,7 +87,7 @@ pipeline:
     pca_variance: 0.95
 
   asr:
-    engine: "faster-whisper"
+    engine: "auto"
     model: "large-v3"                          # 使用最大模型
     device: "auto"
     compute_type: "float16"

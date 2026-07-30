@@ -147,3 +147,19 @@ def test_finalize_does_not_mutate_source_events():
     assert event.index == 8
     assert event.start == 1.0
     assert event.end == 1.2
+
+
+def test_finalize_splits_event_longer_than_max_duration():
+    event = _make_event(
+        1,
+        0.0,
+        10.0,
+        "这是一个很长的中文字幕句子需要在最终化阶段被拆分为多条字幕事件以便阅读",
+    )
+
+    result = finalize_subtitle_events([event])
+
+    assert len(result.events) > 1
+    assert all(item.end - item.start <= 5.0 for item in result.events)
+    assert result.subtitle_count == len(result.display_cues)
+    assert result.diagnostics["split_long_event_count"] >= 1

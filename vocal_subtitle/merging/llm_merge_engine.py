@@ -343,6 +343,20 @@ class LLMMergeEngine:
                 if not _physical_owner_compatible(prev_frag, curr_frag):
                     break
 
+                # Unknown speaker labels are not evidence that two clips are
+                # the same voice. Preserve the boundary until diarization or
+                # an explicit speaker label can justify a merge.
+                if prev_speaker in ("", "unknown") or curr_speaker in ("", "unknown"):
+                    break
+
+                # Keep the duration contract on the fast path as well as on
+                # LLM/rule decisions.  The check uses the first fragment's
+                # start because the group may already contain several items.
+                first_start = frag.get("start", 0)
+                proposed_end = curr_frag.get("end", first_start)
+                if proposed_end - first_start > cfg.max_combined_duration:
+                    break
+
                 # 快路径合并条件
                 can_fast_merge = (
                     gap < cfg.fast_merge_max_gap
@@ -487,8 +501,10 @@ class LLMMergeEngine:
             # 查找下一段
             next_text = ""
             next_speaker = ""
+            next_frag = None
             for other in candidates:
                 if other.get("id") == next_id:
+                    next_frag = other
                     next_text = other.get("text", "").strip()
                     next_speaker = other.get("speaker", "")
                     break
@@ -496,6 +512,8 @@ class LLMMergeEngine:
             # ★ 不同说话人 → 绝不合并
             curr_speaker = frag.get("speaker", "")
             if curr_speaker and next_speaker and curr_speaker != next_speaker:
+                continue
+            if next_frag is not None and not _physical_owner_compatible(frag, next_frag):
                 continue
 
             # 语义边界检测：下一段是新段落开头 → 不合并
@@ -742,6 +760,21 @@ class LLMMergeEngine:
             if first is None or last is None:
                 continue
 
+            selected = [id_map.get(mid) for mid in ids]
+            if any(item is None for item in selected):
+                continue
+            if any(
+                not _physical_owner_compatible(left, right)
+                for left, right in zip(selected, selected[1:])
+            ):
+                continue
+            if last.get("end", 0) - first.get("start", 0) > self.config.max_combined_duration:
+                logger.debug(
+                    "Rejecting merge group %s: duration exceeds %.2fs",
+                    ids, self.config.max_combined_duration,
+                )
+                continue
+
             # ★ 所有片段必须来自同一说话人
             speakers = set()
             for mid in ids:
@@ -752,10 +785,13 @@ class LLMMergeEngine:
                         speakers.add(spk)
             if len(speakers) > 1:
                 continue  # 不同说话人 → 拒绝合并
+            if any(f.get("speaker", "") in ("", "unknown") for f in selected):
+                continue  # 未知说话人不能作为合并依据
 
             # 拼接文本（去重：同一片段可能被多个 id 引用）
             texts = []
             seen_texts = set()
+            accepted_ids = []
             for mid in ids:
                 frag = id_map.get(mid)
                 if frag:
@@ -763,7 +799,7 @@ class LLMMergeEngine:
                     if t and t not in seen_texts:
                         seen_texts.add(t)
                         texts.append(t)
-                    consumed.add(mid)
+                    accepted_ids.append(mid)
 
             combined_text = " ".join(texts)
 
@@ -787,6 +823,7 @@ class LLMMergeEngine:
                 "_llm_merged": True,
                 "_merged_ids": ids,
             })
+            consumed.update(accepted_ids)
 
         # 添加未被 LLM 消费的片段
         for frag in fast_merged:

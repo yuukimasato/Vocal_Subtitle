@@ -176,6 +176,34 @@ class FasterWhisperEngine(ASREngine):
             logger.warning("Language detection failed: %s", e)
             return None
 
+    def detect_language_info(
+        self,
+        audio: np.ndarray,
+        sample_rate: int = 16000,
+    ):
+        """Return the language and probability used by the router."""
+        if self._model is None:
+            self.load_model()
+        max_samples = 30 * sample_rate
+        sample = np.asarray(audio, dtype=np.float32)[:max_samples]
+        if sample.ndim > 1:
+            sample = sample.mean(axis=-1)
+        _, info = self._model.transcribe(
+            sample,
+            language=None,
+            beam_size=1,
+            word_timestamps=False,
+            condition_on_previous_text=False,
+            vad_filter=False,
+        )
+        from .base import LanguageDetection
+
+        return LanguageDetection(
+            language=str(info.language),
+            probability=float(getattr(info, "language_probability", 0.0)),
+            source=self.model_name,
+        )
+
     def transcribe(
         self,
         audio: np.ndarray,

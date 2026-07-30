@@ -192,20 +192,46 @@ class GlobalASRConfig:
 
 
 @dataclass
+class ASRAutoRoutingConfig:
+    """Automatic engine routing and result quality policy."""
+
+    enabled: bool = True
+    language_probe_model: str = "tiny"
+    language_probe_window_seconds: float = 8.0
+    language_probe_max_windows: int = 8
+    zh_min_probability: float = 0.85
+    zh_required_window_ratio: float = 1.0
+    uncertain_window_policy: str = "faster-whisper"
+    fallback_on_quality_failure: bool = True
+    fallback_engine: str = "faster-whisper"
+    route_version: str = "asr-route-v1"
+    quality_gate_version: str = "asr-quality-v1"
+    min_coverage_ratio: float = 0.80
+    min_text_density: float = 0.20
+    max_event_duration: float = 12.0
+    long_audio_seconds: float = 60.0
+    long_audio_min_text_chars: int = 12
+    max_overlap_ratio: float = 0.35
+
+
+@dataclass
 class ASRConfig:
     """Stage 4: ASR 识别配置"""
 
-    engine: str = "faster-whisper"
+    engine: str = "auto"
     model: str = "large-v3"
     device: str = "auto"  # auto = 自动检测 GPU/CPU
     compute_type: str = "float16"
     language: Optional[str] = None
+    whisper_cpp_bin: Optional[str] = None
+    whisper_cpp_model_path: Optional[str] = None
     beam_size: int = 5
     word_timestamps: bool = True
     condition_on_previous_text: bool = False
     vad_filter: bool = False
     language_mode: str = "single"  # single | mixed | auto
     global_asr: "GlobalASRConfig" = field(default_factory=GlobalASRConfig)
+    auto_routing: ASRAutoRoutingConfig = field(default_factory=ASRAutoRoutingConfig)
     # Hallucination filter thresholds
     no_speech_threshold: float = 0.6
     log_prob_threshold: float = -1.0
@@ -653,6 +679,7 @@ class ConfigLoader:
 
         asr_raw = pipeline_raw.get("asr", {})
         global_asr_raw = asr_raw.get("global_asr", {})
+        auto_routing_raw = asr_raw.get("auto_routing", {})
         global_asr = GlobalASRConfig(
             enabled=global_asr_raw.get("enabled", True),
             routing=global_asr_raw.get("routing", "auto"),
@@ -663,12 +690,47 @@ class ConfigLoader:
             hallucination_filter=global_asr_raw.get("hallucination_filter", True),
             language_switch_threshold=global_asr_raw.get("language_switch_threshold", 0.7),
         )
+        auto_routing = ASRAutoRoutingConfig(
+            enabled=auto_routing_raw.get("enabled", True),
+            language_probe_model=auto_routing_raw.get("language_probe_model", "tiny"),
+            language_probe_window_seconds=auto_routing_raw.get(
+                "language_probe_window_seconds", 8.0
+            ),
+            language_probe_max_windows=auto_routing_raw.get(
+                "language_probe_max_windows", 8
+            ),
+            zh_min_probability=auto_routing_raw.get("zh_min_probability", 0.85),
+            zh_required_window_ratio=auto_routing_raw.get(
+                "zh_required_window_ratio", 1.0
+            ),
+            uncertain_window_policy=auto_routing_raw.get(
+                "uncertain_window_policy", "faster-whisper"
+            ),
+            fallback_on_quality_failure=auto_routing_raw.get(
+                "fallback_on_quality_failure", True
+            ),
+            fallback_engine=auto_routing_raw.get("fallback_engine", "faster-whisper"),
+            route_version=auto_routing_raw.get("route_version", "asr-route-v1"),
+            quality_gate_version=auto_routing_raw.get(
+                "quality_gate_version", "asr-quality-v1"
+            ),
+            min_coverage_ratio=auto_routing_raw.get("min_coverage_ratio", 0.80),
+            min_text_density=auto_routing_raw.get("min_text_density", 0.20),
+            max_event_duration=auto_routing_raw.get("max_event_duration", 12.0),
+            long_audio_seconds=auto_routing_raw.get("long_audio_seconds", 60.0),
+            long_audio_min_text_chars=auto_routing_raw.get(
+                "long_audio_min_text_chars", 12
+            ),
+            max_overlap_ratio=auto_routing_raw.get("max_overlap_ratio", 0.35),
+        )
         asr = ASRConfig(
-            engine=asr_raw.get("engine", "faster-whisper"),
+            engine=asr_raw.get("engine", "auto"),
             model=asr_raw.get("model", "large-v3"),
             device=asr_raw.get("device", "cuda"),
             compute_type=asr_raw.get("compute_type", "float16"),
             language=asr_raw.get("language"),
+            whisper_cpp_bin=asr_raw.get("whisper_cpp_bin"),
+            whisper_cpp_model_path=asr_raw.get("whisper_cpp_model_path"),
             beam_size=asr_raw.get("beam_size", 5),
             word_timestamps=asr_raw.get("word_timestamps", True),
             condition_on_previous_text=asr_raw.get(
@@ -677,7 +739,27 @@ class ConfigLoader:
             vad_filter=asr_raw.get("vad_filter", False),
             language_mode=asr_raw.get("language_mode", "single"),
             global_asr=global_asr,
+            auto_routing=auto_routing,
         )
+        if asr.engine not in {"auto", "faster-whisper", "funasr", "whisper-cpp"}:
+            raise ValueError(
+                "Unknown asr.engine '%s'; expected auto, faster-whisper, funasr or whisper-cpp"
+                % asr.engine
+            )
+        if not 0.0 <= float(asr.auto_routing.zh_min_probability) <= 1.0:
+            raise ValueError("asr.auto_routing.zh_min_probability must be between 0 and 1")
+        if not 0.0 <= float(asr.auto_routing.zh_required_window_ratio) <= 1.0:
+            raise ValueError(
+                "asr.auto_routing.zh_required_window_ratio must be between 0 and 1"
+            )
+        if float(asr.auto_routing.language_probe_window_seconds) <= 0:
+            raise ValueError("asr.auto_routing.language_probe_window_seconds must be positive")
+        if int(asr.auto_routing.language_probe_max_windows) < 2:
+            raise ValueError("asr.auto_routing.language_probe_max_windows must be at least 2")
+        if asr.auto_routing.uncertain_window_policy != "faster-whisper":
+            raise ValueError(
+                "asr.auto_routing.uncertain_window_policy must be faster-whisper"
+            )
 
         spk_role_raw = pipeline_raw.get("speaker_role", {})
         speaker_role = SpeakerRoleConfig(
@@ -991,6 +1073,8 @@ class ConfigLoader:
             "asr_model": "asr.model",
             "asr_engine": "asr.engine",
             "language": "asr.language",
+            "whisper_cpp_bin": "asr.whisper_cpp_bin",
+            "whisper_cpp_model_path": "asr.whisper_cpp_model_path",
             "language_mode": "asr.language_mode",
             "mixed_language": "asr.language_mode",
             "device": "asr.device",

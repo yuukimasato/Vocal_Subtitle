@@ -76,6 +76,7 @@ class TaskStatus(BaseModel):
     progress: Optional[Dict[str, Any]] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    quality_status: Optional[str] = None
 
 
 class SubtitleEventResponse(BaseModel):

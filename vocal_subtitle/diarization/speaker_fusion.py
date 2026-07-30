@@ -76,6 +76,18 @@ def _audio_slice(audio: np.ndarray, start: float, end: float, sample_rate: int) 
     return np.asarray(audio[start_sample:end_sample], dtype=np.float32)
 
 
+def _has_audio_signal(audio: np.ndarray, floor: float = 1e-4) -> bool:
+    """Return whether a slice contains enough finite energy for embeddings."""
+    values = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if values.size == 0:
+        return False
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return False
+    rms = float(np.sqrt(np.mean(np.square(finite, dtype=np.float64))))
+    return np.isfinite(rms) and rms > floor
+
+
 def _window_spans(duration: float) -> list[tuple[float, float]]:
     if duration <= 0:
         return []
@@ -116,7 +128,10 @@ def _extract_embedding_evidence(
     valid_spans: list[tuple[float, float]] = []
     for start, end in spans:
         snippet = _audio_slice(audio, start, end, sample_rate)
-        if len(snippet) < max(1, int(sample_rate * 0.15)):
+        if (
+            len(snippet) < max(1, int(sample_rate * 0.15))
+            or not _has_audio_signal(snippet)
+        ):
             continue
         try:
             feature = np.asarray(
@@ -135,6 +150,11 @@ def _extract_embedding_evidence(
         return EmbeddingEvidence(model=getattr(embedding_engine, "name", ""), status="failed")
 
     matrix = np.vstack(features)
+    if matrix.ndim != 2 or matrix.shape[0] != len(valid_spans):
+        return EmbeddingEvidence(
+            model=getattr(embedding_engine, "name", ""),
+            status="failed",
+        )
     expected = getattr(diar_cfg, "expected_speakers", None)
     identical_embeddings = (
         len(features) > 1
@@ -170,16 +190,21 @@ def _extract_embedding_evidence(
         use_pca=False,
     )
     try:
-        labels = diarizer._cluster(matrix)
+        labels = np.asarray(diarizer._cluster(matrix), dtype=np.int64).reshape(-1)
+        if labels.size != matrix.shape[0] or labels.size == 0:
+            raise ValueError("embedding cluster labels do not match feature rows")
         silhouette = diarizer._evaluate_clustering(matrix, labels)
     except Exception as exc:
         logger.warning("Embedding clustering failed: %s", exc)
         return EmbeddingEvidence(model=getattr(embedding_engine, "name", ""), status="failed")
 
-    centroids = {
-        int(label): matrix[np.asarray(labels) == label].mean(axis=0)
-        for label in sorted(set(labels))
-    }
+    centroids = {}
+    for label in sorted(set(labels.tolist())):
+        members = matrix[labels == label]
+        if len(members):
+            centroids[int(label)] = members.mean(axis=0)
+    if not centroids:
+        return EmbeddingEvidence(model=getattr(embedding_engine, "name", ""), status="failed")
     event_labels: list[int] = []
     for event in events:
         best_index = max(
@@ -322,6 +347,8 @@ def _local_global_boundaries(
     start = max(0.0, float(event.start) - context_seconds)
     end = min(len(audio) / max(sample_rate, 1), float(event.end) + context_seconds)
     snippet = _audio_slice(audio, start, end, sample_rate)
+    if len(snippet) < max(1, int(sample_rate * 0.25)):
+        return []
     try:
         result = engine.diarize(
             audio=snippet,

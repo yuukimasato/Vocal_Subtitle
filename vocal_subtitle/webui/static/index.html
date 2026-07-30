@@ -1627,7 +1627,11 @@ const App = {
   // ---- WebSocket ----
   ws: {
     connect(taskId) {
-      if (App.state.ws) { App.state.ws.close(); }
+      if (App.state.ws) {
+        App.state.ws._intentionalClose = true;
+        App.state.ws.close();
+      }
+      App.ws.stopTaskPolling();
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(protocol + '//' + location.host + '/ws/tasks/' + taskId);
       App.state.ws = ws;
@@ -1640,8 +1644,11 @@ const App = {
       };
 
       ws.onclose = function() {
-        if (App.state.isRunning) {
-          toast('WebSocket 连接断开', 'error');
+        if (!ws._intentionalClose && App.state.isRunning) {
+          // The task runs in a server thread. Recover the terminal result via
+          // REST when the progress socket disappears instead of losing a
+          // completed task or showing a false failure immediately.
+          App.ws.startTaskPolling(taskId);
         }
       };
 
@@ -1657,7 +1664,48 @@ const App = {
 
     disconnect() {
       if (App.state._wsHeartbeat) { clearInterval(App.state._wsHeartbeat); }
-      if (App.state.ws) { App.state.ws.close(); App.state.ws = null; }
+      App.ws.stopTaskPolling();
+      if (App.state.ws) {
+        App.state.ws._intentionalClose = true;
+        App.state.ws.close();
+        App.state.ws = null;
+      }
+    },
+
+    startTaskPolling(taskId) {
+      App.ws.stopTaskPolling();
+      let attempts = 0;
+      App.state._taskPollTimer = setInterval(async function() {
+        if (!App.state.isRunning || App.state.taskId !== taskId) {
+          App.ws.stopTaskPolling();
+          return;
+        }
+        attempts += 1;
+        try {
+          const status = await App.api.getTaskStatus(taskId);
+          if (status.status === 'completed' && status.result) {
+            App.ws.stopTaskPolling();
+            App.ui.pipelineComplete(status.result);
+          } else if (status.status === 'failed') {
+            App.ws.stopTaskPolling();
+            App.ui.pipelineError(status.error || '处理失败');
+          }
+        } catch (ex) {
+          // Keep polling briefly through transient REST failures. After the
+          // timeout, expose the connection issue rather than hanging forever.
+          if (attempts >= 15) {
+            App.ws.stopTaskPolling();
+            App.ui.pipelineError('实时连接已断开，且无法获取任务状态');
+          }
+        }
+      }, 1000);
+    },
+
+    stopTaskPolling() {
+      if (App.state._taskPollTimer) {
+        clearInterval(App.state._taskPollTimer);
+        App.state._taskPollTimer = null;
+      }
     },
 
     handleMessage(msg) {
@@ -1905,6 +1953,13 @@ const App = {
 
 	    // 获取完整详情（含字幕事件 + 音频路径），完善显示
 	    App.api._fetch('/api/history/' + item.id).then(detail => {
+	      const summary = detail.result_summary || {};
+	      if (summary.stats) {
+	        App.ui.renderStats(summary.stats);
+	        $('#empty-state').style.display = 'none';
+	        $('#results-content').style.display = 'block';
+	        App.ui.renderDiagnosticReport({ stats: summary.stats });
+	      }
 	      if (detail.events && detail.events.length > 0) {
 	        App.state.subtitleEvents = detail.events;
 	        App.ui.renderTimeline(detail.events);
@@ -1915,9 +1970,9 @@ const App = {
 	    }).catch(ex => {
 	      console.error('Failed to load history detail:', ex);
 	    });
-	  },
+    },
 
-  async exportFormat(fmt) {
+    async exportFormat(fmt) {
     if (!App.state.taskId) { toast('请先完成处理', 'error'); return; }
     try {
       const resp = await fetch('/api/subtitle/' + App.state.taskId + '/export?format=' + fmt);
@@ -2145,7 +2200,7 @@ const App = {
     },
 
     renderOptions(config) {
-      const asrEngine = config.asr_engine || 'faster-whisper';
+      const asrEngine = config.asr_engine || 'auto';
       const genericASRModels = ['large-v3', 'medium', 'small', 'tiny'];
       const configuredASRModel = config.asr_model || 'large-v3';
       const funasrDefaultModel = 'iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch';
@@ -2181,6 +2236,7 @@ const App = {
       // ASR options
       $('#opts-asr').innerHTML = `
         <div class="option-row"><label>引擎</label><select data-key="asr_engine">
+          <option value="auto" ${asrEngine==='auto'?'selected':''}>自动（中文优先）</option>
           <option value="faster-whisper" ${config.asr_engine==='faster-whisper'?'selected':''}>faster-whisper</option>
           <option value="whisper-cpp" ${config.asr_engine==='whisper-cpp'?'selected':''}>whisper.cpp</option>
           <option value="funasr" ${config.asr_engine==='funasr'?'selected':''}>FunASR (中文优化)</option>
@@ -2329,7 +2385,12 @@ const App = {
           '<option value="medium" ' + (selected === 'medium' ? 'selected' : '') + '>medium</option>' +
           '<option value="small" ' + (selected === 'small' ? 'selected' : '') + '>small</option>' +
           '<option value="tiny" ' + (selected === 'tiny' ? 'selected' : '') + '>tiny</option>';
-        if (status) { status.style.display = 'none'; status.textContent = ''; }
+        if (status) {
+          status.style.display = engine === 'auto' ? 'inline' : 'none';
+          status.textContent = engine === 'auto'
+            ? '自动检测：纯中文走 FunASR，其他情况走 faster-whisper'
+            : '';
+        }
       }
     },
 
@@ -2995,6 +3056,24 @@ const App = {
       }
     },
 
+    renderStats(stats) {
+      stats = stats || {};
+      $('#stats-grid').innerHTML = `
+        <div class="stat-card"><div class="stat-value">${(stats.total_time || 0).toFixed(1)}s</div><div class="stat-label">总耗时</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.segment_count || 0}</div><div class="stat-label">语音片段</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.subtitle_count || 0}</div><div class="stat-label">字幕条数</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.duration_seconds ? (stats.duration_seconds/60).toFixed(1)+'min' : '—'}</div><div class="stat-label">音频时长</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.speaker_count || 0}</div><div class="stat-label">说话人数</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.local_speaker_split_count || 0}</div><div class="stat-label">局部换人切分</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.speaker_conflict_count || 0}</div><div class="stat-label">说话人冲突</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.unknown_speaker_count || 0}</div><div class="stat-label">未确认</div></div>
+        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.quality_status || 'pass')}</div><div class="stat-label">质量状态</div></div>
+        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml((stats.final_engine || stats.selected_engine || '—'))}</div><div class="stat-label">最终引擎</div></div>
+        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.detected_language || 'unknown')}</div><div class="stat-label">检测语言</div></div>
+        <div class="stat-card"><div class="stat-value" title="${App.ui._escapeAttr(stats.fallback_reason || '')}">${App.ui.escapeHtml(stats.fallback_reason ? '已回退' : '—')}</div><div class="stat-label">回退原因</div></div>
+      `;
+    },
+
     async pipelineComplete(result) {
       App.ws.disconnect();
       App.state.isRunning = false;
@@ -3004,16 +3083,7 @@ const App = {
       App.state.subtitleEvents = result.events || [];
 
       // Show stats
-      $('#stats-grid').innerHTML = `
-        <div class="stat-card"><div class="stat-value">${stats.total_time.toFixed(1)}s</div><div class="stat-label">总耗时</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.segment_count || 0}</div><div class="stat-label">语音片段</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.subtitle_count || 0}</div><div class="stat-label">字幕条数</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.duration_seconds ? (stats.duration_seconds/60).toFixed(1)+'min' : '—'}</div><div class="stat-label">音频时长</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.speaker_count || 0}</div><div class="stat-label">说话人数</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.local_speaker_split_count || 0}</div><div class="stat-label">局部换人切分</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.speaker_conflict_count || 0}</div><div class="stat-label">说话人冲突</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.unknown_speaker_count || 0}</div><div class="stat-label">未确认</div></div>
-      `;
+      App.ui.renderStats(stats);
 
       // Render subtitle timeline
       App.ui.renderTimeline(App.state.subtitleEvents);
@@ -3029,7 +3099,11 @@ const App = {
         }
       }, 3000);
 
-      toast('字幕生成完成！共 ' + App.state.subtitleEvents.length + ' 条', 'success');
+      const qualityStatus = stats.quality_status || 'pass';
+      const qualityMessage = qualityStatus === 'pass'
+        ? '字幕生成完成'
+        : '字幕已生成，但质量状态为 ' + qualityStatus;
+      toast(qualityMessage + '，共 ' + App.state.subtitleEvents.length + ' 条', qualityStatus === 'pass' ? 'success' : 'warning');
 
       // Refresh history and cache info
       App.refreshHistory();
@@ -3121,8 +3195,6 @@ const App = {
         var diagPanel = document.getElementById('diagnostic-panel');
         if (diagPanel) diagPanel.style.display = 'none';
         // Hide audio export bar during processing
-        var audioBar = document.getElementById('audio-export-bar');
-        if (audioBar) audioBar.style.display = 'none';
         var audioBar = document.getElementById('audio-export-bar');
         if (audioBar) audioBar.style.display = 'none';
       } else {

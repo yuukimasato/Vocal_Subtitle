@@ -726,6 +726,12 @@ python scripts/compare_timeline.py --auto output.srt --ground-truth test/中文�
 
 详见 [NOTICE](NOTICE)。
 
+## AI 辅助开发说明
+
+本项目由 `yuukimasato` 主导开发和维护。开发过程中使用了包括 Claude、GPT 等多种 AI 大模型辅助进行代码分析、方案设计、实现和测试；AI 工具不作为本项目的作者、独立贡献者或维护者。最终的技术决策、代码审查、测试验证、发布和维护责任均由项目作者承担。
+
+提交历史中可能保留 AI 工具生成的协作元数据，这些信息仅用于记录开发过程，不代表 AI 服务或其提供方对本项目的署名、背书或权利主张。
+
 ## 致谢
 
 - [BS-RoFormer](https://github.com/Anjok07/ultimatevocalremovergui) — UVR 人声分离引擎

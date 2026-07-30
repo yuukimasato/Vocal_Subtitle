@@ -43,7 +43,7 @@ scenes:
     speaker_count: 1
 
   - name: "中文朗读双人"
-    audio: test/中文朗读测试-双人.wav
+    audio: test/TTS中文朗读测试-双人.wav
     ground_truth: null
     category: multi_speaker
     language: zh

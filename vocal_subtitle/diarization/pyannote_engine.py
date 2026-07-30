@@ -340,6 +340,20 @@ class PyannoteDiarizationEngine:
             array = np.asarray(audio, dtype=np.float32)
             if array.ndim > 1:
                 array = array.mean(axis=1)
+            min_samples = max(1, int(sample_rate * 0.25))
+            if array.size < min_samples:
+                logger.debug(
+                    "Audio too short for diarization (%d samples < %d min); returning empty result",
+                    array.size, min_samples,
+                )
+                return DiarizationResult(
+                    turns=[],
+                    exclusive_turns=[],
+                    speaker_count=0,
+                    backend=self.name,
+                    status="empty_audio",
+                    overlap_duration=0.0,
+                )
             source = {
                 "waveform": torch.from_numpy(array).unsqueeze(0),
                 "sample_rate": sample_rate,

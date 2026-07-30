@@ -26,6 +26,10 @@ class FinalizeConfig:
     llm_post_enabled: bool = False
     display: DisplayTimelineConfig = field(default_factory=DisplayTimelineConfig)
     validate: bool = True
+    max_duration: float = 5.0
+    max_chars_cjk: int = 20
+    max_chars_latin: int = 42
+    max_lines: int = 2
 
 
 @dataclass
@@ -93,6 +97,23 @@ def finalize_subtitle_events(
 
     # Step 1: 验证输入事件
     valid_events = _validate_input_events(detached_events, diagnostics)
+
+    # Split logical cues before display mapping so the preview, API payload,
+    # statistics, and exported files all observe the same cue boundaries.
+    from .subtitle_builder import SubtitleBuilder, SubtitleRule
+
+    splitter = SubtitleBuilder(
+        rule=SubtitleRule(
+            max_duration=cfg.max_duration,
+            max_chars_cjk=cfg.max_chars_cjk,
+            max_chars_latin=cfg.max_chars_latin,
+            max_lines=cfg.max_lines,
+        )
+    )
+    before_split = len(valid_events)
+    valid_events = splitter._split_long_events(valid_events)
+    diagnostics["split_long_event_count"] = max(0, len(valid_events) - before_split)
+    diagnostics["step"].append("split_long_events")
 
     # Step 2: 转换为语义组格式
     semantic_groups = _events_to_semantic_groups(valid_events)

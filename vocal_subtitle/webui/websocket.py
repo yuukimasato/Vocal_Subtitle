@@ -62,7 +62,9 @@ class WebSocketManager:
                 pass
             if not self._connections[task_id]:
                 del self._connections[task_id]
-        logger.info("WebSocket disconnected for task: %s", task_id)
+        # Client-side close after a completed task is expected and should not
+        # be mistaken for a server-side pipeline failure.
+        logger.debug("WebSocket disconnected for task: %s", task_id)
 
     async def broadcast(self, task_id: str, message: Dict[str, Any]) -> None:
         """向所有监听该任务的 WebSocket 广播消息"""

@@ -177,3 +177,24 @@ def test_known_multi_speaker_count_does_not_split_identical_embeddings():
     assert result.backend == "unknown"
     assert result.diagnostics["embedding_status"] == "failed"
     assert [item.speaker_id for item in result.events] == [None, None]
+
+
+def test_silent_embedding_windows_are_skipped():
+    class _CountingEmbedding(_FakeEmbedding):
+        calls = 0
+
+        def extract_embedding(self, audio, sample_rate):
+            self.calls += 1
+            return super().extract_embedding(audio, sample_rate)
+
+    engine = _CountingEmbedding()
+    config = _config(expected=1)
+    events = [SubtitleEvent(1, 0.0, 1.0, "静音")]
+
+    result = speaker_fusion.run_speaker_fusion(
+        events, np.zeros(4 * 16000, dtype=np.float32), 16000, config,
+        embedding_engine=engine,
+    )
+
+    assert result.diagnostics["embedding_status"] == "failed"
+    assert engine.calls == 0

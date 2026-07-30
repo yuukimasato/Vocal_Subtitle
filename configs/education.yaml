@@ -86,7 +86,7 @@ pipeline:
     pca_variance: 0.95
 
   asr:
-    engine: "faster-whisper"
+    engine: "auto"
     model: "large-v3"                         # 教学需要最高准确率
     device: "auto"
     compute_type: "float16"

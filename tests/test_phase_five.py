@@ -116,8 +116,16 @@ def test_pipeline_stats_round_trip_keeps_path_diagnostics(tmp_path):
 def test_full_pipeline_cache_requires_compatible_path():
     pipeline = Pipeline(PipelineConfig())
     pipeline._requested_asr_path = "global"
+    current_route = pipeline.config.asr.auto_routing.route_version
+    current_quality = pipeline.config.asr.auto_routing.quality_gate_version
     assert pipeline._is_usable_full_pipeline_cache(
-        {"stats": {"asr_path": "global"}}
+        {"stats": {
+            "asr_path": "global",
+            "requested_engine": "auto",
+            "selected_engine": "funasr",
+            "asr_route_version": current_route,
+            "quality_gate_version": current_quality,
+        }}
     )
     assert not pipeline._is_usable_full_pipeline_cache(
         {"stats": {"asr_path": "legacy"}}

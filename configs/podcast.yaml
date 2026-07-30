@@ -88,7 +88,7 @@ pipeline:
     pca_variance: 0.95
 
   asr:
-    engine: "faster-whisper"
+    engine: "auto"
     model: "large-v3"                          # 播客使用最高精度模型
     device: "auto"
     compute_type: "float16"

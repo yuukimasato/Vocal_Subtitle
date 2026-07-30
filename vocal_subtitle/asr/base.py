@@ -7,6 +7,30 @@ from typing import List, Optional
 import numpy as np
 
 
+class ASREngineError(RuntimeError):
+    """Base error for failures that should be surfaced by the pipeline."""
+
+    category = "execution_failed"
+
+
+class ASRDependencyError(ASREngineError):
+    """The selected ASR backend is not installed or executable."""
+
+    category = "dependency_unavailable"
+
+
+class ASRModelError(ASREngineError):
+    """The selected ASR model is missing or cannot be loaded."""
+
+    category = "model_unavailable"
+
+
+class ASRInvalidResultError(ASREngineError):
+    """The backend returned no usable transcription for detected speech."""
+
+    category = "invalid_result"
+
+
 @dataclass
 class WordTimestamp:
     """词级时间戳"""

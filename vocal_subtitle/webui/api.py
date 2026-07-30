@@ -129,6 +129,8 @@ def _config_summary(config: PipelineConfig) -> Dict[str, Any]:
         "asr_model": config.asr.model,
         "language": config.asr.language,
         "device": config.asr.device,
+        "asr_route_version": config.asr.auto_routing.route_version,
+        "asr_quality_gate_version": config.asr.auto_routing.quality_gate_version,
         "llm_enabled": config.llm_optimize.enabled,
     }
 
@@ -151,6 +153,8 @@ def _config_to_overrides_dict(config: PipelineConfig) -> Dict[str, Any]:
         "asr_compute_type": config.asr.compute_type,
         "language": config.asr.language or "",
         "asr_beam_size": config.asr.beam_size,
+        "asr_route_version": config.asr.auto_routing.route_version,
+        "asr_quality_gate_version": config.asr.auto_routing.quality_gate_version,
         "subtitle_min_duration": config.subtitle.min_duration,
         "subtitle_max_duration": config.subtitle.max_duration,
         "subtitle_max_chars_cjk": config.subtitle.max_chars_cjk,
@@ -467,6 +471,12 @@ def _run_pipeline_in_thread(
             "from_cache": from_cache,
             "segment_count": stats.segment_count,
             "subtitle_count": stats.subtitle_count,
+            "quality_status": stats.quality_status,
+            "requested_engine": stats.requested_engine,
+            "selected_engine": stats.selected_engine,
+            "final_engine": stats.final_engine,
+            "detected_language": stats.detected_language,
+            "fallback_reason": stats.fallback_reason or None,
             "vocals_path": result.get("vocals_path"),
             "accompaniment_path": result.get("accompaniment_path"),
         }
@@ -739,12 +749,14 @@ async def get_task_status(task_id: str):
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
     task = _task_store[task_id]
+    result = task.get("result") or {}
     return TaskStatus(
         task_id=task["task_id"],
         status=task["status"],
         progress=task.get("progress"),
         result=task.get("result"),
         error=task.get("error"),
+        quality_status=result.get("quality_status"),
     )
 
 
@@ -785,6 +797,8 @@ async def list_history(
                     "subtitle_count": r.get("subtitle_count", 0),
                     "segment_count": r.get("segment_count", 0),
                     "from_cache": r.get("from_cache", False),
+                    "quality_status": (r.get("stats") or {}).get("quality_status"),
+                    "final_engine": (r.get("stats") or {}).get("final_engine"),
                 }
             except (json.JSONDecodeError, TypeError):
                 pass

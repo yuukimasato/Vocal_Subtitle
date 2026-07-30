@@ -138,15 +138,23 @@ class FunASREngine(ASREngine):
         )
 
         try:
-            # FunASR 需要 int16 格式的音频
-            if audio.dtype == np.float32:
-                audio_int16 = (audio * 32767).astype(np.int16)
+            # FunASR/PyTorch 的部分前端会对输入调用 mean()；传入 int16
+            # 会触发 torch.mean(Short) 异常。ASREngine 的公共契约本身就是
+            # float32、[-1, 1]，因此在这里保持浮点格式并做边界清理。
+            audio_array = np.asarray(audio)
+            if np.issubdtype(audio_array.dtype, np.integer):
+                scale = float(max(abs(np.iinfo(audio_array.dtype).min), np.iinfo(audio_array.dtype).max))
+                audio_float32 = audio_array.astype(np.float32) / scale
             else:
-                audio_int16 = audio.astype(np.int16)
+                audio_float32 = audio_array.astype(np.float32, copy=False)
+            audio_float32 = np.nan_to_num(
+                audio_float32, nan=0.0, posinf=1.0, neginf=-1.0
+            )
+            audio_float32 = np.clip(audio_float32, -1.0, 1.0)
 
             # 调用 FunASR
             result = self._model.generate(
-                input=audio_int16,
+                input=audio_float32,
                 batch_size_s=300,
                 **kwargs,
             )
@@ -160,6 +168,8 @@ class FunASREngine(ASREngine):
                 text = res.get("text", "")
                 timestamp_list = res.get("timestamp", [])
 
+                parsed_timestamp_count = 0
+                pair_timestamp_bounds = []
                 if timestamp_list:
                     # 有词级时间戳
                     for ts_item in timestamp_list:
@@ -181,7 +191,23 @@ class FunASREngine(ASREngine):
                                     ],
                                 )
                             )
-                else:
+                            parsed_timestamp_count += 1
+                        elif isinstance(ts_item, (list, tuple)) and len(ts_item) >= 2:
+                            # 部分 FunASR 版本只返回 [start_ms, end_ms]，
+                            # 文本仍在结果级 text 字段中。
+                            parsed_timestamp_count += 1
+                            pair_timestamp_bounds.append(
+                                (float(ts_item[0]) / 1000.0, float(ts_item[1]) / 1000.0)
+                            )
+                if not segments and pair_timestamp_bounds and text.strip():
+                    segments.append(
+                        TranscriptionSegment(
+                            text=text.strip(),
+                            start=pair_timestamp_bounds[0][0],
+                            end=pair_timestamp_bounds[-1][1],
+                        )
+                    )
+                elif not parsed_timestamp_count:
                     # 无词级时间戳，创建单个段
                     segments.append(
                         TranscriptionSegment(

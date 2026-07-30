@@ -18,7 +18,7 @@ class TestPipelineConfig:
         assert isinstance(config, PipelineConfig)
         assert config.separation.engine == "uvr"
         assert config.vad.engine == "silero"
-        assert config.asr.engine == "faster-whisper"
+        assert config.asr.engine == "auto"
 
     def test_load_podcast_config(self):
         config = ConfigLoader().load_profile("podcast")

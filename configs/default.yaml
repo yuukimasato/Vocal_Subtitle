@@ -197,11 +197,14 @@ pipeline:
 
   # Stage 4: ASR 识别
   asr:
-    engine: "faster-whisper"                   # faster-whisper | whisper-cpp | funasr
+    engine: "auto"                             # auto | faster-whisper | whisper-cpp | funasr
     model: "large-v3"
     device: "auto"
     compute_type: "float16"
     # language: "zh"                           # 语言锁定，null = 自动检测
+    # whisper.cpp 可执行文件与 GGML/GGUF 模型的显式路径（仅 whisper.cpp 使用）
+    # whisper_cpp_bin: "/usr/local/bin/whisper-cli"
+    # whisper_cpp_model_path: "/models/ggml-medium.bin"
     beam_size: 5
     word_timestamps: true
     condition_on_previous_text: false          # 每段独立，防止跨段幻觉
@@ -218,6 +221,26 @@ pipeline:
       min_word_confidence: 0.0
       hallucination_filter: true
       language_switch_threshold: 0.7
+
+    # 自动语言路由与质量门禁
+    auto_routing:
+      enabled: true
+      language_probe_model: "tiny"
+      language_probe_window_seconds: 8.0
+      language_probe_max_windows: 8
+      zh_min_probability: 0.85
+      zh_required_window_ratio: 1.0
+      uncertain_window_policy: "faster-whisper"
+      fallback_on_quality_failure: true
+      fallback_engine: "faster-whisper"
+      route_version: "asr-route-v1"
+      quality_gate_version: "asr-quality-v1"
+      min_coverage_ratio: 0.80
+      min_text_density: 0.20
+      max_event_duration: 12.0
+      long_audio_seconds: 60.0
+      long_audio_min_text_chars: 12
+      max_overlap_ratio: 0.35
 
   # Stage 4.5: LLM 说话人角色标注（可选）
   speaker_role:

@@ -22,7 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .asr.base import ASREngine, TranscriptionSegment
+from .asr.base import ASREngine, ASRInvalidResultError, TranscriptionSegment
+from .asr.router import ASRRouteDecision, ASRRouter
 from .config import PipelineConfig
 from .mapping.subtitle_builder import SubtitleBuilder, SubtitleRule
 from .mapping.time_mapper import SubtitleEvent, TimeMapper
@@ -55,6 +56,14 @@ class PipelineStats:
     diarization_silhouette: Optional[float] = None
     diagnostic_report: Optional[Dict] = None
     quality_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    quality_status: str = "pass"
+    requested_engine: str = ""
+    selected_engine: str = ""
+    final_engine: str = ""
+    detected_language: str = "unknown"
+    language_probability: float = 0.0
+    asr_route_version: str = ""
+    quality_gate_version: str = ""
 
     # global ASR path diagnostics
     asr_path: str = ""
@@ -103,6 +112,14 @@ class PipelineStats:
             "speaker_conflict_count": self.speaker_conflict_count,
             "unknown_speaker_count": self.unknown_speaker_count,
             "quality_diagnostics": self.quality_diagnostics,
+            "quality_status": self.quality_status,
+            "requested_engine": self.requested_engine,
+            "selected_engine": self.selected_engine,
+            "final_engine": self.final_engine,
+            "detected_language": self.detected_language,
+            "language_probability": self.language_probability,
+            "asr_route_version": self.asr_route_version,
+            "quality_gate_version": self.quality_gate_version,
             "hallucination_filter_version": getattr(self, "hallucination_filter_version", ""),
             "hallucination_dropped_count": getattr(self, "hallucination_dropped_count", 0),
         }
@@ -142,6 +159,14 @@ class PipelineStats:
         stats.diarization_silhouette = payload.get("diarization_silhouette")
         stats.diagnostic_report = payload.get("diagnostic_report")
         stats.quality_diagnostics = payload.get("quality_diagnostics", {})
+        stats.quality_status = payload.get("quality_status", "pass")
+        stats.requested_engine = payload.get("requested_engine", "")
+        stats.selected_engine = payload.get("selected_engine", "")
+        stats.final_engine = payload.get("final_engine", "")
+        stats.detected_language = payload.get("detected_language", "unknown")
+        stats.language_probability = payload.get("language_probability", 0.0)
+        stats.asr_route_version = payload.get("asr_route_version", "")
+        stats.quality_gate_version = payload.get("quality_gate_version", "")
         return stats
 
 
@@ -189,6 +214,8 @@ class Pipeline:
 
         # ASR 路径追踪
         self._requested_asr_path: str = ""
+        self._asr_route_decision: Optional[ASRRouteDecision] = None
+        self._asr_engines: Dict[str, ASREngine] = {}
 
     # Direct full-audio ASR is intentionally bounded until the existing
     # GlobalTranscriber windowing path is promoted to the main route.
@@ -201,12 +228,17 @@ class Pipeline:
     @staticmethod
     def _classify_global_failure(exc: Exception) -> str:
         """Classify a global ASR failure into a stable category."""
+        category = getattr(exc, "category", None)
+        if category:
+            return category
         msg = str(exc).lower()
         type_name = type(exc).__name__
         if isinstance(exc, ImportError):
             return "dependency_unavailable"
         if isinstance(exc, MemoryError):
             return "resource_unavailable"
+        if "quality gate" in msg or "quality_gate" in msg:
+            return "quality_gate_failed"
         if any(kw in msg for kw in ("degraded", "empty result", "no transcript")):
             return "invalid_result"
         if any(kw in type_name.lower() + msg for kw in ("memory", "oom", "cuda out")):
@@ -219,6 +251,46 @@ class Pipeline:
         Tests monkeypatch this method; the default returns the standard engine.
         """
         return self._get_asr_engine()
+
+    def _prepare_asr_route(self, audio, sample_rate: int, speech_intervals=None):
+        """Resolve and cache the task-level ASR route exactly once."""
+        if self._asr_route_decision is not None:
+            return self._asr_route_decision
+
+        def factory(engine_name, model=None, probe=False):
+            return self._get_asr_engine_for(
+                engine_name, model=model, cache=not probe
+            )
+
+        decision = ASRRouter(self.config, factory).decide(
+            audio, sample_rate, speech_intervals
+        )
+        self._asr_route_decision = decision
+        self._resolved_language = decision.language
+        self._asr_engine = self._get_asr_engine_for(decision.selected_engine)
+        logger.info(
+            "ASR route: requested=%s selected=%s language=%s probability=%.3f reason=%s",
+            decision.requested_engine,
+            decision.selected_engine,
+            decision.detected_language,
+            decision.language_probability,
+            decision.decision_reason,
+        )
+        if self._progress is not None:
+            try:
+                self._progress.update_stage(
+                    0,
+                    extra={
+                        "detail": (
+                            f"语言检测完成：{decision.detected_language}，"
+                            f"路由到 {decision.selected_engine}"
+                        )
+                    },
+                )
+            except Exception:
+                # Global ASR may resolve before the segmented ASR stage exists.
+                pass
+        return decision
 
     def _run_global_transcription_path(
         self,
@@ -321,6 +393,8 @@ class Pipeline:
         if timeline is None:
             return [], {"recovery": {"status": "no_timeline"}, "physical_coverage": {"complete": False}}, global_transcript
 
+        tail_repair = self._repair_tail_evidence(timeline, stats.duration_seconds)
+
         bins = build_physical_subtitle_bins(
             timeline, audio=audio, sample_rate=sample_rate,
         )
@@ -393,7 +467,20 @@ class Pipeline:
         ]
 
         coverage = audit_physical_coverage(bins, allocation_result.allocations)
-        diag = {"physical_coverage": coverage.to_dict(), "recovery": {"status": "recovered" if coverage.complete else "incomplete"}}
+        from .asr.quality_gate import evaluate_asr_quality
+
+        quality = evaluate_asr_quality(
+            events,
+            [(item.start, item.end) for item in bins],
+            stats.duration_seconds,
+            **self._quality_gate_kwargs(),
+        )
+        diag = {
+            "physical_coverage": coverage.to_dict(),
+            "quality_gate": quality.to_dict(),
+            "tail_evidence_repair": tail_repair,
+            "recovery": {"status": "recovered" if coverage.complete else "incomplete"},
+        }
 
         # Tail recovery
         if not coverage.complete and coverage.recovery_ranges:
@@ -468,7 +555,94 @@ class Pipeline:
         elif not coverage.complete:
             global_transcript = GlobalTranscript(audio_duration=stats.duration_seconds, words=words, segments=transcript_segments, backend=engine.name, status="degraded")
 
+        quality = evaluate_asr_quality(
+            events,
+            [(item.start, item.end) for item in bins],
+            stats.duration_seconds,
+            **self._quality_gate_kwargs(),
+        )
+        diag["quality_gate"] = quality.to_dict()
         return events, diag, global_transcript
+
+    def _quality_gate_kwargs(self) -> dict:
+        policy = self.config.asr.auto_routing
+        return {
+            "min_coverage_ratio": policy.min_coverage_ratio,
+            "min_text_density": policy.min_text_density,
+            "max_event_duration": policy.max_event_duration,
+            "long_audio_seconds": policy.long_audio_seconds,
+            "long_audio_min_text_chars": policy.long_audio_min_text_chars,
+            "max_overlap_ratio": policy.max_overlap_ratio,
+        }
+
+    @staticmethod
+    def _repair_tail_evidence(timeline, duration_seconds: float) -> dict:
+        """Preserve a longer corroborating tail when ffmpeg ends early.
+
+        The preferred ffmpeg skeleton remains the source for normal bins. A
+        longer Silero/coarse span is copied only across the disputed tail,
+        which keeps precise boundaries while preventing silent truncation.
+        """
+        evidence = list(getattr(timeline, "speech_evidence_spans", []) or [])
+        preferred = [item for item in evidence if item.source == "ffmpeg_skeleton"]
+        alternatives = [
+            item for item in evidence
+            if item.source != "ffmpeg_skeleton"
+            and item.source in {"silero", "ten", "webrtc", "boundary_fusion", "ffmpeg_coarse"}
+        ]
+        preferred_end = max((float(item.end) for item in preferred), default=0.0)
+        alternative = max(alternatives, key=lambda item: float(item.end), default=None)
+        alternative_end = float(getattr(alternative, "end", 0.0) or 0.0)
+        gap = alternative_end - preferred_end
+        if alternative is None or gap <= 0.15:
+            return {
+                "status": "not_needed",
+                "preferred_end": preferred_end,
+                "alternative_end": alternative_end,
+                "gap_seconds": max(0.0, gap),
+            }
+        end = min(float(duration_seconds), alternative_end)
+        start = max(0.0, min(float(alternative.start), preferred_end - 0.25))
+        try:
+            timeline.add_evidence(
+                start=start,
+                end=end,
+                source="ffmpeg_skeleton",
+                confidence=getattr(alternative, "confidence", None),
+                physical_clip_id=getattr(alternative, "physical_clip_id", None),
+                metadata={
+                    "tail_recheck": True,
+                    "source_evidence": getattr(alternative, "source", "unknown"),
+                    "original_preferred_end": preferred_end,
+                },
+            )
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "preferred_end": preferred_end,
+                "alternative_end": alternative_end,
+                "gap_seconds": gap,
+                "error": str(exc),
+            }
+        return {
+            "status": "extended",
+            "preferred_end": preferred_end,
+            "alternative_end": alternative_end,
+            "gap_seconds": gap,
+            "source": getattr(alternative, "source", "unknown"),
+            "recheck_start": start,
+            "recheck_end": end,
+        }
+
+    @staticmethod
+    def _validate_global_result(events, transcript, diagnostics):
+        if not events:
+            raise RuntimeError("global ASR returned no usable events")
+        if not Pipeline._is_usable_global_transcript(transcript):
+            raise RuntimeError("global ASR returned an invalid transcript")
+        coverage = diagnostics.get("physical_coverage", {})
+        if coverage and coverage.get("complete") is False:
+            raise RuntimeError("global ASR physical coverage is incomplete")
 
     @staticmethod
     def _classify_global_diagnostics(diagnostics: dict) -> str:
@@ -526,8 +700,18 @@ class Pipeline:
 
     def _is_usable_full_pipeline_cache(self, cache_entry: dict) -> bool:
         """Check whether a cached full-pipeline result matches the current ASR path."""
-        cached_path = cache_entry.get("stats", {}).get("asr_path", "")
+        cached_stats = cache_entry.get("stats", {})
+        cached_path = cached_stats.get("asr_path", "")
         requested_path = self._resolve_asr_path()
+        if self.config.asr.engine == "auto" and requested_path in ("global", "auto"):
+            policy = self.config.asr.auto_routing
+            if (
+                cached_stats.get("asr_route_version") != policy.route_version
+                or cached_stats.get("quality_gate_version") != policy.quality_gate_version
+                or not cached_stats.get("requested_engine")
+                or not cached_stats.get("selected_engine")
+            ):
+                return False
         if requested_path in ("global", "auto"):
             return cached_path == "global"
         # Old cache entries did not carry asr_path; retain compatibility for
@@ -821,6 +1005,12 @@ class Pipeline:
         """
         if getattr(self.config.asr, "language", None):
             return self.config.asr.language
+        if (
+            getattr(self.config.asr, "engine", "") == "auto"
+            and self._asr_engine is None
+        ):
+            decision = self._prepare_asr_route(audio, sample_rate)
+            return decision.language
         engine = self._get_asr_engine()
         engine.load_model()
         detector = getattr(engine, "detect_language", None)
@@ -919,12 +1109,18 @@ class Pipeline:
 
         return self._vad_engine
 
-    def _get_asr_engine(self) -> ASREngine:
-        if self._asr_engine is not None:
-            return self._asr_engine
+    def _get_asr_engine_for(
+        self,
+        engine_name: str,
+        model: Optional[str] = None,
+        cache: bool = True,
+    ) -> ASREngine:
+        """Construct one concrete engine; ``auto`` never reaches this method."""
+        if cache and engine_name in self._asr_engines:
+            return self._asr_engines[engine_name]
 
         asr_cfg = self.config.asr
-        engine_name = asr_cfg.engine
+        model = model or asr_cfg.model
 
         # 自动检测设备
         device = asr_cfg.device
@@ -941,8 +1137,8 @@ class Pipeline:
         if engine_name == "faster-whisper":
             from .asr.faster_whisper_engine import FasterWhisperEngine
 
-            self._asr_engine = FasterWhisperEngine(
-                model=asr_cfg.model,
+            engine = FasterWhisperEngine(
+                model=model,
                 device=device,
                 compute_type=asr_cfg.compute_type,
                 beam_size=asr_cfg.beam_size,
@@ -953,23 +1149,39 @@ class Pipeline:
         elif engine_name == "whisper-cpp":
             from .asr.whisper_cpp_engine import WhisperCppEngine
 
-            self._asr_engine = WhisperCppEngine(
-                model=asr_cfg.model,
+            engine = WhisperCppEngine(
+                model=model,
                 language=asr_cfg.language,
+                model_path=getattr(asr_cfg, "whisper_cpp_model_path", None),
+                whisper_cpp_bin=getattr(asr_cfg, "whisper_cpp_bin", None),
             )
         elif engine_name == "funasr":
             from .asr.funasr_engine import FunASREngine
 
-            self._asr_engine = FunASREngine(
-                model=asr_cfg.model,
+            engine = FunASREngine(
+                model=model,
                 device=device,
             )
         else:
             raise ValueError(
                 f"Unknown ASR engine: {engine_name}. "
-                f"Options: faster-whisper, whisper-cpp, funasr"
+                "Options: auto, faster-whisper, whisper-cpp, funasr"
             )
+        if cache:
+            self._asr_engines[engine_name] = engine
+        return engine
 
+    def _get_asr_engine(self) -> ASREngine:
+        if self._asr_engine is not None:
+            return self._asr_engine
+        engine_name = self.config.asr.engine
+        if engine_name == "auto":
+            engine_name = (
+                self._asr_route_decision.selected_engine
+                if self._asr_route_decision is not None
+                else "faster-whisper"
+            )
+        self._asr_engine = self._get_asr_engine_for(engine_name)
         return self._asr_engine
 
     def _get_cache(self) -> CacheManager:
@@ -1109,6 +1321,8 @@ class Pipeline:
         start_time = time.time()
         stats = PipelineStats(input_path=input_path, duration_seconds=0)
         self._resolved_language = None
+        self._asr_route_decision = None
+        self._asr_engine = None
 
         # 解析活跃模块（受降级模式控制）
         active = self._resolve_active_modules()
@@ -1227,6 +1441,7 @@ class Pipeline:
         requested_asr_path = self._resolve_asr_path()
         stats.asr_path = "legacy" if requested_asr_path == "segmented" else requested_asr_path
         global_completed = False
+        quality_speech_intervals = None
 
         if requested_asr_path in ("global", "auto"):
             stats.global_attempted = True
@@ -1266,6 +1481,21 @@ class Pipeline:
                         shadow_ffmpeg,
                         shadow_noise,
                     )
+                    decision = self._prepare_asr_route(
+                        audio,
+                        sample_rate,
+                        speech_intervals=[
+                            (item.start, item.end) for item in shadow_vad
+                        ] + list((shadow_ffmpeg or {}).get("skeleton", [])),
+                    )
+                    stats.requested_engine = decision.requested_engine
+                    stats.selected_engine = decision.selected_engine
+                    stats.final_engine = decision.selected_engine
+                    stats.detected_language = decision.detected_language
+                    stats.language_probability = decision.language_probability
+                    stats.asr_route_version = decision.route_version
+                    stats.quality_gate_version = decision.quality_gate_version
+                    global_diag["route"] = decision.to_dict()
                     events, global_diag, global_transcript = (
                         self._run_global_transcription_path(
                             audio=audio,
@@ -1278,19 +1508,25 @@ class Pipeline:
                         )
                     )
                     global_diag = dict(global_diag or {})
+                    global_diag["route"] = decision.to_dict()
                     global_diag["shadow"] = {
                         "status": getattr(shadow, "status", "unknown"),
                         "diagnostics": getattr(shadow, "diagnostics", {}),
                         "statistics": getattr(shadow, "statistics", {}),
                     }
                     stats.global_diagnostics = global_diag
-                    coverage = global_diag.get("physical_coverage", {})
-                    if not events:
-                        raise RuntimeError("global ASR returned no usable events")
-                    if not self._is_usable_global_transcript(global_transcript):
-                        raise RuntimeError("global ASR returned an invalid transcript")
-                    if coverage and coverage.get("complete") is False:
-                        raise RuntimeError("global ASR physical coverage is incomplete")
+                    quality_payload = global_diag.get("quality_gate", {})
+                    stats.quality_status = quality_payload.get("status", "pass")
+                    stats.quality_diagnostics["asr_quality_gate"] = quality_payload
+                    if (
+                        decision.selected_engine == "funasr"
+                        and quality_payload.get("status") == "failed"
+                    ):
+                        raise RuntimeError(
+                            "FunASR quality gate failed: "
+                            + ", ".join(quality_payload.get("reasons", []))
+                        )
+                    self._validate_global_result(events, global_transcript, global_diag)
 
                     stats.asr_path = "global"
                     stats.segment_count = len(global_transcript.segments)
@@ -1318,10 +1554,97 @@ class Pipeline:
                     logger.warning(
                         "Global ASR failed (%s): %s", category, reason,
                     )
+                    decision = self._asr_route_decision
+                    can_fallback = bool(
+                        requested_asr_path == "auto"
+                        and decision is not None
+                        and decision.requested_engine == "auto"
+                        and decision.selected_engine == "funasr"
+                        and decision.fallback_engine == "faster-whisper"
+                    )
+                    if can_fallback:
+                        try:
+                            logger.warning("Falling back once from FunASR to faster-whisper")
+                            self._asr_engine = self._get_asr_engine_for(
+                                "faster-whisper"
+                            )
+                            fallback_events, fallback_diag, fallback_transcript = (
+                                self._run_global_transcription_path(
+                                    audio=audio,
+                                    sample_rate=sample_rate,
+                                    shadow=shadow,
+                                    stats=stats,
+                                    vad_segments=shadow_vad,
+                                    ffmpeg_result=shadow_ffmpeg,
+                                    noise_profile=shadow_noise,
+                                )
+                            )
+                            fallback_diag = dict(fallback_diag or {})
+                            fallback_diag["route"] = decision.to_dict()
+                            fallback_diag["fallback"] = {
+                                "from": "funasr",
+                                "to": "faster-whisper",
+                                "reason": reason,
+                            }
+                            self._validate_global_result(
+                                fallback_events, fallback_transcript, fallback_diag
+                            )
+                            events = fallback_events
+                            global_transcript = fallback_transcript
+                            global_diag = {
+                                "primary": stats.global_diagnostics,
+                                "fallback_result": fallback_diag,
+                            }
+                            stats.global_diagnostics = global_diag
+                            stats.fallback_category = category
+                            stats.fallback_reason = reason
+                            stats.final_engine = "faster-whisper"
+                            fallback_quality = fallback_diag.get("quality_gate", {})
+                            stats.quality_status = fallback_quality.get(
+                                "status", "degraded"
+                            )
+                            stats.quality_diagnostics["asr_quality_gate"] = {
+                                "primary": stats.global_diagnostics.get("primary", {}).get(
+                                    "quality_gate", {}
+                                ),
+                                "fallback": fallback_quality,
+                            }
+                            stats.asr_path = "global"
+                            stats.segment_count = len(fallback_transcript.segments)
+                            stats.subtitle_count = len(events)
+                            events = self._post_process_events(
+                                events,
+                                vocals_path,
+                                audio,
+                                sample_rate,
+                                stats,
+                                ffmpeg_unified_result=shadow_ffmpeg,
+                            )
+                            global_completed = True
+                        except Exception as fallback_exc:
+                            fallback_reason = self._safe_failure_reason(fallback_exc)
+                            stats.global_diagnostics["fallback_error"] = fallback_reason
+                            stats.quality_status = "failed"
+                            logger.warning(
+                                "faster-whisper fallback failed: %s", fallback_reason
+                            )
                     if requested_asr_path == "global":
                         stats.asr_path = "global"
                         raise
-                    stats.asr_path = "legacy_degraded"
+                    if not global_completed:
+                        stats.asr_path = "legacy_degraded"
+
+        # Segmented/legacy paths still use the same task-level route. When no
+        # physical shadow is needed, probing falls back to full-audio windows.
+        if self._asr_route_decision is None:
+            decision = self._prepare_asr_route(audio, sample_rate)
+            stats.requested_engine = decision.requested_engine
+            stats.selected_engine = decision.selected_engine
+            stats.final_engine = decision.selected_engine
+            stats.detected_language = decision.detected_language
+            stats.language_probability = decision.language_probability
+            stats.asr_route_version = decision.route_version
+            stats.quality_gate_version = decision.quality_gate_version
 
         # ---- 骨架分段独立处理模式（跳过 VAD 分段，按声学骨架逐段处理） ----
         if global_completed:
@@ -1339,6 +1662,7 @@ class Pipeline:
             )
             stats.segment_count = seg_count
             stats.subtitle_count = len(events)
+            quality_speech_intervals = (skeleton_ffmpeg_result or {}).get("skeleton", [])
 
             # ---- 骨架分段后处理：帧级无缝衔接 + LLM 语义合并 + 声学校验 ----
             # 顺序：帧级衔接 → LLM 合并（改变边界） → 声学校验（校验最终边界）
@@ -1346,6 +1670,57 @@ class Pipeline:
                 events, vocals_path, audio, sample_rate, stats,
                 ffmpeg_unified_result=skeleton_ffmpeg_result,
             )
+
+            from .asr.quality_gate import evaluate_asr_quality
+            quality = evaluate_asr_quality(
+                events,
+                quality_speech_intervals or [
+                    (getattr(item, "physical_start", item.start),
+                     getattr(item, "physical_end", item.end))
+                    for item in events
+                ],
+                stats.duration_seconds,
+                **self._quality_gate_kwargs(),
+            )
+            stats.quality_status = quality.status
+            stats.quality_diagnostics["asr_quality_gate"] = quality.to_dict()
+            decision = self._asr_route_decision
+            if (
+                quality.status == "failed"
+                and decision is not None
+                and decision.requested_engine == "auto"
+                and decision.selected_engine == "funasr"
+                and decision.fallback_engine == "faster-whisper"
+            ):
+                logger.warning("Segmented FunASR quality gate failed; retrying with faster-whisper")
+                self._asr_engine = self._get_asr_engine_for("faster-whisper")
+                events, seg_count, skeleton_ffmpeg_result = self._process_skeleton_segmented(
+                    audio=audio,
+                    sample_rate=sample_rate,
+                    vocals_path=vocals_path,
+                )
+                stats.segment_count = seg_count
+                stats.subtitle_count = len(events)
+                events = self._post_process_events(
+                    events,
+                    vocals_path,
+                    audio,
+                    sample_rate,
+                    stats,
+                    ffmpeg_unified_result=skeleton_ffmpeg_result,
+                )
+                stats.final_engine = "faster-whisper"
+                fallback_quality = evaluate_asr_quality(
+                    events,
+                    (skeleton_ffmpeg_result or {}).get("skeleton", []),
+                    stats.duration_seconds,
+                    **self._quality_gate_kwargs(),
+                )
+                stats.quality_status = fallback_quality.status
+                stats.quality_diagnostics["asr_quality_gate"] = {
+                    "primary": quality.to_dict(),
+                    "fallback": fallback_quality.to_dict(),
+                }
 
         # ---- Stage 2-5.6: 核心处理流程（非骨架模式） ----
         elif macro_chunks is not None and len(macro_chunks) > 1:
@@ -1532,6 +1907,9 @@ class Pipeline:
                 events, vocals_path, audio, sample_rate, stats,
                 ffmpeg_unified_result=ctx.ffmpeg_unified_result,
             )
+
+        if stats.detected_language == "unknown" and self._resolved_language:
+            stats.detected_language = str(self._resolved_language)
 
         # ---- 结束时间后校验（LLM 优化前，确保干净版字幕时间戳正确） ----
         try:
@@ -2348,6 +2726,9 @@ class Pipeline:
 
         results = []
         fallback_count = 0
+        failed_segments = 0
+        recognized_segments = 0
+        first_failure: Optional[Exception] = None
         for i, seg in enumerate(segments):
             self._progress.update_stage(
                 1,
@@ -2364,6 +2745,22 @@ class Pipeline:
                     end=seg.end,
                     model=asr_cfg.model,
                     language=resolved_language,
+                    requested_engine=asr_cfg.engine,
+                    selected_engine=(
+                        self._asr_route_decision.selected_engine
+                        if self._asr_route_decision is not None
+                        else engine.name
+                    ),
+                    asr_route_version=(
+                        self._asr_route_decision.route_version
+                        if self._asr_route_decision is not None
+                        else "legacy"
+                    ),
+                    quality_gate_version=(
+                        self._asr_route_decision.quality_gate_version
+                        if self._asr_route_decision is not None
+                        else "legacy"
+                    ),
                 )
                 cached = cache.get("transcription", cache_key)
                 if cached is not None:
@@ -2372,6 +2769,11 @@ class Pipeline:
                     cached = self._dedup_overlapping_segments(cached)
                     cached, _dropped = self._filter_asr_results(cached)
                     self._hallucination_dropped_count = getattr(self, "_hallucination_dropped_count", 0) + _dropped
+                    # A cached empty list can be the intentional result of
+                    # filtering a previously successful recognition (for
+                    # example a known hallucination phrase). It must not be
+                    # mistaken for a backend outage.
+                    recognized_segments += 1
                     results.append(cached)
                     continue
 
@@ -2393,6 +2795,8 @@ class Pipeline:
                     sample_rate,
                     language=resolved_language,
                 )
+                if seg_results:
+                    recognized_segments += 1
 
                 # ---- 置信度回退：检测代码穿插 ----
                 # 当全局语言与当前片段不匹配时（如中文视频中
@@ -2458,6 +2862,9 @@ class Pipeline:
 
             except Exception as e:
                 logger.error("ASR failed for segment %d: %s", i, e)
+                failed_segments += 1
+                if first_failure is None:
+                    first_failure = e
                 results.append([])
 
         if fallback_count > 0:
@@ -2466,6 +2873,15 @@ class Pipeline:
                 "with auto-detect (possible code-switching)",
                 fallback_count, len(segments),
             )
+
+        if segments and recognized_segments == 0:
+            detail = (
+                f"ASR returned no usable subtitles for {len(segments)} detected "
+                f"speech segments"
+            )
+            if failed_segments:
+                detail += f" ({failed_segments} segment failures)"
+            raise ASRInvalidResultError(detail) from first_failure
 
         return results
 
@@ -3368,17 +3784,25 @@ class Pipeline:
 
         return result
 
-    @staticmethod
     def _finalize_events(
+        self,
         events: List[SubtitleEvent],
         stats: PipelineStats,
         audio_duration: Optional[float],
     ) -> List[SubtitleEvent]:
         """Finalize once before stats, API responses, cache, and export."""
         from .mapping.finalize import finalize_subtitle_events
+        from .mapping.finalize import FinalizeConfig
+        sub_cfg = getattr(self.config, "subtitle", None)
 
         result = finalize_subtitle_events(
             events,
+            config=FinalizeConfig(
+                max_duration=getattr(sub_cfg, "max_duration", 5.0),
+                max_chars_cjk=getattr(sub_cfg, "max_chars_cjk", 20),
+                max_chars_latin=getattr(sub_cfg, "max_chars_latin", 42),
+                max_lines=getattr(sub_cfg, "max_lines", 2),
+            ),
             audio_duration=audio_duration if audio_duration and audio_duration > 0 else None,
         )
         stats.subtitle_count = result.subtitle_count
@@ -4080,6 +4504,8 @@ class Pipeline:
         # ★ 跨段说话人偏移量（同多块路径）：每个骨架段独立运行 diarization，
         # 从 0 开始编号。为防止不同段的 "说话人0" 混淆，累加偏移量。
         speaker_offset = 0
+        empty_asr_segments = 0
+        first_empty_asr_error: Optional[Exception] = None
 
         total_segments = len(speech_skeleton)
         for idx, (seg_start, seg_end) in enumerate(speech_skeleton):
@@ -4109,13 +4535,27 @@ class Pipeline:
                     idx + 1, total_segments, seg_start, seg_end, seg_duration,
                 )
 
-                seg_events, seg_count, _seg_ctx = self._process_chunk_pipeline(
-                    audio=seg_audio,
-                    sample_rate=sample_rate,
-                    vocals_path=tmp_path,
-                    chunk_label=chunk_label,
-                    parallel_vad=False,  # 骨架分段嵌套线程，避免 PyTorch 死锁
-                )
+                try:
+                    seg_events, seg_count, _seg_ctx = self._process_chunk_pipeline(
+                        audio=seg_audio,
+                        sample_rate=sample_rate,
+                        vocals_path=tmp_path,
+                        chunk_label=chunk_label,
+                        parallel_vad=False,  # 骨架分段嵌套线程，避免 PyTorch 死锁
+                    )
+                except ASRInvalidResultError as exc:
+                    # A physical skeleton can contain a very short/noisy burst
+                    # that VAD keeps but ASR cannot transcribe. Skip only this
+                    # independent segment and continue with the rest.
+                    empty_asr_segments += 1
+                    if first_empty_asr_error is None:
+                        first_empty_asr_error = exc
+                    logger.warning(
+                        "%sASR produced no usable subtitles; skipping skeleton segment: %s",
+                        chunk_label,
+                        exc,
+                    )
+                    continue
             finally:
                 tmp_path.unlink(missing_ok=True)
 
@@ -4139,6 +4579,13 @@ class Pipeline:
 
             total_seg_count += seg_count
             all_events.extend(seg_events)
+
+        if speech_skeleton and not all_events and first_empty_asr_error is not None:
+            raise ASRInvalidResultError(
+                "ASR returned no usable subtitles for any of "
+                f"{len(speech_skeleton)} skeleton speech segments "
+                f"({empty_asr_segments} segment failures)"
+            ) from first_empty_asr_error
 
         # Step 3: 按 start 排序
         all_events.sort(key=lambda e: e.start)

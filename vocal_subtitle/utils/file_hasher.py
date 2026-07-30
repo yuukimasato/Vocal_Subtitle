@@ -110,6 +110,8 @@ def _pipeline_code_fingerprint() -> str:
         "vocal_subtitle/asr/funasr_engine.py",
         "vocal_subtitle/asr/whisper_cpp_engine.py",
         "vocal_subtitle/asr/base.py",
+        "vocal_subtitle/asr/router.py",
+        "vocal_subtitle/asr/quality_gate.py",
         "vocal_subtitle/asr/boundary_reasr.py",
     ]
 

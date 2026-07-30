@@ -17,6 +17,8 @@ from .base import ASREngine, TranscriptionSegment, WordTimestamp
 from .faster_whisper_engine import FasterWhisperEngine
 from .funasr_engine import FunASREngine
 from .whisper_cpp_engine import WhisperCppEngine
+from .router import ASRRouteDecision, ASRRouter
+from .quality_gate import ASRQualityResult, evaluate_asr_quality
 
 __all__ = [
     "ASREngine",
@@ -25,4 +27,8 @@ __all__ = [
     "FasterWhisperEngine",
     "WhisperCppEngine",
     "FunASREngine",
+    "ASRRouteDecision",
+    "ASRRouter",
+    "ASRQualityResult",
+    "evaluate_asr_quality",
 ]

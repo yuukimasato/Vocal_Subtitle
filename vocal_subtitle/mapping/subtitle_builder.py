@@ -379,16 +379,13 @@ class SubtitleBuilder:
         _original: SubtitleEvent,
     ) -> SubtitleEvent:
         """从累积的句子列表构造单个 SubtitleEvent，保留说话人信息"""
-        return SubtitleEvent(
-            index=0,
-            start=start,
-            end=end,
-            text=" ".join(texts),
-            words=words,
-            original_text=_original.original_text,
-            speaker_id=_original.speaker_id,
-            speaker_label=_original.speaker_label,
-        )
+        sub_event = copy.deepcopy(_original)
+        sub_event.index = 0
+        sub_event.start = start
+        sub_event.end = end
+        sub_event.text = " ".join(texts)
+        sub_event.words = list(words)
+        return sub_event
 
     # ------------------------------------------------------------------
     # 降级路径：强制拆分（在逗号/空格处），用于无句子边界或单句过长
@@ -399,102 +396,57 @@ class SubtitleBuilder:
     ) -> List[SubtitleEvent]:
         """在弱分隔符处按字符数阈值强制拆分（降级路径）。"""
         text = event.text
-        parts = re.split(f"({self._WEAK_SPLIT.pattern})", text)
         total_duration = event.duration
         total_chars = max(1, self._count_display_chars(text))
-        target_chars = self._max_chars_for_text(text) // 2
+        required_chunks = max(1, math.ceil(total_duration / self.rule.max_duration))
+        target_chars = max(
+            1,
+            min(
+                self._max_chars_for_text(text) // 2,
+                max(1, total_chars // required_chunks),
+            ),
+        )
+
+        # Work on text chunks directly so a single unpunctuated CJK token is
+        # still split. Prefer a weak separator near the target; otherwise
+        # force a character boundary as the last-resort safety net.
+        chunks: List[str] = []
+        remaining = text.strip()
+        while remaining:
+            if self._count_display_chars(remaining) <= target_chars:
+                chunks.append(remaining.strip())
+                break
+
+            candidate = remaining[:target_chars]
+            split_at = max(
+                (candidate.rfind(mark) for mark in ",，;； \t—…"),
+                default=-1,
+            )
+            if split_at >= max(1, target_chars // 2):
+                cut = split_at + 1
+            else:
+                cut = target_chars
+            chunks.append(remaining[:cut].strip())
+            remaining = remaining[cut:].lstrip()
 
         sub_events = []
-        current_text = ""
         char_pos = 0
-        seg_start_char = 0
-
-        for part in parts:
-            if not part:
-                continue
-
-            is_delim = bool(re.match(f"^{self._WEAK_SPLIT.pattern}$", part))
-
-            if is_delim:
-                if not current_text.strip():
-                    if sub_events:
-                        sub_events[-1].text = sub_events[-1].text.rstrip() + part
-                        delim_chars = self._count_display_chars(part)
-                        new_char_pos = char_pos + delim_chars
-                        sub_events[-1].end = (
-                            event.start
-                            + (new_char_pos / total_chars) * total_duration
-                        )
-                        seg_start_char = new_char_pos
-                        char_pos = new_char_pos
-                    else:
-                        char_pos += self._count_display_chars(part)
-                        seg_start_char = char_pos
-                    continue
-                current_text += part
-                continue
-
-            part_chars = self._count_display_chars(part)
-            new_char_pos = char_pos + part_chars
-            current_text += part
-            current_seg_chars = new_char_pos - seg_start_char
-
-            if current_seg_chars >= target_chars or new_char_pos >= total_chars:
-                start_prop = seg_start_char / total_chars
-                end_prop = new_char_pos / total_chars
-                sub_start = event.start + start_prop * total_duration
-                sub_end = event.start + end_prop * total_duration
-
-                sub_words = [
-                    w for w in event.words
-                    if w.start >= sub_start - event.start
-                    and w.end <= sub_end - event.start + 0.001
-                ]
-
-                sub_text = current_text.strip()
-                sub_events.append(
-                    SubtitleEvent(
-                        index=0,
-                        start=max(event.start, sub_start),
-                        end=min(event.end, sub_end),
-                        text=sub_text,
-                        words=sub_words,
-                        original_text=event.original_text,
-                        speaker_id=event.speaker_id,
-                        speaker_label=event.speaker_label,
-                    )
-                )
-                current_text = ""
-                seg_start_char = new_char_pos
-
-            char_pos = new_char_pos
-
-        # 尾部残留：太短则合并到前一条，避免孤立碎片
-        if current_text.strip():
-            stripped = current_text.strip()
-            tail_chars = self._count_display_chars(stripped)
-            # 尾部片段占比 < 25% 或 ≤ 4 个显示字符 → 合并到前一条
-            if sub_events and (
-                tail_chars <= 4
-                or (tail_chars / max(1, total_chars)) < 0.25
-            ):
-                sub_events[-1].end = event.end
-                sub_events[-1].text = (
-                    sub_events[-1].text.rstrip() + " " + stripped
-                )
-            else:
-                prev_end = sub_events[-1].end if sub_events else event.start
-                sub_events.append(
-                    SubtitleEvent(
-                        index=0,
-                        start=prev_end,
-                        end=event.end,
-                        text=stripped,
-                        original_text=event.original_text,
-                        speaker_id=event.speaker_id,
-                        speaker_label=event.speaker_label,
-                    )
-                )
+        for chunk in chunks:
+            chunk_chars = max(1, self._count_display_chars(chunk))
+            start_prop = char_pos / total_chars
+            end_prop = min(1.0, (char_pos + chunk_chars) / total_chars)
+            sub_start = event.start + start_prop * total_duration
+            sub_end = event.start + end_prop * total_duration
+            sub_words = [
+                w for w in event.words
+                if w.start >= sub_start - event.start
+                and w.end <= sub_end - event.start + 0.001
+            ]
+            sub_events.append(self._make_sub_event(
+                [chunk], sub_words, max(event.start, sub_start),
+                min(event.end, sub_end), event,
+            ))
+            char_pos += chunk_chars
 
         return sub_events if sub_events else [event]
 

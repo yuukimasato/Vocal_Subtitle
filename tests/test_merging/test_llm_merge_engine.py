@@ -196,6 +196,38 @@ class TestBuildMergeInput:
         assert result[0]["gap_to_next_sec"] == pytest.approx(1.0)
 
 
+def test_fast_merge_respects_max_combined_duration():
+    engine = LLMMergeEngine(MergeDecisionConfig(
+        fast_merge_max_gap=0.2,
+        max_combined_duration=5.0,
+        llm_tier="rule_only",
+    ))
+    fragments = [
+        {"id": 1, "start": 0.0, "end": 2.0, "text": "one,", "speaker": "A"},
+        {"id": 2, "start": 2.1, "end": 4.0, "text": "two,", "speaker": "A"},
+        {"id": 3, "start": 4.1, "end": 6.0, "text": "three", "speaker": "A"},
+    ]
+
+    result = engine._apply_fast_merges(engine._ensure_gap_info(fragments))
+
+    assert len(result) == 2
+    assert result[0]["end"] == 4.0
+
+
+def test_llm_merge_rejects_duration_violation():
+    engine = LLMMergeEngine(MergeDecisionConfig(max_combined_duration=5.0))
+    fragments = [
+        {"id": 1, "start": 0.0, "end": 3.0, "text": "one", "speaker": "A"},
+        {"id": 2, "start": 3.1, "end": 6.0, "text": "two", "speaker": "A"},
+    ]
+
+    result = engine._apply_all_decisions(
+        fragments, [{"ids": [1, 2], "reason": "test"}], {}
+    )
+
+    assert len(result) == 2
+
+
 class TestFrameSeamlessStitching:
     """帧级无缝衔接测试 (3.7)"""
 

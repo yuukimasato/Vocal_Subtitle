@@ -87,8 +87,14 @@ class RoleLabeler:
                 api_key=api_key,
                 temperature=temperature,
             )
+        except ImportError as e:
+            # The role labeler is optional. Missing OpenAI/tenacity packages
+            # must use the documented fallback without looking like a failed
+            # transcription task in the server log.
+            logger.info("LLM role labeling unavailable; using fallback labels: %s", e)
+            return self._fallback_labels(transcript_by_speaker)
         except Exception as e:
-            logger.error("LLM role labeling failed: %s", e)
+            logger.warning("LLM role labeling failed; using fallback labels: %s", e)
             return self._fallback_labels(transcript_by_speaker)
 
         # Step 3: 解析 JSON 响应

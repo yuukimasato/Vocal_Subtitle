@@ -14,6 +14,7 @@
 
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -21,9 +22,18 @@ from typing import List, Optional
 
 import numpy as np
 
-from .base import ASREngine, TranscriptionSegment, WordTimestamp
+from .base import ASRDependencyError, ASREngine, ASRModelError, TranscriptionSegment, WordTimestamp
 
 logger = logging.getLogger(__name__)
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _project_local_binary() -> Path:
+    return _PROJECT_ROOT / "cache" / "whisper_cpp" / "build" / "bin" / "whisper-cli"
+
+
+def _project_local_model_dir() -> Path:
+    return _PROJECT_ROOT / "cache" / "whisper_cpp" / "models"
 
 
 class WhisperCppEngine(ASREngine):
@@ -44,6 +54,7 @@ class WhisperCppEngine(ASREngine):
         whisper_cpp_bin: Optional[str] = None,
         n_threads: int = 4,
         language: Optional[str] = None,
+        model_path: Optional[str] = None,
     ):
         """
         Args:
@@ -53,12 +64,16 @@ class WhisperCppEngine(ASREngine):
             language: 默认语言
         """
         self._model_size = model
-        self._bin = whisper_cpp_bin or os.getenv(
-            "WHISPER_CPP_BIN", "whisper-cli"
+        configured_bin = whisper_cpp_bin or os.getenv("WHISPER_CPP_BIN")
+        local_binary = _project_local_binary()
+        self._bin = configured_bin or (
+            str(local_binary)
+            if local_binary.is_file() and os.access(local_binary, os.X_OK)
+            else "whisper-cli"
         )
         self._n_threads = n_threads
         self._language = language
-        self._model_path: Optional[Path] = None
+        self._model_path: Optional[Path] = Path(model_path) if model_path else None
 
     @property
     def name(self) -> str:
@@ -79,25 +94,46 @@ class WhisperCppEngine(ASREngine):
         else:
             # 从默认位置查找
             default_dirs = [
+                _project_local_model_dir(),
                 Path.home() / ".cache" / "whisper",
                 Path.home() / ".cache" / "vocal-subtitle" / "whisper-cpp",
                 Path("models"),
             ]
-
-            model_filename = f"ggml-{self._model_size}.bin"
-            for d in default_dirs:
-                candidate = d / model_filename
-                if candidate.exists():
-                    self._model_path = candidate
-                    break
+            configured_model = os.getenv("WHISPER_CPP_MODEL")
+            if configured_model:
+                self._model_path = Path(configured_model)
 
             if self._model_path is None:
-                logger.warning(
-                    "Whisper model file not found. "
-                    "Please download it first, e.g.: "
-                    "bash scripts/download-ggml-model.sh %s",
-                    self._model_size,
-                )
+                model_filename = f"ggml-{self._model_size}.bin"
+                for d in default_dirs:
+                    candidate = d / model_filename
+                    if candidate.exists():
+                        self._model_path = candidate
+                        break
+
+        binary = Path(self._bin)
+        if not binary.exists() and shutil.which(self._bin) is None:
+            raise ASRDependencyError(
+                f"whisper.cpp executable not found: {self._bin}. "
+                "Install whisper.cpp or set WHISPER_CPP_BIN."
+            )
+        if binary.exists() and not os.access(binary, os.X_OK):
+            raise ASRDependencyError(
+                f"whisper.cpp executable is not executable: {binary}. "
+                "Fix its permissions or set WHISPER_CPP_BIN to an executable."
+            )
+
+        if self._model_path is None or not self._model_path.is_file():
+            expected = f"ggml-{self._model_size}.bin"
+            raise ASRModelError(
+                f"whisper.cpp model not found: {expected}. "
+                "Set WHISPER_CPP_MODEL or provide model_path."
+            )
+        if self._model_path.suffix.lower() not in {".bin", ".gguf", ".ggml"}:
+            raise ASRModelError(
+                f"Unsupported whisper.cpp model format: {self._model_path}. "
+                "Use a GGML/GGUF .bin, .ggml or .gguf model."
+            )
 
     def transcribe(
         self,
