@@ -16,12 +16,13 @@ import logging
 import tempfile
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from .application.pipeline_result import PipelineStats  # noqa: F401 — backward-compat re-export
+from .application.pipeline_services import PipelineServiceFactory
 from .asr.base import ASREngine, ASRInvalidResultError, TranscriptionSegment
 from .asr.router import ASRRouteDecision, ASRRouter
 from .config import PipelineConfig
@@ -40,134 +41,6 @@ from .utils.task_history import TaskHistoryManager
 from .vad.base import SpeechSegment, VADEngine
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class PipelineStats:
-    """管道执行统计"""
-
-    input_path: Path
-    duration_seconds: float
-    stage_timings: Dict[str, float] = field(default_factory=dict)
-    total_time: float = 0.0
-    segment_count: int = 0
-    subtitle_count: int = 0
-    speaker_count: int = 0
-    diarization_silhouette: Optional[float] = None
-    diagnostic_report: Optional[Dict] = None
-    quality_diagnostics: Dict[str, Any] = field(default_factory=dict)
-    quality_status: str = "pass"
-    requested_engine: str = ""
-    selected_engine: str = ""
-    final_engine: str = ""
-    detected_language: str = "unknown"
-    language_probability: float = 0.0
-    asr_route_version: str = ""
-    quality_gate_version: str = ""
-
-    # global ASR path diagnostics
-    asr_path: str = ""
-    global_attempted: bool = False
-    fallback_category: str = ""
-    fallback_reason: str = ""
-    global_diagnostics: Dict = field(default_factory=dict)
-
-    # diarization canonicalization
-    raw_diarization_speaker_count: int = 0
-    canonical_speaker_count: int = 0
-    speaker_merge_map: Dict = field(default_factory=dict)
-    canonicalization_status: str = ""
-
-    # diarization diagnostics
-    diarization_backend: str = ""
-    diarization_status: str = ""
-    mixed_event_count: int = 0
-    atomic_span_count: int = 0
-    local_speaker_split_count: int = 0
-    speaker_conflict_count: int = 0
-    unknown_speaker_count: int = 0
-
-    def to_dict(self) -> dict:
-        result = {
-            "input_path": str(self.input_path),
-            "duration_seconds": self.duration_seconds,
-            "stage_timings": self.stage_timings,
-            "total_time": self.total_time,
-            "segment_count": self.segment_count,
-            "subtitle_count": self.subtitle_count,
-            "asr_path": self.asr_path,
-            "global_attempted": self.global_attempted,
-            "fallback_category": self.fallback_category,
-            "fallback_reason": self.fallback_reason,
-            "global_diagnostics": self.global_diagnostics,
-            "raw_diarization_speaker_count": self.raw_diarization_speaker_count,
-            "canonical_speaker_count": self.canonical_speaker_count,
-            "speaker_merge_map": self.speaker_merge_map,
-            "canonicalization_status": self.canonicalization_status,
-            "diarization_backend": self.diarization_backend,
-            "diarization_status": self.diarization_status,
-            "mixed_event_count": self.mixed_event_count,
-            "atomic_span_count": self.atomic_span_count,
-            "local_speaker_split_count": self.local_speaker_split_count,
-            "speaker_conflict_count": self.speaker_conflict_count,
-            "unknown_speaker_count": self.unknown_speaker_count,
-            "quality_diagnostics": self.quality_diagnostics,
-            "quality_status": self.quality_status,
-            "requested_engine": self.requested_engine,
-            "selected_engine": self.selected_engine,
-            "final_engine": self.final_engine,
-            "detected_language": self.detected_language,
-            "language_probability": self.language_probability,
-            "asr_route_version": self.asr_route_version,
-            "quality_gate_version": self.quality_gate_version,
-            "hallucination_filter_version": getattr(self, "hallucination_filter_version", ""),
-            "hallucination_dropped_count": getattr(self, "hallucination_dropped_count", 0),
-        }
-        if self.speaker_count:
-            result["speaker_count"] = self.speaker_count
-        if self.diarization_silhouette is not None:
-            result["diarization_silhouette"] = self.diarization_silhouette
-        if self.diagnostic_report:
-            result["diagnostic_report"] = self.diagnostic_report
-        return result
-
-    @classmethod
-    def from_dict(
-        cls, input_path: Path, payload: dict, duration_seconds: float = 0.0
-    ) -> "PipelineStats":
-        stats = cls(input_path=input_path, duration_seconds=duration_seconds)
-        stats.total_time = payload.get("total_time", 0.0)
-        stats.segment_count = payload.get("segment_count", 0)
-        stats.subtitle_count = payload.get("subtitle_count", 0)
-        stats.asr_path = payload.get("asr_path", "")
-        stats.global_attempted = payload.get("global_attempted", False)
-        stats.fallback_category = payload.get("fallback_category", "")
-        stats.fallback_reason = payload.get("fallback_reason", "")
-        stats.global_diagnostics = payload.get("global_diagnostics", {})
-        stats.raw_diarization_speaker_count = payload.get("raw_diarization_speaker_count", 0)
-        stats.canonical_speaker_count = payload.get("canonical_speaker_count", 0)
-        stats.speaker_merge_map = payload.get("speaker_merge_map", {})
-        stats.canonicalization_status = payload.get("canonicalization_status", "")
-        stats.diarization_backend = payload.get("diarization_backend", "")
-        stats.diarization_status = payload.get("diarization_status", "")
-        stats.mixed_event_count = payload.get("mixed_event_count", 0)
-        stats.atomic_span_count = payload.get("atomic_span_count", 0)
-        stats.local_speaker_split_count = payload.get("local_speaker_split_count", 0)
-        stats.speaker_conflict_count = payload.get("speaker_conflict_count", 0)
-        stats.unknown_speaker_count = payload.get("unknown_speaker_count", 0)
-        stats.speaker_count = payload.get("speaker_count", 0)
-        stats.diarization_silhouette = payload.get("diarization_silhouette")
-        stats.diagnostic_report = payload.get("diagnostic_report")
-        stats.quality_diagnostics = payload.get("quality_diagnostics", {})
-        stats.quality_status = payload.get("quality_status", "pass")
-        stats.requested_engine = payload.get("requested_engine", "")
-        stats.selected_engine = payload.get("selected_engine", "")
-        stats.final_engine = payload.get("final_engine", "")
-        stats.detected_language = payload.get("detected_language", "unknown")
-        stats.language_probability = payload.get("language_probability", 0.0)
-        stats.asr_route_version = payload.get("asr_route_version", "")
-        stats.quality_gate_version = payload.get("quality_gate_version", "")
-        return stats
 
 
 class Pipeline:
@@ -197,15 +70,11 @@ class Pipeline:
         self._setup_logging()
 
         # 初始化各阶段组件
-        self._separation_engine: Optional[SeparationEngine] = None
-        self._vad_engine: Optional[VADEngine] = None
-        self._asr_engine: Optional[ASREngine] = None
+        self._services = PipelineServiceFactory(self.config)
         self._merge_strategy: Optional[MergeStrategy] = None
         self._time_mapper: Optional[TimeMapper] = None
         self._subtitle_builder: Optional[SubtitleBuilder] = None
         self._embedding_engine = None  # 说话人嵌入引擎（惰性初始化）
-        self._cache: Optional[CacheManager] = None
-        self._history: Optional[TaskHistoryManager] = None
         self._progress: Optional[ProgressManager] = None
 
         # 当前任务的输入文件哈希（用于缓存键）
@@ -214,8 +83,6 @@ class Pipeline:
 
         # ASR 路径追踪
         self._requested_asr_path: str = ""
-        self._asr_route_decision: Optional[ASRRouteDecision] = None
-        self._asr_engines: Dict[str, ASREngine] = {}
 
     # Direct full-audio ASR is intentionally bounded until the existing
     # GlobalTranscriber windowing path is promoted to the main route.
@@ -250,24 +117,117 @@ class Pipeline:
 
         Tests monkeypatch this method; the default returns the standard engine.
         """
-        return self._get_asr_engine()
+        return self._services.get_asr_engine()
+
+    def _run_global_evidence_path(
+        self,
+        audio,
+        sample_rate,
+        stats,
+        *,
+        language: Optional[str] = None,
+        physical_timeline=None,
+    ):
+        """Run global ASR as shadow evidence without creating subtitle events."""
+        from .asr.global_transcriber import GlobalTranscriber, GlobalTranscriberConfig
+        from .physical.ir import GlobalTranscript
+
+        config = self.config.asr.global_asr
+        engine = self._get_global_asr_engine()
+        resolved_language = language or self._services.resolved_language_or_config()
+        cache = self._services.get_cache() if self.config.cache.enabled and self._file_hash else None
+        cache_key = None
+        if cache is not None:
+            from .physical.ir_cache import make_asr_evidence_cache_key, load_ir_value
+
+            cache_key = make_asr_evidence_cache_key(
+                audio_hash=self._file_hash,
+                engine=getattr(engine, "name", config.backend),
+                model=getattr(engine, "model_name", self.config.asr.model),
+                language=resolved_language,
+                start=0.0,
+                end=len(audio) / max(sample_rate, 1),
+                word_timestamps=self.config.asr.word_timestamps,
+                condition_on_previous_text=self.config.asr.condition_on_previous_text,
+                asr_route_version=self.config.asr.auto_routing.route_version,
+                quality_gate_version=self.config.asr.auto_routing.quality_gate_version,
+                hallucination_filter_version=self.config.asr.hallucination_filter_version,
+                context_reasr_version=config.mode + ":" + self.config.asr.context_reasr.version,
+                cross_engine_policy_version=self.config.asr.context_reasr.cross_engine_policy_version,
+                window_policy_version=(
+                    f"macro:{config.macro_window_seconds}:{config.macro_overlap_seconds}"
+                ),
+                device=self.config.asr.device,
+                compute_type=self.config.asr.compute_type,
+            )
+            cached = load_ir_value(
+                cache,
+                "asr_evidence",
+                cache_key,
+                GlobalTranscript.from_dict,
+                expected_schema_version="global-ir-v1",
+            )
+            if cached is not None:
+                return cached, {"cache_hit": True, "window_strategy": "cached"}
+        engine.load_model()
+        if resolved_language is None:
+            detector = getattr(engine, "detect_language", None)
+            if callable(detector):
+                resolved_language = detector(audio, sample_rate)
+            if resolved_language:
+                self._services.resolved_language = resolved_language
+        transcriber = GlobalTranscriber(
+            engine,
+            GlobalTranscriberConfig(
+                left_context=config.left_context,
+                right_context=config.right_context,
+                direct_max_duration_seconds=config.direct_max_duration_seconds,
+                macro_window_seconds=config.macro_window_seconds,
+                macro_overlap_seconds=config.macro_overlap_seconds,
+            ),
+        )
+        result = transcriber.transcribe(
+            audio,
+            sample_rate,
+            physical_timeline=physical_timeline,
+            language=resolved_language,
+        )
+        transcript = result.transcript
+        transcript.diagnostics.update({
+            "mode": "evidence",
+            "language": resolved_language,
+            "engine": getattr(engine, "name", "unknown"),
+            "model": getattr(engine, "model_name", "unknown"),
+        })
+        if cache is not None and cache_key:
+            from .physical.ir_cache import persist_ir_value
+
+            persist_ir_value(
+                cache,
+                "asr_evidence",
+                cache_key,
+                transcript,
+                ttl=self.config.cache.ttl_transcription,
+            )
+        stats.asr_review_diagnostics.setdefault("global_evidence", result.diagnostics)
+        return transcript, result.diagnostics
 
     def _prepare_asr_route(self, audio, sample_rate: int, speech_intervals=None):
         """Resolve and cache the task-level ASR route exactly once."""
-        if self._asr_route_decision is not None:
-            return self._asr_route_decision
+        if self._services.asr_route_decision is not None:
+            return self._services.asr_route_decision
 
         def factory(engine_name, model=None, probe=False):
-            return self._get_asr_engine_for(
+            return self._services.get_asr_engine_for(
                 engine_name, model=model, cache=not probe
             )
 
         decision = ASRRouter(self.config, factory).decide(
             audio, sample_rate, speech_intervals
         )
-        self._asr_route_decision = decision
-        self._resolved_language = decision.language
-        self._asr_engine = self._get_asr_engine_for(decision.selected_engine)
+        self._services.asr_route_decision = decision
+        self._services.resolved_language = decision.language
+        self._services.get_asr_engine_for(decision.selected_engine)
         logger.info(
             "ASR route: requested=%s selected=%s language=%s probability=%.3f reason=%s",
             decision.requested_engine,
@@ -326,7 +286,7 @@ class Pipeline:
         engine = self._get_global_asr_engine()
         engine.load_model()
 
-        language = self._resolved_language_or_config()
+        language = self._services.resolved_language_or_config()
         if language is None:
             detector = getattr(engine, "detect_language", None)
             if callable(detector):
@@ -335,7 +295,7 @@ class Pipeline:
                 except Exception as exc:
                     logger.warning("Global language detection failed: %s", exc)
             if language:
-                self._resolved_language = language
+                self._services.resolved_language = language
 
         # Transcribe the full audio
         segments = engine.transcribe(audio, sample_rate, language=language)
@@ -574,6 +534,202 @@ class Pipeline:
             "long_audio_min_text_chars": policy.long_audio_min_text_chars,
             "max_overlap_ratio": policy.max_overlap_ratio,
         }
+
+    def _review_segmented_events_against_global(
+        self, events, transcript, audio, sample_rate: int, stats
+    ) -> dict:
+        """Score segmented events and review only anomalous context windows.
+
+        This method deliberately returns diagnostics only. A future production
+        switch can apply ``replace``/``split`` decisions after the same report
+        has passed regression gates.
+        """
+        from .asr.context_scheduler import AnomalyTrigger, ContextScheduler, ContextSchedulerConfig
+        from .asr.evidence import SubtitleEvidence, evidence_from_transcription, stable_event_id
+        from .asr.review_resolver import ReviewResolver
+        from .asr.text_metrics import score_text_anomaly, repeated_phrase_indices
+        from .diagnostics.asr_review import ASRReviewDiagnostics
+        from .physical.evidence_alignment import align_candidate_to_global
+        from .physical.ir import GlobalWord
+
+        words = list(getattr(transcript, "words", []) or [])
+        context = self.config.asr.context_reasr
+        originals: dict[str, SubtitleEvidence] = {}
+        triggers: list[AnomalyTrigger] = []
+        report = ASRReviewDiagnostics()
+        normalized_texts = []
+        event_order: list[str] = []
+        for index, event in enumerate(events or []):
+            start = float(getattr(event, "physical_start", None) or event.start)
+            end = float(getattr(event, "physical_end", None) or event.end)
+            if end <= start:
+                continue
+            event_id = stable_event_id(
+                f"segmented:{getattr(event, 'source_word_ids', [])}:{index}",
+                start,
+                end,
+                event.text,
+            )
+            event_words: list[GlobalWord] = []
+            for word_index, item in enumerate(getattr(event, "words", []) or []):
+                word_start = float(getattr(item, "start", 0.0))
+                word_end = float(getattr(item, "end", 0.0))
+                # SubtitleEvent words are normally relative to event.start.
+                if word_end <= end - start + 0.05:
+                    word_start += start
+                    word_end += start
+                if word_end <= word_start:
+                    continue
+                event_words.append(GlobalWord(
+                    id=(getattr(item, "id", None) or
+                        f"{event_id}:word:{word_index:04d}"),
+                    text=str(getattr(item, "word", "")).strip(),
+                    raw_start=word_start,
+                    raw_end=word_end,
+                    confidence=getattr(item, "confidence", None),
+                    source_window_id="segmented",
+                    segment_id=event_id,
+                    speaker_id=getattr(item, "speaker_id", None),
+                ))
+            original = SubtitleEvidence(
+                source="segmented",
+                text=str(event.text),
+                start=start,
+                end=end,
+                words=event_words,
+                confidence=(sum(item.confidence or 0.0 for item in event_words) / len(event_words)) if event_words else None,
+                engine=stats.selected_engine or self.config.asr.engine,
+                model=self.config.asr.model,
+                event_id=event_id,
+            )
+            originals[event_id] = original
+            normalized_texts.append(original.text)
+            event_order.append(event_id)
+            anomaly = score_text_anomaly(
+                original.text,
+                original.start,
+                original.end,
+                cps_warning_threshold=context.cps_warning_threshold,
+                cps_high_risk_threshold=context.cps_high_risk_threshold,
+                min_duration_trigger=context.min_duration_trigger,
+                has_word_evidence=bool(event_words or getattr(event, "source_word_ids", [])),
+            )
+            alignment = align_candidate_to_global(
+                event_id, original.text, start, end, words,
+            )
+            reasons = list(anomaly.reasons)
+            if alignment.uncovered_text:
+                reasons.append("global_segment_conflict")
+            if not alignment.matched_word_ids:
+                reasons.append("global_word_gap")
+            if reasons:
+                triggers.append(AnomalyTrigger(
+                    event_id=event_id,
+                    start=start,
+                    end=end,
+                    reasons=tuple(dict.fromkeys(reasons)),
+                    score=min(1.0, anomaly.score + (0.25 if alignment.uncovered_text else 0.0)),
+                    speaker_id=getattr(event, "speaker_id", None),
+                ))
+            report.counters["event_count"] = report.counters.get("event_count", 0) + 1
+            if alignment.matched_word_ids:
+                report.counters["aligned_event_count"] = report.counters.get("aligned_event_count", 0) + 1
+            report.counters["physical_duration_seconds"] = report.counters.get("physical_duration_seconds", 0) + (end - start)
+            report.counters.setdefault("alignment_similarity_sum", 0)
+            report.counters["alignment_similarity_sum"] += alignment.text_similarity
+
+        repeated = repeated_phrase_indices(normalized_texts)
+        trigger_by_id = {trigger.event_id: trigger for trigger in triggers}
+        for event_index in repeated:
+            event_id = event_order[event_index]
+            original = originals[event_id]
+            current = trigger_by_id.get(event_id)
+            if current is None:
+                trigger_by_id[event_id] = AnomalyTrigger(
+                    event_id,
+                    original.start,
+                    original.end,
+                    ("distant_duplicate",),
+                    0.35,
+                    None,
+                )
+            elif "distant_duplicate" not in current.reasons:
+                trigger_by_id[event_id] = AnomalyTrigger(
+                    current.event_id,
+                    current.start,
+                    current.end,
+                    tuple(dict.fromkeys([*current.reasons, "distant_duplicate"])),
+                    min(1.0, current.score + 0.15),
+                    current.speaker_id,
+                )
+        triggers = list(trigger_by_id.values())
+
+        scheduler = ContextScheduler(ContextSchedulerConfig(
+            left_context_seconds=context.left_context_seconds,
+            right_context_seconds=context.right_context_seconds,
+            max_window_seconds=context.max_window_seconds,
+            max_group_seconds=context.max_group_seconds,
+        ))
+        windows = scheduler.schedule(triggers, stats.duration_seconds)
+        for window in windows:
+            report.add_window(window)
+
+        # Run local primary/secondary ASR only for scheduled windows.
+        candidates_by_event: dict[str, list[SubtitleEvidence]] = {key: [] for key in originals}
+        for window in windows:
+            start_sample = max(0, int(round(window.start * sample_rate)))
+            end_sample = min(len(audio), int(round(window.end * sample_rate)))
+            if end_sample <= start_sample:
+                continue
+            engines = [(context.primary_engine, context.primary_model, "context_primary")]
+            needs_secondary = context.secondary_on_conflict and any(
+                reason in {"global_segment_conflict", "global_word_gap", "training_phrase"}
+                for reason in window.trigger_reasons
+            )
+            if needs_secondary:
+                engines.append((context.secondary_engine, context.secondary_model, "context_secondary"))
+            for engine_name, model, source in engines:
+                try:
+                    engine = self._services.get_asr_engine_for(engine_name, model=model, cache=False)
+                    engine.load_model()
+                    segments = engine.transcribe(
+                        audio[start_sample:end_sample],
+                        sample_rate,
+                        language=self._services.resolved_language_or_config(),
+                    ) or []
+                    for segment_index, segment in enumerate(segments):
+                        try:
+                            evidence = evidence_from_transcription(
+                                segment,
+                                source=source,
+                                time_offset=window.start,
+                                engine=getattr(engine, "name", engine_name),
+                                model=getattr(engine, "model_name", model),
+                                window_id=window.id,
+                                id_prefix=f"{window.id}:{source}:{segment_index}",
+                            )
+                        except (TypeError, ValueError):
+                            continue
+                        for event_id in window.event_ids:
+                            original = originals[event_id]
+                            if evidence.end > original.start and evidence.start < original.end:
+                                candidates_by_event[event_id].append(evidence)
+                except Exception as exc:
+                    report.counters[f"{source}_failed"] = report.counters.get(f"{source}_failed", 0) + 1
+                    report.windows.append({"id": window.id, "source": source, "error": self._safe_failure_reason(exc)})
+        resolver = ReviewResolver()
+        for trigger in triggers:
+            original = originals[trigger.event_id]
+            review = resolver.resolve(
+                trigger.event_id,
+                original,
+                candidates_by_event.get(trigger.event_id, []),
+                trigger_reasons=trigger.reasons,
+            )
+            report.add_review(review)
+        report.counters["trigger_count"] = len(triggers)
+        report.counters["window_count"] = len(windows)
+        return report.to_dict()
 
     @staticmethod
     def _repair_tail_evidence(timeline, duration_seconds: float) -> dict:
@@ -926,7 +1082,7 @@ class Pipeline:
                             break
                     if event.speaker_id is not None:
                         event.speaker_label = self._make_speaker_label(
-                            self._resolved_language_or_config(), event.speaker_id
+                            self._services.resolved_language_or_config(), event.speaker_id
                         )
                 stats.mixed_event_count += 1
                 result.append(event)
@@ -966,7 +1122,7 @@ class Pipeline:
                 piece.text = piece_text or event.text
                 piece.speaker_id = turn_speaker
                 piece.speaker_label = self._make_speaker_label(
-                    self._resolved_language_or_config(), turn_speaker
+                    self._services.resolved_language_or_config(), turn_speaker
                 )
                 # Adjust word timestamps relative to the new piece start.
                 # For the first piece, b_start == event.start so offsets are zero.
@@ -1007,24 +1163,24 @@ class Pipeline:
             return self.config.asr.language
         if (
             getattr(self.config.asr, "engine", "") == "auto"
-            and self._asr_engine is None
+            and self._services._asr_engine is None
         ):
             decision = self._prepare_asr_route(audio, sample_rate)
             return decision.language
-        engine = self._get_asr_engine()
+        engine = self._services.get_asr_engine()
         engine.load_model()
         detector = getattr(engine, "detect_language", None)
         if callable(detector):
             result = detector(audio, sample_rate)
             if result:
-                self._resolved_language = result
+                self._services.resolved_language = result
                 return result
         detect = getattr(engine, "detect_language_info", None)
         if callable(detect):
             lang_info = detect(audio, sample_rate)
             lang = getattr(lang_info, "language", None) or lang_info
             if lang:
-                self._resolved_language = lang
+                self._services.resolved_language = lang
                 return lang
         return None
 
@@ -1116,8 +1272,8 @@ class Pipeline:
         cache: bool = True,
     ) -> ASREngine:
         """Construct one concrete engine; ``auto`` never reaches this method."""
-        if cache and engine_name in self._asr_engines:
-            return self._asr_engines[engine_name]
+        if cache and engine_name in self._services._asr_engines:
+            return self._services._asr_engines[engine_name]
 
         asr_cfg = self.config.asr
         model = model or asr_cfg.model
@@ -1168,21 +1324,12 @@ class Pipeline:
                 "Options: auto, faster-whisper, whisper-cpp, funasr"
             )
         if cache:
-            self._asr_engines[engine_name] = engine
+            self._services._asr_engines[engine_name] = engine
         return engine
 
     def _get_asr_engine(self) -> ASREngine:
-        if self._asr_engine is not None:
-            return self._asr_engine
-        engine_name = self.config.asr.engine
-        if engine_name == "auto":
-            engine_name = (
-                self._asr_route_decision.selected_engine
-                if self._asr_route_decision is not None
-                else "faster-whisper"
-            )
-        self._asr_engine = self._get_asr_engine_for(engine_name)
-        return self._asr_engine
+        """Backward-compat thin wrapper that delegates to PipelineServiceFactory."""
+        return self._services.get_asr_engine()
 
     def _get_cache(self) -> CacheManager:
         if self._cache is None:
@@ -1264,7 +1411,7 @@ class Pipeline:
 
         # ---- 检查全管道缓存 ----
         if cache_cfg.enabled and cache_cfg.full_pipeline_cache and not skip_separation:
-            history = self._get_history()
+            history = self._services.get_history()
             cached_task = history.find_by_hash(
                 self._file_hash, self._config_hash
             )
@@ -1320,9 +1467,9 @@ class Pipeline:
 
         start_time = time.time()
         stats = PipelineStats(input_path=input_path, duration_seconds=0)
-        self._resolved_language = None
-        self._asr_route_decision = None
-        self._asr_engine = None
+        self._services.resolved_language = None
+        self._services.asr_route_decision = None
+        self._services.invalidate_asr_engine()
 
         # 解析活跃模块（受降级模式控制）
         active = self._resolve_active_modules()
@@ -1442,8 +1589,45 @@ class Pipeline:
         stats.asr_path = "legacy" if requested_asr_path == "segmented" else requested_asr_path
         global_completed = False
         quality_speech_intervals = None
+        global_evidence_transcript = None
+        evidence_mode = (
+            requested_asr_path == "auto"
+            and self.config.asr.global_asr.mode == "evidence"
+            and self.config.asr.global_asr.enabled
+        )
 
-        if requested_asr_path in ("global", "auto"):
+        # Evidence mode is intentionally shadow-only. It must not short-circuit
+        # the existing segmented production path.
+        if evidence_mode:
+            stats.global_attempted = True
+            try:
+                transcript, evidence_diag = self._run_global_evidence_path(
+                    audio, sample_rate, stats,
+                )
+                stats.global_diagnostics = {
+                    "route": "auto",
+                    "mode": "evidence",
+                    "status": transcript.status,
+                    "word_count": len(transcript.words),
+                    "transcript": transcript.to_dict(),
+                    **evidence_diag,
+                }
+                global_evidence_transcript = transcript
+                stats.asr_review_diagnostics["global_transcript"] = transcript.to_dict()
+                stats.asr_path = "legacy_evidence"
+            except Exception as exc:
+                reason = self._safe_failure_reason(exc)
+                stats.global_diagnostics = {
+                    "route": "auto",
+                    "mode": "evidence",
+                    "status": "failed",
+                    "error": reason,
+                }
+                stats.fallback_category = self._classify_global_failure(exc)
+                stats.fallback_reason = reason
+                stats.asr_path = "legacy_evidence_degraded"
+
+        if requested_asr_path in ("global", "auto") and not evidence_mode:
             stats.global_attempted = True
             global_diag = {
                 "route": requested_asr_path,
@@ -1554,7 +1738,7 @@ class Pipeline:
                     logger.warning(
                         "Global ASR failed (%s): %s", category, reason,
                     )
-                    decision = self._asr_route_decision
+                    decision = self._services.asr_route_decision
                     can_fallback = bool(
                         requested_asr_path == "auto"
                         and decision is not None
@@ -1565,7 +1749,7 @@ class Pipeline:
                     if can_fallback:
                         try:
                             logger.warning("Falling back once from FunASR to faster-whisper")
-                            self._asr_engine = self._get_asr_engine_for(
+                            self._services.get_asr_engine_for(
                                 "faster-whisper"
                             )
                             fallback_events, fallback_diag, fallback_transcript = (
@@ -1636,7 +1820,7 @@ class Pipeline:
 
         # Segmented/legacy paths still use the same task-level route. When no
         # physical shadow is needed, probing falls back to full-audio windows.
-        if self._asr_route_decision is None:
+        if self._services.asr_route_decision is None:
             decision = self._prepare_asr_route(audio, sample_rate)
             stats.requested_engine = decision.requested_engine
             stats.selected_engine = decision.selected_engine
@@ -1684,7 +1868,7 @@ class Pipeline:
             )
             stats.quality_status = quality.status
             stats.quality_diagnostics["asr_quality_gate"] = quality.to_dict()
-            decision = self._asr_route_decision
+            decision = self._services.asr_route_decision
             if (
                 quality.status == "failed"
                 and decision is not None
@@ -1693,7 +1877,7 @@ class Pipeline:
                 and decision.fallback_engine == "faster-whisper"
             ):
                 logger.warning("Segmented FunASR quality gate failed; retrying with faster-whisper")
-                self._asr_engine = self._get_asr_engine_for("faster-whisper")
+                self._services.get_asr_engine_for("faster-whisper")
                 events, seg_count, skeleton_ffmpeg_result = self._process_skeleton_segmented(
                     audio=audio,
                     sample_rate=sample_rate,
@@ -1908,8 +2092,18 @@ class Pipeline:
                 ffmpeg_unified_result=ctx.ffmpeg_unified_result,
             )
 
-        if stats.detected_language == "unknown" and self._resolved_language:
-            stats.detected_language = str(self._resolved_language)
+        if global_evidence_transcript is not None and self.config.asr.context_reasr.enabled:
+            try:
+                review_report = self._review_segmented_events_against_global(
+                    events, global_evidence_transcript, audio, sample_rate, stats,
+                )
+                stats.asr_review_diagnostics.update(review_report)
+            except Exception as exc:
+                logger.warning("ASR evidence review failed; keeping primary events: %s", exc)
+                stats.asr_review_diagnostics["review_failure"] = self._safe_failure_reason(exc)
+
+        if stats.detected_language == "unknown" and self._services.resolved_language:
+            stats.detected_language = str(self._services.resolved_language)
 
         # ---- 结束时间后校验（LLM 优化前，确保干净版字幕时间戳正确） ----
         try:
@@ -2410,9 +2604,9 @@ class Pipeline:
 
         # 检查持久化文件缓存
         if self.config.cache.enabled:
-            cache = self._get_cache()
-            vocals_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._get_sep_model_name()}:vocals"
-            accomp_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._get_sep_model_name()}:accompaniment"
+            cache = self._services.get_cache()
+            vocals_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._services.get_sep_model_name()}:vocals"
+            accomp_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._services.get_sep_model_name()}:accompaniment"
             cached_vocals = cache.get_file(vocals_cache_key)
             cached_accomp = cache.get_file(accomp_cache_key)
             if cached_vocals is not None:
@@ -2429,8 +2623,8 @@ class Pipeline:
                     result.accompaniment_path = cached_accomp or cached_vocals
                     return result
 
-        engine = self._get_separation_engine()
-        engine.load_model(self._get_sep_model_name() or None)
+        engine = self._services.get_separation_engine()
+        engine.load_model(self._services.get_sep_model_name() or None)
 
         output_dir = Path(tempfile.mkdtemp(prefix="vocal_sep_"))
         result = engine.separate(
@@ -2439,7 +2633,7 @@ class Pipeline:
 
         # 标准化并持久化人声和伴奏
         if self.config.cache.enabled:
-            cache = self._get_cache()
+            cache = self._services.get_cache()
 
         # 处理人声 (vocals)
         if result.vocals_path.exists():
@@ -2451,7 +2645,7 @@ class Pipeline:
 
             # 复制到持久化缓存目录
             if self.config.cache.enabled:
-                vocals_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._get_sep_model_name()}:vocals"
+                vocals_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._services.get_sep_model_name()}:vocals"
                 persistent_vocals = cache.set_file(vocals_cache_key, normalized_vocals)
                 result.vocals_path = persistent_vocals
 
@@ -2465,15 +2659,15 @@ class Pipeline:
 
             # 复制到持久化缓存目录
             if self.config.cache.enabled:
-                accomp_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._get_sep_model_name()}:accompaniment"
+                accomp_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._services.get_sep_model_name()}:accompaniment"
                 persistent_accomp = cache.set_file(accomp_cache_key, normalized_accomp)
                 result.accompaniment_path = persistent_accomp
 
         # 写入分离结果缓存（含人声和伴奏路径）
         if self.config.cache.enabled:
-            cache = self._get_cache()
+            cache = self._services.get_cache()
             cache_key = cache.make_key(
-                input_path, engine=sep_cfg.engine, model=self._get_sep_model_name()
+                input_path, engine=sep_cfg.engine, model=self._services.get_sep_model_name()
             )
             cache.set("separation", cache_key, result)
             # 同时用文件哈希键缓存
@@ -2488,7 +2682,7 @@ class Pipeline:
         """Stage 2: 执行 VAD 检测"""
         vad_cfg = self.config.vad
 
-        engine = self._get_vad_engine()
+        engine = self._services.get_vad_engine()
         engine.load_model()
 
         segments = engine.detect_on_array(
@@ -2620,7 +2814,7 @@ class Pipeline:
 
     def _resolved_language_or_config(self) -> Optional[str]:
         """获取当前任务的解析语言（已检测或用户配置）"""
-        return getattr(self, '_resolved_language', None) or self.config.asr.language
+        return self._services.resolved_language or self.config.asr.language
 
     @staticmethod
     def _filter_asr_results(seg_results: list) -> list:
@@ -2633,18 +2827,14 @@ class Pipeline:
         Returns the same list shape as input: a flat list of segments per
         VAD chunk, or an empty list when every segment is filtered.
         """
-        # Common training/evaluation phrases that Whisper often hallucinates
-        _TRAINING_PHRASES = frozenset({
-            "感谢观看", "感谢大家观看", "Thanks for watching",
-            "谢谢观看", "Please subscribe",
-        })
+        from .asr.text_metrics import training_phrase_matches
+
         filtered = []
         _dropped = 0
         for seg in seg_results:
             text = getattr(seg, "text", "").strip()
-            # Strip trailing punctuation that text normalizer may have added
-            cleaned = text.rstrip(".,!?;:，。！？；：")
-            if cleaned in _TRAINING_PHRASES:
+            has_word_evidence = bool(getattr(seg, "words", []) or [])
+            if training_phrase_matches(text) and not has_word_evidence:
                 _dropped += 1
                 continue
             filtered.append(seg)
@@ -2676,7 +2866,7 @@ class Pipeline:
         """
         asr_cfg = self.config.asr
 
-        engine = self._get_asr_engine()
+        engine = self._services.get_asr_engine()
         engine.load_model()
 
         # ---- 全局语言预检测（修复短片段语言误判） ----
@@ -2686,8 +2876,8 @@ class Pipeline:
         # 中一次性检测语言，然后应用于所有片段。
         resolved_language: Optional[str] = asr_cfg.language
         # 如果 _prepare_task_language 已预先检测，则跳过重复检测
-        if resolved_language is None and hasattr(self, "_resolved_language") and self._resolved_language is not None:
-            resolved_language = self._resolved_language
+        if resolved_language is None and self._services.resolved_language is not None:
+            resolved_language = self._services.resolved_language
         if resolved_language is None:
             # 首先尝试 detect_language（引擎可能不支持完整音频语言检测）
             detector = getattr(engine, "detect_language", None)
@@ -2711,7 +2901,7 @@ class Pipeline:
                 )
 
         # ★ 存储解析后的语言，供 speaker label 国际化等下游使用
-        self._resolved_language = resolved_language
+        self._services.resolved_language = resolved_language
 
         # ★ FunASR 语言不匹配警告：FunASR 是中文专属引擎，
         # 对非中文音频会输出乱码中文字幕
@@ -2738,7 +2928,7 @@ class Pipeline:
             # 检查缓存（使用解析后的语言，而非原始的 None，确保缓存正确分区）
             cache_key = None
             if self.config.cache.enabled:
-                cache = self._get_cache()
+                cache = self._services.get_cache()
                 cache_key = cache.make_key(
                     Path(f"segment_{i}"),
                     start=seg.start,
@@ -2747,20 +2937,25 @@ class Pipeline:
                     language=resolved_language,
                     requested_engine=asr_cfg.engine,
                     selected_engine=(
-                        self._asr_route_decision.selected_engine
-                        if self._asr_route_decision is not None
+                        self._services.asr_route_decision.selected_engine
+                        if self._services.asr_route_decision is not None
                         else engine.name
                     ),
                     asr_route_version=(
-                        self._asr_route_decision.route_version
-                        if self._asr_route_decision is not None
+                        self._services.asr_route_decision.route_version
+                        if self._services.asr_route_decision is not None
                         else "legacy"
                     ),
                     quality_gate_version=(
-                        self._asr_route_decision.quality_gate_version
-                        if self._asr_route_decision is not None
+                        self._services.asr_route_decision.quality_gate_version
+                        if self._services.asr_route_decision is not None
                         else "legacy"
                     ),
+                    hallucination_filter_version=asr_cfg.hallucination_filter_version,
+                    context_reasr_version=asr_cfg.context_reasr.version,
+                    cross_engine_policy_version=asr_cfg.context_reasr.cross_engine_policy_version,
+                    word_timestamps=asr_cfg.word_timestamps,
+                    condition_on_previous_text=asr_cfg.condition_on_previous_text,
                 )
                 cached = cache.get("transcription", cache_key)
                 if cached is not None:
@@ -2857,7 +3052,7 @@ class Pipeline:
 
                 # 写入缓存（保存去重后的结果，避免重复污染缓存）
                 if self.config.cache.enabled and cache_key:
-                    cache = self._get_cache()
+                    cache = self._services.get_cache()
                     cache.set("transcription", cache_key, seg_results)
 
             except Exception as e:
@@ -3349,7 +3544,7 @@ class Pipeline:
             evt.speaker_id = remap[evt.speaker_id]
 
         # 注入 speaker_label（根据语言国际化）
-        lang = self._resolved_language_or_config()
+        lang = self._services.resolved_language_or_config()
         for evt in events:
             sid = evt.speaker_id
             evt.speaker_label = self._make_speaker_label(lang, sid)
@@ -3421,7 +3616,7 @@ class Pipeline:
           短间隙恢复上一说话人（回切检测）
         """
         if len(events) <= 1:
-            lang = self._resolved_language_or_config()
+            lang = self._services.resolved_language_or_config()
             for e in events:
                 e.speaker_id = 0
                 e.speaker_label = self._make_speaker_label(lang, 0)
@@ -3477,7 +3672,7 @@ class Pipeline:
                     current_speaker = prev_speaker
                     prev_speaker = speaker_stack.pop() if speaker_stack else None
 
-        lang = self._resolved_language_or_config()
+        lang = self._services.resolved_language_or_config()
         for evt in events:
             evt.speaker_label = self._make_speaker_label(lang, evt.speaker_id)
 
@@ -3629,7 +3824,7 @@ class Pipeline:
         # 如果用户未锁定语言，从完整音频中做一次全局检测。
         boundary_language: Optional[str] = self.config.asr.language
         if boundary_language is None:
-            asr_engine = self._get_asr_engine()
+            asr_engine = self._services.get_asr_engine()
             asr_engine.load_model()
             detector = getattr(asr_engine, "detect_language", None)
             if callable(detector):
@@ -3651,8 +3846,8 @@ class Pipeline:
 
         reasr = SlidingWindowReASR(
             config=window_cfg,
-            asr_engine=self._get_asr_engine(),
-            cache=self._get_cache() if self.config.cache.enabled else None,
+            asr_engine=self._services.get_asr_engine(),
+            cache=self._services.get_cache() if self.config.cache.enabled else None,
             language=boundary_language,
         )
         reasr_results = reasr.process_boundaries(
@@ -3842,7 +4037,7 @@ class Pipeline:
         # 当有 diarization 结果但无 role_names 时，生成通用标签
         # e.g. speaker_id=0 → "说话人A" (zh) / "Speaker A" (en) / "話者A" (ja)
         if speaker_ids and not role_names:
-            lang = self._resolved_language_or_config()
+            lang = self._services.resolved_language_or_config()
             for event in events:
                 spk_id = event.speaker_id
                 if spk_id is not None and event.speaker_label is None:
@@ -3880,7 +4075,7 @@ class Pipeline:
             # 构建字幕字典 {index: text} 和元数据 {index: metadata}
             subtitle_dict = {}
             event_metadata = {}
-            lang = self._resolved_language_or_config()
+            lang = self._services.resolved_language_or_config()
             sorted_events = sorted(events, key=lambda e: e.index)
             for i, e in enumerate(sorted_events):
                 idx_str = str(e.index)

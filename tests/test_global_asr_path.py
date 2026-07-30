@@ -271,7 +271,7 @@ def test_segmented_asr_surfaces_all_segment_failures():
     pipeline = Pipeline(PipelineConfig())
     pipeline.config.cache.enabled = False
     pipeline._progress = SimpleNamespace(update_stage=lambda *args, **kwargs: None)
-    pipeline._get_asr_engine = lambda: FailingEngine()
+    pipeline._services._asr_engine = FailingEngine()
     segments = [SpeechSegment(0.0, 0.5, 0.9), SpeechSegment(1.0, 1.5, 0.9)]
 
     with pytest.raises(ASRInvalidResultError, match="no usable subtitles"):
@@ -297,7 +297,7 @@ def test_segmented_asr_allows_no_speech_input():
     pipeline = Pipeline(PipelineConfig())
     pipeline.config.cache.enabled = False
     pipeline._progress = SimpleNamespace(update_stage=lambda *args, **kwargs: None)
-    pipeline._get_asr_engine = lambda: NoopEngine()
+    pipeline._services._asr_engine = NoopEngine()
 
     assert pipeline._run_asr(np.zeros(16000, dtype=np.float32), 16000, []) == []
 

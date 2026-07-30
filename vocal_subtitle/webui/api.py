@@ -897,7 +897,7 @@ async def clear_history(
             loader = ConfigLoader()
             config = loader.load_profile("default")
             pipeline = Pipeline(config)
-            cache = pipeline._get_cache()
+            cache = pipeline._services.get_cache()
             persistent_cleaned = cache.clear_persistent_files()
             logger.info("Cleared %d persistent file entries", persistent_cleaned)
         except Exception as e:

@@ -113,7 +113,7 @@ def _run_asr_with_mode(mode):
     config.cache.enabled = False
     pipeline = Pipeline(config)
     engine = _FakeASR()
-    pipeline._asr_engine = engine
+    pipeline._services._asr_engine = engine
     pipeline._progress = _Progress()
     results = pipeline._run_asr(
         np.zeros(16000, dtype=np.float32),
@@ -136,7 +136,7 @@ def test_explicit_language_skips_detection():
     config.cache.enabled = False
     pipeline = Pipeline(config)
     engine = _FakeASR()
-    pipeline._asr_engine = engine
+    pipeline._services._asr_engine = engine
     pipeline._progress = _Progress()
 
     pipeline._run_asr(
@@ -155,7 +155,7 @@ def test_single_language_detection_is_prepared_from_complete_audio_once():
     config.cache.enabled = False
     pipeline = Pipeline(config)
     engine = _FakeASR()
-    pipeline._asr_engine = engine
+    pipeline._services._asr_engine = engine
     pipeline._progress = _Progress()
 
     complete_audio = np.zeros(4 * 16000, dtype=np.float32)
@@ -202,7 +202,7 @@ def test_mixed_language_mode_rejects_missing_language_evidence():
     config.asr.language_mode = "mixed"
     config.cache.enabled = False
     pipeline = Pipeline(config)
-    pipeline._asr_engine = engine
+    pipeline._services._asr_engine = engine
     pipeline._progress = _Progress()
     results = pipeline._run_asr(
         np.zeros(16000, dtype=np.float32),
@@ -243,7 +243,7 @@ def test_whisper_cpp_pipeline_passes_configured_language():
     config.asr.language = "ja"
     pipeline = Pipeline(config)
 
-    engine = pipeline._get_asr_engine()
+    engine = pipeline._services.get_asr_engine()
 
     assert engine._language == "ja"
 

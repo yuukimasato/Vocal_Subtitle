@@ -97,11 +97,11 @@ def test_cached_and_fresh_asr_results_share_filter(monkeypatch):
     pipeline = Pipeline(config)
     engine = _ASR()
     cache = _Cache()
-    pipeline._asr_engine = engine
-    pipeline._cache = cache
+    pipeline._services._asr_engine = engine
+    pipeline._services._cache = cache
     pipeline._progress = _Progress()
     pipeline._file_hash = "audio-hash"
-    monkeypatch.setattr(pipeline, "_get_cache", lambda: cache)
+    monkeypatch.setattr(pipeline._services, "get_cache", lambda: cache)
 
     first = pipeline._run_asr(
         np.zeros(16000, dtype=np.float32),
