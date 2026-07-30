@@ -3,7 +3,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from vocal_subtitle.webui import api
+from vocal_subtitle.webui import api, api_serializers, api_services
 from vocal_subtitle.webui.app import create_app
 
 
@@ -26,9 +26,9 @@ def _task():
 
 
 @pytest.fixture
-def client(monkeypatch):
-    tasks = {"batch-task": _task()}
-    monkeypatch.setattr(api, "_task_store", tasks)
+def client():
+    api_services._task_store.clear()
+    api_services._task_store["batch-task"] = _task()
     return TestClient(create_app())
 
 
@@ -47,7 +47,7 @@ def test_batch_speaker_updates_final_events_without_changing_text(client):
     events = response.json()["events"]
     assert [event["speaker_id"] for event in events] == [1, None, 1]
     assert events[0]["text"] == "用户修改后的最终文本"
-    assert api._task_store["batch-task"]["result"]["events"][0]["text"] == "用户修改后的最终文本"
+    assert api_services._task_store["batch-task"]["result"]["events"][0]["text"] == "用户修改后的最终文本"
 
 
 def test_rewrite_uses_user_edited_text_for_final_and_llm_files(tmp_path):
@@ -56,7 +56,7 @@ def test_rewrite_uses_user_edited_text_for_final_and_llm_files(tmp_path):
     result["llm_subtitle_path"] = str(tmp_path / "llm.srt")
     result["events"][0]["text"] = "用户手动修改后的最终版"
 
-    assert api._rewrite_subtitle_files(result) == []
+    assert api_serializers._rewrite_subtitle_files(result) == []
     assert "用户手动修改后的最终版" in (tmp_path / "final.srt").read_text(encoding="utf-8")
     assert "用户手动修改后的最终版" in (tmp_path / "llm.srt").read_text(encoding="utf-8")
 
@@ -72,7 +72,7 @@ def test_batch_merge_returns_reindexed_final_events(client):
     assert payload["subtitle_count"] == 2
     assert [event["index"] for event in payload["events"]] == [1, 2]
     assert payload["events"][1]["text"] == "第二句 第三句"
-    assert api._task_store["batch-task"]["result"]["stats"]["subtitle_count"] == 2
+    assert api_services._task_store["batch-task"]["result"]["stats"]["subtitle_count"] == 2
 
 
 def test_batch_merge_rejects_non_contiguous_selection(client):
@@ -85,7 +85,7 @@ def test_batch_merge_rejects_non_contiguous_selection(client):
     assert "连续" in response.json()["detail"]
 
 
-def test_batch_edit_loads_and_persists_history_only_task(monkeypatch):
+def test_batch_edit_loads_and_persists_history_only_task():
     source = _task()
     updates = {}
 
@@ -96,8 +96,13 @@ def test_batch_edit_loads_and_persists_history_only_task(monkeypatch):
         def update(self, task_id, **fields):
             updates.update(fields)
 
-    monkeypatch.setattr(api, "_task_store", {})
-    monkeypatch.setattr(api, "_task_history", HistoryStub())
+    api_services._task_store.clear()
+    svc_history = api_services._task_history
+    # Patch the get/update methods on the real history instance
+    original_get = svc_history.get
+    original_update = svc_history.update
+    svc_history.get = HistoryStub().get
+    svc_history.update = HistoryStub().update
     client = TestClient(create_app())
 
     response = client.put(

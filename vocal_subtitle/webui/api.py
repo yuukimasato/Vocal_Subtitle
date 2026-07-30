@@ -1,4 +1,8 @@
-"""REST API 端点 — 配置管理、Pipeline 执行、字幕操作、导出、任务历史、缓存管理"""
+"""REST API 端点 — 配置管理、Pipeline 执行、字幕操作、导出、任务历史、缓存管理
+
+Route endpoints are now thin HTTP wrappers. Shared services and serializers
+live in api_services.py and api_serializers.py respectively.
+"""
 
 import asyncio
 import json
@@ -8,11 +12,10 @@ import shutil
 import threading
 import time
 import uuid
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import PlainTextResponse
 
 from ..asr.funasr_manager import (
@@ -20,13 +23,35 @@ from ..asr.funasr_manager import (
     ensure_funasr_ready,
     funasr_status,
 )
-from ..config import ConfigLoader, PipelineConfig
-from ..mapping.time_mapper import SubtitleEvent
+from ..config import ConfigLoader
 from ..pipeline import Pipeline
 from ..utils.file_hasher import compute_config_hash, compute_file_hash
 from ..utils.gpu_detector import GPUDetector
-from ..utils.session_manager import OUTPUT_NAMES, SessionManager
+from ..utils.session_manager import SessionManager
 from ..utils.task_history import TaskHistoryManager
+from .api_serializers import (
+    SerializationError,
+    _build_subtitle_event_payloads,
+    _build_task_result,
+    _config_summary,
+    _config_to_overrides_dict,
+    _get_profile_description,
+    _load_completed_subtitle_task,
+    _parse_cache_status_response,
+    _persist_subtitle_result,
+    _rewrite_subtitle_files,
+    _subtitle_event_from_payload,
+    _subtitle_event_to_payload,
+)
+from .api_services import (
+    _clear_history_full,
+    _dir_size_mb,
+    _get_persistence_mgr,
+    _run_pipeline_in_thread,
+    _task_history,
+    _task_store,
+    UPLOAD_DIR,
+)
 from .models import (
     BatchRunRequest,
     CacheConfigUpdate,
@@ -51,8 +76,8 @@ from .models import (
     TaskHistoryItem,
     TaskStatus,
 )
-from .websocket import ws_manager
 from .subtitle_editing import SubtitleBatchEditError, apply_batch_edit
+from .websocket import ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -89,123 +114,23 @@ def _speaker_model_download_detail(exc: Exception) -> str:
     return "speaker model download failed"
 
 # ---------------------------------------------------------------------------
-# 任务存储（内存）
+# 任务存储（内存）— shared with api_services
 # ---------------------------------------------------------------------------
 
-# task_id -> TaskStatus
-_task_store: Dict[str, Dict[str, Any]] = {}
-
-# 持久化任务历史管理器
-_task_history = TaskHistoryManager()
-
-# 上传文件临时目录
-UPLOAD_DIR = Path(__file__).parent.parent.parent / "cache" / "uploads"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# _task_store, _task_history, UPLOAD_DIR are imported from .api_services
 
 
 # ---------------------------------------------------------------------------
 # 场景模板描述
 # ---------------------------------------------------------------------------
 
-_PROFILE_DESCRIPTIONS: Dict[str, str] = {
+_PROFILE_DESCRIPTIONS = {
     "default": "通用场景，分离引擎 Spleeter，适合日常音频处理",
     "podcast": "播客/访谈场景，UVR 高品质分离，中文优化，低 VAD 阈值捕捉更多语音",
     "education": "教学/演讲场景，Spleeter 分离，较大的合并间隙适应讲课节奏",
     "variety_show": "综艺/直播场景，UVR 分离，背景音乐较多时的最佳选择",
     "music_live": "音乐现场场景，UVR 高品质分离，专为含背景音乐的语音优化",
 }
-
-
-def _get_profile_description(name: str) -> str:
-    return _PROFILE_DESCRIPTIONS.get(name, "自定义配置")
-
-
-def _config_summary(config: PipelineConfig) -> Dict[str, Any]:
-    """提取配置关键字段摘要"""
-    return {
-        "separation_engine": config.separation.engine,
-        "vad_engine": config.vad.engine,
-        "asr_engine": config.asr.engine,
-        "asr_model": config.asr.model,
-        "language": config.asr.language,
-        "device": config.asr.device,
-        "asr_route_version": config.asr.auto_routing.route_version,
-        "asr_quality_gate_version": config.asr.auto_routing.quality_gate_version,
-        "llm_enabled": config.llm_optimize.enabled,
-    }
-
-
-def _config_to_overrides_dict(config: PipelineConfig) -> Dict[str, Any]:
-    """将完整配置转为前端可用的参数字典"""
-    return {
-        "separator": config.separation.engine,
-        "uvr_model": config.separation.uvr_model,
-        "vad_engine": config.vad.engine,
-        "vad_threshold": config.vad.threshold,
-        "vad_min_speech_ms": config.vad.min_speech_duration_ms,
-        "vad_min_silence_ms": config.vad.min_silence_duration_ms,
-        "merge_min_silence_gap": config.merging.min_silence_gap,
-        "merge_max_segment": config.merging.max_segment_length,
-        "merge_padding": config.merging.padding,
-        "asr_engine": config.asr.engine,
-        "asr_model": config.asr.model,
-        "asr_device": config.asr.device,
-        "asr_compute_type": config.asr.compute_type,
-        "language": config.asr.language or "",
-        "asr_beam_size": config.asr.beam_size,
-        "asr_route_version": config.asr.auto_routing.route_version,
-        "asr_quality_gate_version": config.asr.auto_routing.quality_gate_version,
-        "subtitle_min_duration": config.subtitle.min_duration,
-        "subtitle_max_duration": config.subtitle.max_duration,
-        "subtitle_max_chars_cjk": config.subtitle.max_chars_cjk,
-        "subtitle_max_chars_latin": config.subtitle.max_chars_latin,
-        "llm_enabled": config.llm_optimize.enabled,
-        "llm_model": config.llm_optimize.model,
-        "llm_batch_num": config.llm_optimize.batch_num,
-        "llm_thread_num": config.llm_optimize.thread_num,
-        "llm_base_url": config.llm_optimize.base_url or "",
-        "llm_api_key": config.llm_optimize.api_key or "",
-        "diarization_enabled": config.diarization.enabled,
-        "speaker_fusion": config.diarization.fusion_mode,
-        "global_diarization_model": config.diarization.global_model,
-        "speaker_diarization_scope": config.diarization.diarization_scope,
-        "local_speaker_refinement": config.diarization.local_refinement,
-        "expected_speakers": config.diarization.expected_speakers,
-        "diarization_local_context": config.diarization.local_context_seconds,
-        "diarization_min_local_segment": config.diarization.min_local_segment_seconds,
-        "diarization_min_change_confidence": config.diarization.min_change_confidence,
-        "diarization_distance_threshold": config.diarization.distance_threshold,
-        "diarization_min_speakers": config.diarization.min_speakers,
-        "diarization_max_speakers": config.diarization.max_speakers,
-        "diarization_use_pca": config.diarization.use_pca,
-        "diarization_pca_variance": config.diarization.pca_variance,
-        "speaker_role_enabled": config.speaker_role.enabled,
-        "speaker_role_model": config.speaker_role.model,
-        "speaker_role_temperature": config.speaker_role.temperature,
-        "speaker_role_context_hint": config.speaker_role.context_hint or "",
-        # 说话人嵌入模型
-        "speaker_embedding_enabled": config.speaker_embedding.enabled,
-        "speaker_embedding_engine": config.speaker_embedding.engine,
-        "speaker_embedding_model_ref": config.speaker_embedding.model_ref,
-        "speaker_embedding_hf_token": (
-            "***"
-            if config.speaker_embedding.hf_token or _has_saved_hf_token()
-            else ""
-        ),
-        # 骨架分段模式
-        "acoustic_skeleton_mode": config.acoustic_validation.skeleton_mode,
-        "acoustic_export_skeleton": config.acoustic_validation.export_skeleton_segments,
-        # 语义合并决策 (merge_decision) — ★ 反馈面板需要
-        "fast_merge_max_gap": config.merge_decision.fast_merge_max_gap,
-        "llm_decision_min_gap": config.merge_decision.llm_decision_min_gap,
-        "llm_decision_max_gap": config.merge_decision.llm_decision_max_gap,
-        "hard_split_min_gap": config.merge_decision.hard_split_min_gap,
-        "llm_tier": config.merge_decision.llm_tier,
-        "llm_merge_model": config.merge_decision.llm_model,
-        # 反馈学习
-        "feedback_enabled": config.feedback.enabled,
-        "feedback_active_profile": config.feedback.active_profile,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -1174,114 +1099,6 @@ async def get_subtitles(task_id: str):
     return [SubtitleEventResponse(**e) for e in events]
 
 
-def _subtitle_event_from_payload(payload: dict) -> SubtitleEvent:
-    """Reconstruct a SubtitleEvent from a dict payload, preserving all provenance fields."""
-    return SubtitleEvent.from_dict(payload)
-
-
-def _subtitle_event_to_payload(event: SubtitleEvent) -> dict:
-    """Serialize a SubtitleEvent to a dict, preserving all provenance fields."""
-    return event.to_dict()
-
-
-def _load_completed_subtitle_task(task_id: str) -> tuple[Dict[str, Any], Dict[str, Any]]:
-    """Load a completed task from memory, falling back to persisted history."""
-    task = _task_store.get(task_id)
-    if not task:
-        hist_task = _task_history.get(task_id)
-        if hist_task and hist_task.get("result_json"):
-            try:
-                result = json.loads(hist_task["result_json"])
-            except (json.JSONDecodeError, TypeError) as exc:
-                raise HTTPException(status_code=404, detail=f"Task not found: {task_id}") from exc
-            task = {
-                "task_id": task_id,
-                "status": "completed",
-                "result": result,
-            }
-            _task_store[task_id] = task
-        else:
-            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
-
-    if task.get("status") != "completed":
-        raise HTTPException(status_code=400, detail="Task not completed yet")
-    result = task.get("result", {})
-    if not isinstance(result, dict) or not isinstance(result.get("events"), list):
-        raise HTTPException(status_code=404, detail="Task has no subtitle events")
-    return task, result
-
-
-def _persist_subtitle_result(task_id: str, task: Dict[str, Any], result: Dict[str, Any]) -> None:
-    """Persist the final event list used by the UI and every subtitle export."""
-    task["status"] = "completed"
-    task["result"] = result
-    _task_store[task_id] = task
-    _task_history.update(
-        task_id,
-        status="completed",
-        result_json=json.dumps(result, default=str),
-    )
-
-
-def _rewrite_subtitle_files(task_result: Dict[str, Any]) -> List[str]:
-    """将内存中的字幕事件写回磁盘文件
-
-    同时更新主字幕文件和 LLM 字幕文件（如果存在）。
-    """
-    events = task_result.get("events", [])
-    if not events:
-        return []
-
-    errors: List[str] = []
-
-    # 重建 SubtitleEvent 对象
-    from ..mapping.subtitle_builder import SubtitleBuilder, SubtitleRule
-    from ..config import SubtitleBuildConfig
-
-    rebuilt_events = [_subtitle_event_from_payload(e) for e in events]
-
-    # 加载字幕构建规则
-    loader = ConfigLoader()
-    try:
-        config = loader.load_profile("default")
-        sub_cfg = config.subtitle
-    except Exception:
-        sub_cfg = SubtitleBuildConfig()
-
-    builder = SubtitleBuilder(
-        rule=SubtitleRule(
-            min_duration=sub_cfg.min_duration,
-            max_duration=sub_cfg.max_duration,
-            max_chars_cjk=sub_cfg.max_chars_cjk,
-            max_chars_latin=sub_cfg.max_chars_latin,
-            max_lines=sub_cfg.max_lines,
-        )
-    )
-
-    # 写回主字幕文件
-    subtitle_path = task_result.get("subtitle_path")
-    if subtitle_path:
-        try:
-            srt_text = builder.build_to_string(rebuilt_events, fmt="srt")
-            Path(subtitle_path).write_text(srt_text, encoding="utf-8")
-            logger.info("Rewrote subtitle file: %s", subtitle_path)
-        except Exception as e:
-            logger.warning("Failed to rewrite subtitle file: %s", e)
-            errors.append(f"主字幕文件: {e}")
-
-    # 写回 LLM 字幕文件（如果存在）
-    llm_path = task_result.get("llm_subtitle_path")
-    if llm_path:
-        try:
-            llm_text = builder.build_to_string(rebuilt_events, fmt="srt")
-            Path(llm_path).write_text(llm_text, encoding="utf-8")
-            logger.info("Rewrote LLM subtitle file: %s", llm_path)
-        except Exception as e:
-            logger.warning("Failed to rewrite LLM subtitle file: %s", e)
-            errors.append(f"LLM 字幕文件: {e}")
-    return errors
-
-
 @router.put("/subtitle/{task_id}/batch")
 async def update_subtitles_batch(task_id: str, body: SubtitleBatchEditRequest):
     """批量修改最终字幕事件并同步历史与导出文件。"""
@@ -1992,6 +1809,11 @@ async def feedback_learn(
     """
     import tempfile
 
+    from ..asr.funasr_manager import (
+        FunASRPrepareError,
+        ensure_funasr_ready,
+        funasr_status,
+    )
     from ..config import ConfigLoader
     from ..feedback import (
         DiffAnalyzer,
