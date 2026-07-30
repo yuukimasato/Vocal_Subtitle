@@ -1,13 +1,10 @@
-"""配置管理模块 — backward-compat re-export hub.
+"""Configuration dataclasses — pure data models with defaults.
 
-Import this module to get all config symbols from a single entry point.
-The actual implementations live in:
-- config.models: all dataclasses
-- config_loader: YAML loading, profile management, overrides, validation
+This module holds every PipelineConfig sub-dataclass. No filesystem I/O,
+environment reads, YAML loading or model construction happens here.
 """
 
-# Re-export all config dataclasses from models
-from .config.models import (  # noqa: F401
+from .models import (  # noqa: F401
     AcousticValidationConfig,
     ASRAutoRoutingConfig,
     ASRConfig,
@@ -37,5 +34,8 @@ from .config.models import (  # noqa: F401
     VADConfig,
 )
 
-# Re-export loader
-from .config_loader import ConfigLoader, validate_config_consistency  # noqa: F401
+# Re-export loader symbols so `from vocal_subtitle.config import ConfigLoader` works.
+from ..config_loader import (  # noqa: F401, E0401
+    ConfigLoader,
+    validate_config_consistency,
+)

@@ -35,7 +35,8 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 
 from .pipeline import Pipeline, PipelineStats
-from .config import ConfigLoader, PipelineConfig
+from .config_loader import ConfigLoader
+from .config import PipelineConfig
 
 __all__ = [
     "Pipeline",
