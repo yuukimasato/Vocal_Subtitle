@@ -1,0 +1,2532 @@
+(function() {
+'use strict';
+
+// ---- Utility Functions ----
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) { return document.querySelectorAll(sel); }
+
+function formatTime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = (seconds % 60).toFixed(1);
+  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(4,'0')}`;
+  return `${m}:${String(s).padStart(4,'0')}`;
+}
+
+/**
+ * 计算原始文本和优化后文本的词级差异，返回高亮 HTML。
+ * 算法：对 token 序列做 LCS (Longest Common Subsequence)，
+ * 回溯分类每个 token 为 same / added，用不同颜色标记。
+ * CJK 字符逐字分词，拉丁语言逐词分词。
+ */
+function diffAndHighlight(original, optimized) {
+  if (!original || original === optimized) return App.ui.escapeHtml(optimized);
+
+  // 分词：CJK 单字、拉丁单词、空白、标点
+  function tokenize(text) {
+    var tokens = [];
+    var re = /([一-鿿㐀-䶿]|[\w]+|[^\w\s]|\s+)/g;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      tokens.push({ text: m[1], pos: m.index });
+    }
+    return tokens;
+  }
+
+  var origTokens = tokenize(original);
+  var optTokens = tokenize(optimized);
+  var origWords = origTokens.map(function(t) { return t.text; });
+  var optWords = optTokens.map(function(t) { return t.text; });
+  var m = origWords.length;
+  var n = optWords.length;
+
+  // LCS DP 表
+  var dp = new Array(m + 1);
+  for (var i = 0; i <= m; i++) {
+    dp[i] = new Array(n + 1);
+    for (var j = 0; j <= n; j++) dp[i][j] = 0;
+  }
+  for (var i = 1; i <= m; i++) {
+    for (var j = 1; j <= n; j++) {
+      if (origWords[i - 1] === optWords[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  // 回溯分类每个 optimized token
+  var tags = new Array(n);
+  for (var k = 0; k < n; k++) tags[k] = 'added';
+  var i = m, j = n;
+  while (i > 0 && j > 0) {
+    if (origWords[i - 1] === optWords[j - 1]) {
+      tags[j - 1] = 'same';
+      i--; j--;
+    } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+
+  // 构建高亮 HTML
+  var result = [];
+  for (var k = 0; k < n; k++) {
+    var word = App.ui.escapeHtml(optWords[k]);
+    if (tags[k] === 'same') {
+      result.push(word);
+    } else {
+      result.push('<span class="diff-added">' + word + '</span>');
+    }
+  }
+  return result.join('');
+}
+
+/**
+ * 将秒数格式化为 SRT 时间戳 (HH:MM:SS,mmm)
+ */
+function formatSRTTime(seconds) {
+  var h = Math.floor(seconds / 3600);
+  var m = Math.floor((seconds % 3600) / 60);
+  var s = Math.floor(seconds % 60);
+  var ms = Math.floor((seconds % 1) * 1000);
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + ',' + String(ms).padStart(3, '0');
+}
+
+/**
+ * 将秒数格式化为 ASS 时间戳 (H:MM:SS.cc)
+ */
+function formatASSTime(seconds) {
+  var h = Math.floor(seconds / 3600);
+  var m = Math.floor((seconds % 3600) / 60);
+  var s = Math.floor(seconds % 60);
+  var cs = Math.floor((seconds % 1) * 100);
+  return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + '.' + String(cs).padStart(2, '0');
+}
+
+/**
+ * 将单条字幕事件格式化为 SRT 条目
+ */
+function formatEventAsSRT(event) {
+  return event.index + '\n' + formatSRTTime(event.start) + ' --> ' + formatSRTTime(event.end) + '\n' + event.text;
+}
+
+/**
+ * 将单条字幕事件格式化为 ASS Dialogue 行
+ */
+function formatEventAsASS(event) {
+  return 'Dialogue: 0,' + formatASSTime(event.start) + ',' + formatASSTime(event.end) + ',Default,,0,0,0,,' + event.text;
+}
+
+/**
+ * 检测字幕事件是否存在冲突
+ *
+ * 仅将以下情况视为真正的冲突（需要人工确认）：
+ * 1. LLM 将其他条目的内容复制到了当前条目（跨条目内容泄漏）
+ * 2. 不同说话人的文本被合并到同一条字幕
+ *
+ * 普通的 LLM 修正（拼写、标点、语序、语气词去除）不再视为冲突，
+ * 最终版本直接使用 LLM 优化后的文本。
+ *
+ * @param {Object} event - 字幕事件
+ * @param {Array} allEvents - 所有字幕事件（用于相邻条目对比）
+ * @returns {boolean} 是否存在需要人工确认的冲突
+ */
+function hasConflict(event, allEvents) {
+  // 无原始文本 = LLM 未修改 → 无冲突
+  if (!event.original_text) return false;
+  // 文本未变 → 无冲突
+  if (event.original_text === event.text) return false;
+
+  // LLM 做了修改 → 检查是否为跨条目内容泄漏
+  if (allEvents && allEvents.length > 0) {
+    var idx = event.index;
+
+    // 检查前一相邻条目：前一条是否吸收了当前条目的内容
+    var prev = null;
+    for (var i = 0; i < allEvents.length; i++) {
+      if (allEvents[i].index === idx - 1) { prev = allEvents[i]; break; }
+    }
+    if (prev && prev.text && event.text.trim().length >= 3) {
+      if (prev.text.indexOf(event.text.trim()) >= 0) {
+        return true;  // 当前条目的内容被前一条吸收了
+      }
+    }
+
+    // 检查后一相邻条目：当前条目是否吸收了后一条目的内容
+    var next = null;
+    for (var i = 0; i < allEvents.length; i++) {
+      if (allEvents[i].index === idx + 1) { next = allEvents[i]; break; }
+    }
+    if (next && next.text && next.text.trim().length >= 3) {
+      if (event.text.indexOf(next.text.trim()) >= 0) {
+        return true;  // 当前条目吸收了后一条的内容
+      }
+    }
+  }
+
+  // 普通 LLM 修正（拼写、标点、语气词去除等）→ 自动接受
+  return false;
+}
+
+function toast(msg, type) {
+  type = type || 'info';
+  const container = $('#toast-container');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }, 4000);
+}
+
+// ---- Application State ----
+const App = {
+  state: {
+    selectedFile: null,
+    selectedProfile: 'default',
+    profileConfig: null,
+    outputFormat: 'srt',
+    skipSeparation: false,
+    taskId: null,
+    isRunning: false,
+    subtitleEvents: [],
+    historyItems: [],
+    subtitleViewMode: 'auto',  // 'auto' | 'compare' | 'simple'
+    subtitleFinalFormat: 'srt',  // 'srt' | 'ass' — 最终版本字幕格式
+    funasrPreparing: false,
+    selectedSubtitleIndexes: new Set(),
+    selectionAnchorIndex: null,
+    rowClickTimer: null,
+    ws: null,
+    _audioPlayer: null,          // 当前音频播放器实例
+    _audioTaskId: null,          // 音频播放器加载的任务 ID
+  },
+
+  // ---- Settings Persistence ----
+  _SETTINGS_KEYS: [
+    'profile', 'separator', 'uvr_model', 'vad_engine', 'vad_threshold',
+    'vad_ffmpeg_enabled', 'vad_ffmpeg_noise_db',
+    'asr_engine', 'asr_model', 'asr_device', 'language',
+    'subtitle_min_duration', 'subtitle_max_duration',
+    'diarization_enabled', 'diarization_distance_threshold', 'diarization_min_speakers', 'diarization_max_speakers',
+    'speaker_fusion', 'global_diarization_model', 'speaker_diarization_scope',
+    'local_speaker_refinement', 'expected_speakers', 'diarization_local_context',
+    'diarization_min_local_segment', 'diarization_min_change_confidence',
+    'speaker_role_enabled', 'speaker_role_context_hint',
+    'speaker_embedding_enabled', 'speaker_embedding_model_ref',
+    'llm_enabled', 'llm_model', 'llm_base_url', 'llm_api_key',
+    'macro_chunk_enabled', 'macro_chunk_target_duration', 'macro_chunk_max_duration',
+    'merge_fast_gap', 'merge_llm_min_gap', 'merge_llm_max_gap', 'merge_hard_split_gap',
+    'boundary_refine_enabled', 'boundary_refine_max_shrink',
+    'acoustic_enabled', 'acoustic_max_snap', 'acoustic_generate_report',
+    'acoustic_skeleton_mode',
+    // Persistence settings
+    'persist_asr_subtitle', 'persist_llm_subtitle', 'persist_final_ass',
+    'persist_final_srt', 'persist_vocals', 'persist_accompaniment',
+    'ttl_subtitle_days', 'ttl_audio_days',
+  ],
+  _SETTINGS_STORAGE_KEY: 'vocal_settings',
+
+  saveSettings() {
+    var self = this;
+    var settings = {};
+    self._SETTINGS_KEYS.forEach(function(key) {
+      var el = document.querySelector('#options-panel [data-key="' + key + '"]');
+      if (!el) {
+        if (key === 'profile') {
+          settings[key] = App.state.selectedProfile;
+        } else if (key === 'llm_base_url') {
+          settings[key] = App.ui._llmState.base_url;
+        } else if (key === 'llm_api_key') {
+          settings[key] = App.ui._llmState.api_key;
+        } else if (key === 'llm_enabled') {
+          var cb = document.querySelector('#options-panel [data-key="llm_enabled"]');
+          settings[key] = cb ? cb.checked : false;
+        } else if (key === 'llm_model') {
+          var sel = document.querySelector('#llm-model-select');
+          settings[key] = sel ? sel.value : '';
+        }
+        return;
+      }
+      if (el.type === 'checkbox') {
+        settings[key] = el.checked;
+      } else if (el.type === 'range') {
+        settings[key] = parseFloat(el.value);
+      } else {
+        settings[key] = el.value;
+      }
+    });
+    try { localStorage.setItem(self._SETTINGS_STORAGE_KEY, JSON.stringify(settings)); } catch(e) {}
+    // Save skip-separation toggle state
+    try {
+      settings['_skip_separation'] = App.state.skipSeparation;
+      localStorage.setItem(self._SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch(e) {}
+  },
+
+  loadSettings() {
+    var self = this;
+    var saved = null;
+    try {
+      var raw = localStorage.getItem(self._SETTINGS_STORAGE_KEY);
+      if (raw) saved = JSON.parse(raw);
+    } catch(e) { saved = null; }
+
+    // 从旧版独立键迁移
+    if (!saved) {
+      saved = {};
+      var oldUrl = localStorage.getItem('vocal_llm_url');
+      var oldKey = localStorage.getItem('vocal_llm_key');
+      var oldModel = localStorage.getItem('vocal_llm_model');
+      var oldEnabled = localStorage.getItem('vocal_llm_enabled');
+      if (oldUrl) saved['llm_base_url'] = oldUrl;
+      if (oldKey) saved['llm_api_key'] = oldKey;
+      if (oldModel) saved['llm_model'] = oldModel;
+      if (oldEnabled) saved['llm_enabled'] = (oldEnabled === '1');
+      if (Object.keys(saved).length > 0) {
+        try {
+          localStorage.setItem(self._SETTINGS_STORAGE_KEY, JSON.stringify(saved));
+          localStorage.removeItem('vocal_llm_url');
+          localStorage.removeItem('vocal_llm_key');
+          localStorage.removeItem('vocal_llm_model');
+          localStorage.removeItem('vocal_llm_enabled');
+        } catch(e) {}
+      }
+    }
+    return saved || {};
+  },
+
+  // ---- UI Rendering ----
+  ui: {
+    init() {
+      // 加载持久化设置
+      var saved = App.loadSettings();
+      if (saved.profile) App.state.selectedProfile = saved.profile;
+      if (saved.llm_base_url) App.ui._llmState.base_url = saved.llm_base_url;
+      if (saved.llm_api_key) App.ui._llmState.api_key = saved.llm_api_key;
+      // Restore skip-separation toggle
+      if (saved._skip_separation) {
+        App.state.skipSeparation = true;
+        var skipCb = document.getElementById('skip-separation-cb');
+        if (skipCb) skipCb.checked = true;
+      }
+
+      App.ui.initUploadZone();
+      App.ui.initProfileCards();
+      App.ui.initDeviceInfo();
+      App.refreshHistory();
+      App.refreshCacheInfo();
+
+      // 全局设置变更监听 — 任何表单项变化时自动保存
+      var optionsPanel = document.getElementById('options-panel');
+      if (optionsPanel) {
+        optionsPanel.addEventListener('change', function() { App.saveSettings(); });
+        optionsPanel.addEventListener('input', function(e) {
+          if (e.target.type === 'range') {
+            clearTimeout(App._saveTimeout);
+            App._saveTimeout = setTimeout(function() { App.saveSettings(); }, 300);
+          } else {
+            App.saveSettings();
+          }
+        });
+      }
+      // Skip-separation toggle listener
+      var skipSepCb = document.getElementById('skip-separation-cb');
+      if (skipSepCb) {
+        skipSepCb.addEventListener('change', function() { App.saveSettings(); });
+      }
+
+      App.ui.initSubtitleBatchControls();
+      document.addEventListener('keydown', function(event) {
+        App.ui.handleSubtitleKeyboard(event);
+      });
+
+      // Feedback file input handlers
+      var fbRefInput = $('#fb-ref-input');
+      var fbAudioInput = $('#fb-audio-input');
+      if (fbRefInput) {
+        fbRefInput.addEventListener('change', function() {
+          if (this.files && this.files[0]) {
+            App.state._fbRefFile = this.files[0];
+            var statusEl = $('#fb-file-status');
+            if (statusEl) statusEl.textContent = '已选择: ' + this.files[0].name;
+            App.ui._updateFbButtons();
+          }
+        });
+      }
+      if (fbAudioInput) {
+        fbAudioInput.addEventListener('change', function() {
+          if (this.files && this.files[0]) {
+            App.state._fbAudioFile = this.files[0];
+            var statusEl = $('#fb-file-status');
+            if (statusEl) statusEl.textContent = '已选择: ' + this.files[0].name;
+            App.ui._updateFbButtons();
+          }
+        });
+      }
+    },
+
+    // Upload Zone
+    initUploadZone() {
+      const zone = $('#upload-zone');
+      const input = $('#file-input');
+
+      zone.addEventListener('click', () => input.click());
+
+      zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+      zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+      zone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        zone.classList.remove('drag-over');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) App.ui.setFile(files[0]);
+      });
+
+      input.addEventListener('change', () => {
+        if (input.files.length > 0) App.ui.setFile(input.files[0]);
+      });
+    },
+
+    setFile(file) {
+      App.state.selectedFile = file;
+      const zone = $('#upload-zone');
+      zone.classList.add('has-file');
+      $('#upload-filename').textContent = '✓ ' + file.name + ' (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)';
+
+      // Enable run button
+      const btn = $('#btn-run');
+      btn.disabled = false;
+      $('#btn-run-text').textContent = '开始处理';
+    },
+
+    // Profile Cards
+    async initProfileCards() {
+      try {
+        const profiles = await App.api.getProfiles();
+        const container = $('#profile-cards');
+        container.innerHTML = '';
+
+        profiles.forEach((p, i) => {
+          const card = document.createElement('div');
+          card.className = 'profile-card' + (p.name === App.state.selectedProfile ? ' active' : '');
+          card.innerHTML = `
+            <div class="pc-icon">${['🎵','🎙️','📚','📺','🎸'][i] || '🎧'}</div>
+            <div class="pc-info">
+              <div class="pc-name">${p.name === 'default' ? '默认' : p.name === 'podcast' ? '播客/访谈' : p.name === 'education' ? '教学/演讲' : p.name === 'variety_show' ? '综艺/直播' : p.name === 'music_live' ? '音乐现场' : p.name}</div>
+              <div class="pc-desc">${p.description}</div>
+            </div>
+            <div class="pc-badge">${(p.config_summary && p.config_summary.separation_engine) || '—'}</div>
+          `;
+
+          card.addEventListener('click', () => App.ui.selectProfile(p.name));
+          container.appendChild(card);
+        });
+
+        // Load default profile config
+        await App.ui.loadProfileConfig(App.state.selectedProfile);
+      } catch (ex) {
+        console.error('Failed to load profiles:', ex);
+        toast('加载场景模板失败', 'error');
+      }
+    },
+
+    async selectProfile(name) {
+      App.state.selectedProfile = name;
+      $$('.profile-card').forEach(c => c.classList.remove('active'));
+      const cards = $$('.profile-card');
+      const idx = ['default','podcast','education','variety_show','music_live'].indexOf(name);
+      if (idx >= 0 && cards[idx]) cards[idx].classList.add('active');
+      App.saveSettings();
+      await App.ui.loadProfileConfig(name);
+    },
+
+    async loadProfileConfig(name) {
+      try {
+        const data = await App.api.getProfileConfig(name);
+        App.state.profileConfig = data.config;
+        App.ui.renderOptions(data.config);
+        // 刷新设备提示
+        setTimeout(function() { App.ui.updateDeviceHint(); }, 50);
+      } catch (ex) {
+        console.error('Failed to load config:', ex);
+        toast('加载配置失败', 'error');
+      }
+    },
+
+    renderOptions(config) {
+      const asrEngine = config.asr_engine || 'auto';
+      const genericASRModels = ['large-v3', 'medium', 'small', 'tiny'];
+      const configuredASRModel = config.asr_model || 'large-v3';
+      const funasrDefaultModel = 'iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch';
+      const initialFunASRModel = asrEngine === 'funasr' && genericASRModels.indexOf(configuredASRModel) >= 0
+        ? funasrDefaultModel : configuredASRModel;
+      const asrModelOptions = asrEngine === 'funasr'
+        ? '<option value="' + App.ui._escapeAttr(initialFunASRModel) + '" selected>FunASR Paraformer（中文）</option>'
+        : '<option value="large-v3" ' + (configuredASRModel === 'large-v3' ? 'selected' : '') + '>large-v3</option>' +
+          '<option value="medium" ' + (configuredASRModel === 'medium' ? 'selected' : '') + '>medium</option>' +
+          '<option value="small" ' + (configuredASRModel === 'small' ? 'selected' : '') + '>small</option>' +
+          '<option value="tiny" ' + (configuredASRModel === 'tiny' ? 'selected' : '') + '>tiny</option>';
+
+      // Separation options
+      $('#opts-separation').innerHTML = `
+        <div class="option-row"><label>引擎</label><select data-key="separator">
+          <option value="uvr" ${config.separator==='uvr'?'selected':''}>UVR (BS-RoFormer, 推荐)</option>
+          <option value="openunmix" ${config.separator==='openunmix'?'selected':''}>Open-Unmix (品质)</option>
+          <option value="spleeter" ${config.separator==='spleeter'?'selected':''}>Spleeter (旧, 仅 Py<3.12)</option>
+        </select></div>
+        <div class="option-row"><label>UVR 模型</label><input data-key="uvr_model" value="${config.uvr_model||''}" placeholder="model_bs_roformer..."></div>
+      `;
+
+      // VAD options
+      $('#opts-vad').innerHTML = `
+        <div class="option-row"><label>引擎</label><select data-key="vad_engine">
+          <option value="silero" ${config.vad_engine==='silero'?'selected':''}>Silero VAD</option>
+          <option value="ten" ${config.vad_engine==='ten'?'selected':''}>TEN VAD</option>
+          <option value="webrtc" ${config.vad_engine==='webrtc'?'selected':''}>WebRTC VAD</option>
+        </select></div>
+        <div class="option-row"><label>阈值</label><input type="range" data-key="vad_threshold" min="0.1" max="0.9" step="0.05" value="${config.vad_threshold||0.5}"><span class="value-display">${config.vad_threshold||0.5}</span></div>
+      `;
+
+      // ASR options
+      $('#opts-asr').innerHTML = `
+        <div class="option-row"><label>引擎</label><select data-key="asr_engine">
+          <option value="auto" ${asrEngine==='auto'?'selected':''}>自动（中文优先）</option>
+          <option value="faster-whisper" ${config.asr_engine==='faster-whisper'?'selected':''}>faster-whisper</option>
+          <option value="whisper-cpp" ${config.asr_engine==='whisper-cpp'?'selected':''}>whisper.cpp</option>
+          <option value="funasr" ${config.asr_engine==='funasr'?'selected':''}>FunASR (中文优化)</option>
+        </select></div>
+        <div class="option-row"><label>模型</label><select data-key="asr_model">${asrModelOptions}</select><span class="device-hint" id="funasr-status" style="display:none;"></span></div>
+        <div class="option-row"><label>设备</label><select data-key="device" onchange="App.ui.onDeviceChange()">
+          <option value="auto" ${(!config.asr_device||config.asr_device==='auto')?'selected':''}>自动 (跟随系统)</option>
+          <option value="cuda" ${config.asr_device==='cuda'?'selected':''}>CUDA (GPU)</option>
+          <option value="cpu" ${config.asr_device==='cpu'?'selected':''}>CPU</option>
+        </select><span class="device-hint" id="device-hint"></span></div>
+        <div class="option-row"><label>语言</label><select data-key="language">
+          <option value="" ${!config.language?'selected':''}>自动检测 (Auto)</option>
+          <option value="zh" ${config.language==='zh'?'selected':''}>中文 (Chinese)</option>
+          <option value="en" ${config.language==='en'?'selected':''}>English</option>
+          <option value="ja" ${config.language==='ja'?'selected':''}>日本語 (Japanese)</option>
+          <option value="ko" ${config.language==='ko'?'selected':''}>한국어 (Korean)</option>
+          <option value="fr" ${config.language==='fr'?'selected':''}>Français (French)</option>
+          <option value="de" ${config.language==='de'?'selected':''}>Deutsch (German)</option>
+          <option value="es" ${config.language==='es'?'selected':''}>Español (Spanish)</option>
+          <option value="pt" ${config.language==='pt'?'selected':''}>Português (Portuguese)</option>
+          <option value="ru" ${config.language==='ru'?'selected':''}>Русский (Russian)</option>
+          <option value="ar" ${config.language==='ar'?'selected':''}>العربية (Arabic)</option>
+        </select></div>
+      `;
+
+      const asrEngineSelect = $('#opts-asr [data-key="asr_engine"]');
+      if (asrEngineSelect) {
+        asrEngineSelect.addEventListener('change', function() {
+          App.ui.syncASREngineOptions(this.value, true);
+          App.saveSettings();
+        });
+      }
+
+      // Subtitle options
+      $('#opts-subtitle').innerHTML = `
+        <div class="option-row"><label>最小时长</label><input type="range" data-key="subtitle_min_duration" min="0.3" max="2" step="0.1" value="${config.subtitle_min_duration||0.8}"><span class="value-display">${config.subtitle_min_duration||0.8}s</span></div>
+        <div class="option-row"><label>最大时长</label><input type="range" data-key="subtitle_max_duration" min="2" max="10" step="0.5" value="${config.subtitle_max_duration||5.0}"><span class="value-display">${config.subtitle_max_duration||5.0}s</span></div>
+      `;
+
+      // Diarization options
+      $('#opts-diarization').innerHTML = `
+        <div class="option-row"><label>启用说话人分离</label><input type="checkbox" data-key="diarization_enabled" ${config.diarization_enabled?'checked':''}></div>
+        <div class="option-row"><label>融合模式</label><select data-key="speaker_fusion">
+          <option value="auto" ${(config.speaker_fusion||'auto')==='auto'?'selected':''}>自动</option>
+          <option value="embedding" ${config.speaker_fusion==='embedding'?'selected':''}>仅声纹嵌入</option>
+          <option value="dual" ${config.speaker_fusion==='dual'?'selected':''}>线路四：双路融合</option>
+        </select></div>
+        <div class="option-row"><label>全局模型</label><select data-key="global_diarization_model">
+          <option value="auto" ${(config.global_diarization_model||'auto')==='auto'?'selected':''}>自动</option>
+          <option value="none" ${config.global_diarization_model==='none'?'selected':''}>禁用</option>
+          <option value="community-1" ${config.global_diarization_model==='community-1'?'selected':''}>Community-1</option>
+          <option value="diarization-3.1" ${config.global_diarization_model==='diarization-3.1'?'selected':''}>Diarization 3.1</option>
+        </select></div>
+        <div class="option-row"><label>处理范围</label><select data-key="speaker_diarization_scope">
+          <option value="hierarchical" ${(config.speaker_diarization_scope||'hierarchical')==='hierarchical'?'selected':''}>线路四：全局 + 片段精修</option>
+          <option value="global" ${config.speaker_diarization_scope==='global'?'selected':''}>仅全局 turns</option>
+        </select></div>
+        <div class="option-row"><label>已知说话人数</label><input type="number" data-key="expected_speakers" value="${config.expected_speakers||''}" min="1" max="20" placeholder="自动" style="max-width:80px;"></div>
+        <div class="option-row"><label>局部换人检测</label><select data-key="local_speaker_refinement">
+          <option value="embedding" ${(config.local_speaker_refinement||'embedding')==='embedding'?'selected':''}>ECAPA 检测</option>
+          <option value="full" ${config.local_speaker_refinement==='full'?'selected':''}>全局模型复核</option>
+          <option value="off" ${config.local_speaker_refinement==='off'?'selected':''}>关闭</option>
+        </select></div>
+        <div class="option-row"><label>局部上下文 (秒)</label><input type="number" data-key="diarization_local_context" value="${config.diarization_local_context||0.6}" min="0.1" max="2" step="0.1" style="max-width:80px;"></div>
+        <div class="option-row"><label>换人置信度</label><input type="range" data-key="diarization_min_change_confidence" min="0.3" max="1" step="0.05" value="${config.diarization_min_change_confidence||0.7}"><span class="value-display">${config.diarization_min_change_confidence||0.7}</span></div>
+        <div class="option-row"><label>聚类阈值</label><input type="range" data-key="diarization_distance_threshold" min="0.1" max="1.0" step="0.05" value="${config.diarization_distance_threshold||0.5}"><span class="value-display">${config.diarization_distance_threshold||0.5}</span></div>
+        <div class="option-row"><label>最少说话人数</label><input type="number" data-key="diarization_min_speakers" value="${config.diarization_min_speakers||1}" min="1" max="10" style="max-width:60px;"></div>
+        <div class="option-row"><label>最多说话人数</label><input type="number" data-key="diarization_max_speakers" value="${config.diarization_max_speakers||10}" min="1" max="20" style="max-width:60px;"></div>
+        <div class="option-row"><label>启用角色标注(LLM)</label><input type="checkbox" data-key="speaker_role_enabled" ${config.speaker_role_enabled?'checked':''}></div>
+        <div class="option-row-full"><label>场景提示 (可选)</label><input data-key="speaker_role_context_hint" value="${config.speaker_role_context_hint||''}" placeholder="例如: podcast interview, lecture, meeting"></div>
+      `;
+
+      // Speaker Embedding options
+      App.ui.renderSpeakerEmbeddingOptions(config);
+      App.ui.renderSpeakerModelOptions();
+
+      // LLM options
+      App.ui.renderLLMOptions(config);
+
+      // Macro Chunking options (方案〇)
+      App.ui.renderMacroChunkOptions(config);
+
+      // Merge Decision options (方案五)
+      App.ui.renderMergeDecisionOptions(config);
+
+      // Boundary Refinement options (方案四)
+      App.ui.renderBoundaryRefineOptions(config);
+
+      // Acoustic Validation options (方案七)
+      App.ui.renderAcousticValidationOptions(config);
+
+      // Persistence options
+      App.ui.renderPersistenceOptions(config);
+
+      // Bind range input display updates
+      $$('.option-row input[type=range]').forEach(el => {
+        el.addEventListener('input', () => {
+          const display = el.parentElement.querySelector('.value-display');
+          if (display) display.textContent = el.value + (el.dataset.key.includes('duration') ? 's' : '');
+        });
+      });
+
+      // 应用持久化设置（用户保存的覆盖值优先于模板默认值）
+      var saved = App.loadSettings();
+      for (var key in saved) {
+        if (key === 'profile') continue;
+        var el = document.querySelector('#options-panel [data-key="' + key + '"]');
+        if (!el) continue;
+        if (el.type === 'checkbox') {
+          el.checked = saved[key];
+        } else if (el.type === 'range') {
+          el.value = saved[key];
+          var display = el.parentElement.querySelector('.value-display');
+          if (display) {
+            var suffix = key.includes('duration') ? 's' : '';
+            display.textContent = saved[key] + suffix;
+          }
+        } else {
+          el.value = saved[key];
+        }
+      }
+      App.ui.syncASREngineOptions(
+        document.querySelector('#opts-asr [data-key="asr_engine"]')?.value || asrEngine,
+        true,
+      );
+    },
+
+    syncASREngineOptions(engine, prepare) {
+      var modelSelect = document.querySelector('#opts-asr [data-key="asr_model"]');
+      var status = document.getElementById('funasr-status');
+      if (!modelSelect) return;
+      var funasrModel = 'iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch';
+      var current = modelSelect.value;
+      if (engine === 'funasr') {
+        if (['large-v3', 'large-v2', 'medium', 'small', 'tiny', ''].indexOf(current) >= 0) current = funasrModel;
+        modelSelect.innerHTML = '<option value="' + App.ui._escapeAttr(current) + '" selected>FunASR Paraformer（中文）</option>';
+        if (status) {
+          status.style.display = 'inline';
+          status.textContent = prepare ? '正在检查 FunASR...' : 'FunASR';
+        }
+        if (prepare) App.ui.prepareFunASR(current);
+      } else {
+        var selected = ['large-v3', 'medium', 'small', 'tiny'].indexOf(current) >= 0 ? current : 'large-v3';
+        modelSelect.innerHTML =
+          '<option value="large-v3" ' + (selected === 'large-v3' ? 'selected' : '') + '>large-v3</option>' +
+          '<option value="medium" ' + (selected === 'medium' ? 'selected' : '') + '>medium</option>' +
+          '<option value="small" ' + (selected === 'small' ? 'selected' : '') + '>small</option>' +
+          '<option value="tiny" ' + (selected === 'tiny' ? 'selected' : '') + '>tiny</option>';
+        if (status) {
+          status.style.display = engine === 'auto' ? 'inline' : 'none';
+          status.textContent = engine === 'auto'
+            ? '自动检测：纯中文走 FunASR，其他情况走 faster-whisper'
+            : '';
+        }
+      }
+    },
+
+    async prepareFunASR(model) {
+      var status = document.getElementById('funasr-status');
+      App.state.funasrPreparing = true;
+      var setStatus = function(text, className) {
+        if (status) { status.textContent = text; status.className = 'device-hint ' + (className || ''); }
+      };
+      try {
+        var local = await App.api.getFunASRStatus(model);
+        if (local.ready) {
+          setStatus('✓ FunASR 本地模型已就绪', 'gpu');
+          return local;
+        }
+        setStatus(local.package_installed ? '正在检查/下载本地模型...' : '正在安装 FunASR 依赖...');
+        var ready = await App.api.prepareFunASR(model);
+        setStatus('✓ FunASR 已就绪', 'gpu');
+        return ready;
+      } catch (ex) {
+        var message = ex && ex.message ? ex.message : String(ex);
+        try { message = JSON.parse(message).detail || message; } catch (_) {}
+        setStatus('✗ FunASR 准备失败: ' + message, 'cpu');
+        toast('FunASR 准备失败: ' + message, 'error');
+        throw ex;
+      } finally {
+        App.state.funasrPreparing = false;
+      }
+    },
+
+    // ---- LLM 配置面板 ----
+    _llmState: { base_url: '', api_key: '', models: [] },
+
+    async renderSpeakerModelOptions() {
+      const target = $('#opts-speaker-models');
+      if (!target) return;
+      target.innerHTML = '<div class="option-row-full" style="color:var(--text-tertiary);">正在读取模型状态...</div>';
+      try {
+        const response = await fetch('/api/speaker-models');
+        const payload = await response.json();
+        const models = payload.models || [];
+        target.innerHTML = models.map(model => `
+          <div class="option-row-full" style="border-bottom:1px solid var(--border);padding:8px 0;">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+              <span><strong>${model.name}</strong><br><small style="color:var(--text-tertiary);">${model.kind} · ${model.model_ref}</small></span>
+              <span style="display:flex;gap:6px;flex-shrink:0;">
+                <button class="btn-secondary" type="button" data-model-id="${model.model_id}" data-action="download" ${model.cached?'disabled':''}>${model.cached?'已缓存':'下载'}</button>
+                <button class="btn-secondary" type="button" data-model-id="${model.model_id}" data-action="check">检查缓存</button>
+              </span>
+            </div>
+            <div style="font-size:0.72rem;color:var(--text-tertiary);margin-top:4px;">${model.license}${model.requires_token?' · 需要 HF Token':''}</div>
+          </div>`).join('');
+        target.querySelectorAll('button[data-model-id]').forEach(button => {
+          button.addEventListener('click', () => {
+            if (button.dataset.action === 'check') {
+              this.checkSpeakerModelCache(button.dataset.modelId, button);
+            } else {
+              this.downloadSpeakerModel(button.dataset.modelId, button);
+            }
+          });
+        });
+      } catch (error) {
+        target.innerHTML = '<div class="option-row-full" style="color:var(--accent-red);">模型状态读取失败</div>';
+      }
+    },
+
+    async downloadSpeakerModel(modelId, button) {
+      const token = document.querySelector('[data-key="speaker_embedding_hf_token"]');
+      const form = new FormData();
+      if (token && token.value && token.value !== '***') form.append('token', token.value);
+      button.disabled = true;
+      button.textContent = '下载中...';
+      try {
+        const response = await fetch('/api/speaker-models/' + encodeURIComponent(modelId) + '/download', {method:'POST', body:form});
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.detail || 'download failed');
+        }
+        toast('模型下载完成', 'success');
+      } catch (error) {
+        toast('模型下载失败：' + error.message, 'error');
+      } finally {
+        this.renderSpeakerModelOptions();
+      }
+    },
+
+    async checkSpeakerModelCache(modelId, button) {
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '检查中...';
+      try {
+        const response = await fetch('/api/speaker-models/' + encodeURIComponent(modelId) + '/status');
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'cache check failed');
+        if (payload.cached) {
+          toast('模型缓存完整，可直接使用', 'success');
+        } else {
+          toast('未检测到完整模型缓存，请下载模型', 'error');
+        }
+      } catch (error) {
+        toast('缓存检查失败：' + error.message, 'error');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+        this.renderSpeakerModelOptions();
+      }
+    },
+
+    renderSpeakerEmbeddingOptions(config) {
+      const enabled = config.speaker_embedding_enabled !== false;  // 默认 true
+      const modelRef = config.speaker_embedding_model_ref || 'speechbrain/spkrec-ecapa-voxceleb';
+      const hasToken = config.speaker_embedding_hf_token && config.speaker_embedding_hf_token !== '***';
+      const tokenMasked = config.speaker_embedding_hf_token || '';
+      const isPyannote = modelRef === 'pyannote/embedding';
+
+      const modelOptions = [
+        { value: 'speechbrain/spkrec-ecapa-voxceleb', label: 'speechbrain/ecapa (192维, Apache 2.0, 默认)' },
+        { value: 'pyannote/embedding', label: 'pyannote/embedding (512维, 需签署协议)' },
+      ];
+
+      const modelSelectOptions = modelOptions
+        .map(o => `<option value="${o.value}" ${modelRef===o.value?'selected':''}>${o.label}</option>`)
+        .join('');
+
+      $('#opts-speaker-embedding').innerHTML = `
+        <div class="option-row">
+          <label>启用嵌入模型</label>
+          <input type="checkbox" data-key="speaker_embedding_enabled" ${enabled?'checked':''}>
+        </div>
+        <div class="option-row-full option-field-wrapper">
+          <label>模型<span class="tip-icon" title="选择说话人嵌入模型">?</span></label>
+          <select data-key="speaker_embedding_model_ref" id="speaker-embedding-model-select">${modelSelectOptions}</select>
+          <div class="option-field-tip">
+            <div class="tip-title">📦 模型选择</div>
+            <p><strong>speechbrain/ecapa</strong> — 192维，Apache 2.0 协议。<br>无需签署额外协议，开箱即用。</p>
+            <p style="margin-top:4px;"><strong>pyannote/embedding</strong> — 512维 ECAPA-TDNN，精度最高。<br>需先在 huggingface.co 接受模型使用协议。</p>
+          </div>
+        </div>
+        <div class="option-row-full option-field-wrapper" id="speaker-hf-token-row">
+          <label>HF Token（pyannote 模型）<span class="tip-icon" title="HuggingFace API Token">?</span></label>
+          <input data-key="speaker_embedding_hf_token" name="speaker-embedding-token" type="text" class="credential-mask" value="${tokenMasked}" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxx"
+                 autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" data-form-type="other" data-lpignore="true"
+                 style="${hasToken?'border-color:var(--accent-green);':''}">
+          <div class="option-field-tip">
+            <div class="tip-title">🔑 如何获取 HF Token</div>
+            <ol class="tip-steps">
+              <li>打开 <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a></li>
+              <li>登录或注册 HuggingFace 账号</li>
+              <li>点击「Create new token」→ 选择 <code>Read</code> 类型</li>
+              <li>复制生成的 token (格式: <code>hf_xxxx...</code>)</li>
+              <li>粘贴到此处</li>
+            </ol>
+            <p style="margin-top:4px;">SpeechBrain ECAPA 不需要 Token；pyannote/embedding、Community-1、Diarization 3.1 下载时使用此 Token。Token 由后端加密存储，页面只保留脱敏标记。</p>
+          </div>
+        </div>
+        <div class="option-row-full" style="font-size:0.75rem;color:var(--text-tertiary);padding:6px 0;" id="speaker-embedding-hint">
+          ${isPyannote
+            ? '⚠️ pyannote 模型需签署协议。详见 <a href="speaker-embedding-guide.html" target="_blank" style="color:var(--accent);text-decoration:underline;">📖 配置指南</a>'
+            : (enabled ? '✅ 首次运行将自动下载模型 (~80MB)，请确保网络通畅' : '💡 启用嵌入模型可显著提升说话人分离精度')}
+        </div>
+      `;
+
+      // 监听模型切换：保持共享 Token 输入框可见，只更新提示信息
+      const selectEl = document.getElementById('speaker-embedding-model-select');
+      if (selectEl) {
+        selectEl.addEventListener('change', function() {
+          const isPy = this.value === 'pyannote/embedding';
+          const tokenRow = document.getElementById('speaker-hf-token-row');
+          const hint = document.getElementById('speaker-embedding-hint');
+          if (tokenRow) tokenRow.style.display = '';
+          if (hint) {
+            hint.innerHTML = isPy
+              ? '⚠️ pyannote 模型需签署协议。详见 <a href="speaker-embedding-guide.html" target="_blank" style="color:var(--accent);text-decoration:underline;">📖 配置指南</a>'
+              : '✅ SpeechBrain ECAPA 无需 Token；全局 pyannote 模型下载时会使用上方 Token';
+          }
+        });
+      }
+    },
+
+    renderLLMOptions(config) {
+      const llmEnabled = config.llm_enabled || false;
+      const llmModel = config.llm_model || 'deepseek-v4-pro';
+      const savedUrl = localStorage.getItem('vocal_llm_url') || 'https://api.deepseek.com';
+      const savedKey = localStorage.getItem('vocal_llm_key') || '';
+      const savedModel = localStorage.getItem('vocal_llm_model') || llmModel;
+
+      App.ui._llmState.base_url = savedUrl;
+      App.ui._llmState.api_key = savedKey;
+
+      // Provider presets（与后端 LLM_PROVIDERS 同步，截至 2026-06）
+      const providers = [
+        { id: 'deepseek',   name: 'DeepSeek（深度求索）',   url: 'https://api.deepseek.com' },
+        { id: 'openai',     name: 'OpenAI',                url: 'https://api.openai.com' },
+        { id: 'anthropic',  name: 'Anthropic (Claude)',    url: 'https://api.anthropic.com' },
+        { id: 'google',     name: 'Google (Gemini)',        url: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+        { id: 'zhipu',      name: '智谱 AI (GLM)',         url: 'https://open.bigmodel.cn/api/paas/v4' },
+        { id: 'dashscope',  name: '阿里百炼 (Qwen)',        url: 'https://dashscope.aliyuncs.com/compatible-mode' },
+        { id: 'hunyuan',    name: '腾讯混元 (Hunyuan)',      url: 'https://api.hunyuan.cloud.tencent.com/v1' },
+        { id: 'moonshot',   name: '月之暗面 (Kimi)',         url: 'https://api.moonshot.cn' },
+        { id: 'minimax',    name: 'MiniMax',               url: 'https://api.minimax.chat/v1' },
+        { id: 'siliconflow',name: '硅基流动 (SiliconFlow)',  url: 'https://api.siliconflow.cn' },
+        { id: 'ollama',     name: 'Ollama（本地）',          url: 'http://localhost:11434' },
+      ];
+
+      const activeProvider = providers.find(p => savedUrl.startsWith(p.url)) || providers[0];
+      const hasKey = !!savedKey;
+      const keyMasked = hasKey ? savedKey.slice(0,4) + '****' + savedKey.slice(-4) : '';
+
+      // Build model select options from state, or use saved model as default
+      const modelOptions = App.ui._llmState.models.length > 0
+        ? App.ui._llmState.models.map(m => `<option value="${App.ui._escapeAttr(m.id)}" ${m.id === savedModel ? 'selected' : ''}>${App.ui._escapeHtml(m.id)}</option>`).join('')
+        : `<option value="${App.ui._escapeAttr(savedModel)}" selected>${App.ui._escapeHtml(savedModel)}</option>`;
+
+      let html = `
+        <div class="option-row"><label>启用</label><input type="checkbox" data-key="llm_enabled" ${llmEnabled?'checked':''} onchange="App.ui._onLLMToggle(this)"></div>
+
+        <div class="option-row-full"><label>模型供应商</label></div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;" id="llm-provider-list">
+      `;
+
+      providers.forEach((p, i) => {
+        const active = p.id === activeProvider.id;
+        const colors = ['#58a6ff','#3fb950','#a371f7','#db61a2','#d29922','#f85149','#79c0ff','#56d364','#bc8cff','#e0719c','#f0883e'];
+        html += `
+          <div class="llm-provider-card ${active?'active':''}" data-provider="${p.id}" data-url="${p.url}" onclick="App.ui._onProviderSelect(this)">
+            <span class="pc-dot" style="background:${colors[i]}"></span>${p.name}
+          </div>`;
+      });
+
+      html += `</div>
+
+        <div class="option-row-full">
+          <label>LLM API 地址</label>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <input id="llm-base-url" placeholder="https://api.deepseek.com" oninput="App.ui._onURLChange(this)" value="${App.ui._escapeAttr(savedUrl)}">
+            <span class="llm-status ${savedUrl?'ok':'pending'}" id="llm-url-status">${savedUrl?'✓':'未配置'}</span>
+          </div>
+          <div class="llm-hint">OpenAI 兼容接口地址，选择供应商后自动填充</div>
+        </div>
+
+        <div class="option-row-full" style="margin-top:8px;">
+          <label>LLM API 密钥（Ollama 本地可留空）</label>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <input id="llm-api-key" name="llm-api-key" type="text" class="credential-mask" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" data-form-type="other" data-lpignore="true" placeholder="sk-..." oninput="App.ui._onKeyChange(this)" style="flex:1;" value="${App.ui._escapeAttr(savedKey)}">
+            <span class="llm-status ${hasKey?'ok':'pending'}" id="llm-key-status">${hasKey?'✓ '+keyMasked:'未配置'}</span>
+          </div>
+          <div class="llm-hint">输入密钥后点击"获取模型"自动拉取可用模型列表</div>
+        </div>
+
+        <div style="margin-top:8px;">
+          <button class="btn-fetch-models" id="btn-fetch-models" onclick="App.ui.handleFetchModels()">
+            🔄 获取模型列表
+          </button>
+          <span id="fetch-status" style="font-size:0.7rem;color:var(--text-secondary);margin-left:8px;"></span>
+        </div>
+
+        <div class="option-row-full" style="margin-top:8px;">
+          <label>LLM 模型</label>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <select id="llm-model-select" data-key="llm_model" class="llm-model-select" onchange="App.ui._onModelSelectChange(this)" style="flex:1;">
+              ${modelOptions}
+            </select>
+            <span class="llm-status ${savedModel?'ok':'pending'}" id="llm-model-status">${savedModel?'✓':'未选择'}</span>
+          </div>
+          <div class="llm-hint">点击"获取模型列表"后从下拉列表选择</div>
+        </div>
+      `;
+
+      $('#opts-llm').innerHTML = html;
+
+      // 显式同步密钥值，兼容浏览器自动填充，并修正初始状态徽章。
+      const keyInput = $('#llm-api-key');
+      if (keyInput) {
+        keyInput.value = savedKey;
+        // 绑定 change 事件作为 input 的补充（密码管理器自动填充可能不触发 input）
+        keyInput.addEventListener('change', function() {
+          App.ui._onKeyChange(this);
+        });
+        // 立即同步状态徽章（防御 innerHTML 中状态与 localStorage 不一致）
+        App.ui._syncKeyStatus();
+      }
+
+      const urlInput = $('#llm-base-url');
+      if (urlInput && savedUrl) {
+        urlInput.value = savedUrl;
+      }
+    },
+
+    _escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str || '';
+      return div.innerHTML;
+    },
+
+    _escapeAttr(str) {
+      return (str || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;');
+    },
+
+    _populateModelList(models) {
+      App.ui._llmState.models = models;
+      const sel = $('#llm-model-select');
+      if (!sel) return;
+      const currentVal = sel.value;
+      sel.innerHTML = models.map(m => `<option value="${App.ui._escapeAttr(m.id)}">${App.ui._escapeHtml(m.id)}</option>`).join('');
+      // Restore previous selection if still in list
+      if (models.some(m => m.id === currentVal)) {
+        sel.value = currentVal;
+      } else if (models.length > 0) {
+        // Prefer chat model
+        const chatModel = models.find(m => m.id.includes('chat')) || models[0];
+        sel.value = chatModel.id;
+      }
+      // Trigger change to save
+      App.ui._onModelSelectChange(sel);
+    },
+
+    _onLLMToggle(cb) {
+      localStorage.setItem('vocal_llm_enabled', cb.checked ? '1' : '0');
+      App.saveSettings();
+    },
+
+    _onProviderSelect(el) {
+      const url = el.dataset.url;
+      const urlEl = $('#llm-base-url');
+      if (urlEl) urlEl.value = url;
+      App.ui._llmState.base_url = url;
+      localStorage.setItem('vocal_llm_url', url);
+      App.saveSettings();
+      const statusEl = $('#llm-url-status');
+      if (statusEl) { statusEl.textContent = '✓'; statusEl.className = 'llm-status ok'; }
+
+      // Update active state on all provider cards
+      document.querySelectorAll('#llm-provider-list .llm-provider-card').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+
+      // Clear model list when switching provider
+      App.ui._llmState.models = [];
+      const sel = $('#llm-model-select');
+      const fetchStatus = $('#fetch-status');
+      if (sel) sel.innerHTML = '<option value="">请先获取模型列表</option>';
+      if (fetchStatus) { fetchStatus.textContent = ''; fetchStatus.style.color = ''; }
+    },
+
+    _onURLChange(input) {
+      const url = input.value.trim();
+      App.ui._llmState.base_url = url;
+      localStorage.setItem('vocal_llm_url', url);
+      App.saveSettings();
+      const statusEl = $('#llm-url-status');
+      if (statusEl) {
+        statusEl.textContent = url ? '✓' : '未配置';
+        statusEl.className = url ? 'llm-status ok' : 'llm-status pending';
+      }
+    },
+
+    _onKeyChange(input) {
+      const key = input.value.trim();
+      App.ui._llmState.api_key = key;
+      localStorage.setItem('vocal_llm_key', key);
+      App.ui._syncKeyStatus();
+      App.saveSettings();
+    },
+
+    // 同步密钥状态徽章（供 renderLLMOptions 后调用及 _onKeyChange 复用）
+    _syncKeyStatus() {
+      const key = localStorage.getItem('vocal_llm_key') || '';
+      const statusEl = $('#llm-key-status');
+      if (statusEl) {
+        if (key) {
+          statusEl.textContent = '✓ ' + key.slice(0,4) + '****' + key.slice(-4);
+          statusEl.className = 'llm-status ok';
+        } else {
+          statusEl.textContent = '未配置';
+          statusEl.className = 'llm-status pending';
+        }
+      }
+    },
+
+    _onModelSelectChange(sel) {
+      const model = (sel && sel.value) ? sel.value.trim() : '';
+      if (model) {
+        localStorage.setItem('vocal_llm_model', model);
+        const statusEl = $('#llm-model-status');
+        if (statusEl) { statusEl.textContent = '✓'; statusEl.className = 'llm-status ok'; }
+      }
+      App.saveSettings();
+    },
+
+    // ---- 方案〇 宏观切块选项 ----
+    renderMacroChunkOptions(config) {
+      const mc = config.macro_chunking || {};
+      const saved = App.loadSettings();
+      const enabled = (saved.macro_chunk_enabled !== undefined) ? saved.macro_chunk_enabled : (mc.enabled !== false);
+      const targetDur = saved.macro_chunk_target_duration || mc.target_chunk_duration || 60;
+      const maxDur = saved.macro_chunk_max_duration || mc.max_chunk_duration || 180;
+      $('#opts-macro-chunk').innerHTML =
+        '<div class="option-row"><label>启用 (长音频自动切块)</label><input type="checkbox" data-key="macro_chunk_enabled" ' + (enabled ? 'checked' : '') + '></div>' +
+        '<div class="option-help">音频 > 3 分钟自动在长静音处切分为独立大块，隔离误差、支持并行</div>' +
+        '<div class="option-row"><label>目标块时长</label><input type="range" data-key="macro_chunk_target_duration" min="20" max="120" step="10" value="' + targetDur + '"><span class="value-display">' + targetDur + 's</span></div>' +
+        '<div class="option-row"><label>最大块时长</label><input type="range" data-key="macro_chunk_max_duration" min="60" max="300" step="30" value="' + maxDur + '"><span class="value-display">' + maxDur + 's</span></div>';
+    },
+
+    // ---- 方案五 合并决策选项 ----
+    renderMergeDecisionOptions(config) {
+      const md = config.merge_decision || {};
+      const saved = App.loadSettings();
+      const fastGap = saved.merge_fast_gap !== undefined ? saved.merge_fast_gap : (md.fast_merge_max_gap || 0.20);
+      const llmMin = saved.merge_llm_min_gap !== undefined ? saved.merge_llm_min_gap : (md.llm_decision_min_gap || 0.20);
+      const llmMax = saved.merge_llm_max_gap !== undefined ? saved.merge_llm_max_gap : (md.llm_decision_max_gap || 1.20);
+      const hardGap = saved.merge_hard_split_gap !== undefined ? saved.merge_hard_split_gap : (md.hard_split_min_gap || 1.20);
+      $('#opts-merge-decision').innerHTML =
+        '<div class="option-help">Fast-Slow Path 分流: 间隔 < 快合并阈值 → 规则合并, 在中间 → LLM 裁决, > 强制不合并</div>' +
+        '<div class="option-row"><label>快路径合并阈值</label><input type="range" data-key="merge_fast_gap" min="0.05" max="0.5" step="0.05" value="' + fastGap + '"><span class="value-display">' + fastGap.toFixed(2) + 's</span></div>' +
+        '<div class="option-row"><label>LLM 裁决下限</label><input type="range" data-key="merge_llm_min_gap" min="0.1" max="0.6" step="0.05" value="' + llmMin + '"><span class="value-display">' + llmMin.toFixed(2) + 's</span></div>' +
+        '<div class="option-row"><label>LLM 裁决上限</label><input type="range" data-key="merge_llm_max_gap" min="0.6" max="2.0" step="0.1" value="' + llmMax + '"><span class="value-display">' + llmMax.toFixed(2) + 's</span></div>' +
+        '<div class="option-row"><label>强制不合并阈值</label><input type="range" data-key="merge_hard_split_gap" min="0.8" max="3.0" step="0.1" value="' + hardGap + '"><span class="value-display">' + hardGap.toFixed(2) + 's</span></div>';
+    },
+
+    // ---- 方案四 边界精修选项 ----
+    renderBoundaryRefineOptions(config) {
+      const br = config.boundary_refinement || {};
+      const saved = App.loadSettings();
+      const enabled = (saved.boundary_refine_enabled !== undefined) ? saved.boundary_refine_enabled : (br.enabled !== false);
+      const maxShrink = saved.boundary_refine_max_shrink || br.max_shrink_ms || 200;
+      $('#opts-boundary-refine').innerHTML =
+        '<div class="option-row"><label>启用 ASR 边界精修</label><input type="checkbox" data-key="boundary_refine_enabled" ' + (enabled ? 'checked' : '') + '></div>' +
+        '<div class="option-help">用 ASR 词级时间戳回修语音段边界，三帧能量斜率校验保护辅音 Attack/Release</div>' +
+        '<div class="option-row"><label>最大收缩量</label><input type="range" data-key="boundary_refine_max_shrink" min="50" max="500" step="50" value="' + maxShrink + '"><span class="value-display">' + maxShrink + 'ms</span></div>';
+    },
+
+    // ---- 方案七 声学校验选项 ----
+    renderAcousticValidationOptions(config) {
+      const av = config.acoustic_validation || {};
+      const saved = App.loadSettings();
+      const enabled = (saved.acoustic_enabled !== undefined) ? saved.acoustic_enabled : (av.enabled !== false);
+      const maxSnap = saved.acoustic_max_snap || av.max_snap_distance || 0.15;
+      const genReport = (saved.acoustic_generate_report !== undefined) ? saved.acoustic_generate_report : (av.generate_report !== false);
+      const skeletonMode = (saved.acoustic_skeleton_mode !== undefined) ? saved.acoustic_skeleton_mode : (av.skeleton_mode !== false && config.acoustic_skeleton_mode !== false);
+      $('#opts-acoustic-val').innerHTML =
+        '<div class="option-row"><label>启用声学校验</label><input type="checkbox" data-key="acoustic_enabled" ' + (enabled ? 'checked' : '') + '></div>' +
+        '<div class="option-help">ffmpeg 声学标尺兜底校验，消除字幕切尾（模式 A 错误），输出诊断报告</div>' +
+        '<div class="option-row"><label>🧩 骨架分段模式</label><input type="checkbox" data-key="acoustic_skeleton_mode" ' + (skeletonMode ? 'checked' : '') + '></div>' +
+        '<div class="option-help"><b>推荐开启。</b>按 ffmpeg 声学骨架逐段独立处理再拼接，消除跨段时间戳漂移。每个骨架段是物理隔离的连续语音，段间不会互相干扰。健康度可从 ~77% 提升到 ~100%。</div>' +
+        '<div class="option-row"><label>最大吸附距离</label><input type="range" data-key="acoustic_max_snap" min="0.05" max="0.3" step="0.01" value="' + maxSnap + '"><span class="value-display">' + maxSnap.toFixed(2) + 's</span></div>' +
+        '<div class="option-row"><label>输出诊断报告</label><input type="checkbox" data-key="acoustic_generate_report" ' + (genReport ? 'checked' : '') + '></div>';
+    },
+
+    // 持久化文件设置
+    renderPersistenceOptions(config) {
+      var saved = App.loadSettings();
+      var types = [
+        {key: 'persist_asr_subtitle', label: 'ASR 字幕 (.srt)', def: true},
+        {key: 'persist_llm_subtitle', label: 'LLM 优化字幕 (.srt)', def: true},
+        {key: 'persist_final_srt', label: '最终版 SRT 字幕', def: true},
+        {key: 'persist_final_ass', label: '最终版 ASS 字幕', def: false},
+        {key: 'persist_vocals', label: '人声音频 (.wav)', def: true},
+        {key: 'persist_accompaniment', label: '背景声音频 (.wav)', def: false},
+      ];
+      var html = '<div class="option-help" style="margin-bottom:6px;">选择处理完成后自动保留的文件类型，过期后自动清理</div>';
+      for (var i = 0; i < types.length; i++) {
+        var t = types[i];
+        var checked = (saved[t.key] !== undefined) ? saved[t.key] : t.def;
+        html += '<div class="option-row"><label>' + t.label + '</label><input type="checkbox" data-key="' + t.key + '" ' + (checked ? 'checked' : '') + '></div>';
+      }
+      var ttlSub = (saved.ttl_subtitle_days !== undefined) ? saved.ttl_subtitle_days : 90;
+      var ttlAud = (saved.ttl_audio_days !== undefined) ? saved.ttl_audio_days : 30;
+      html += '<div class="option-row"><label>字幕保留天数</label><input type="number" data-key="ttl_subtitle_days" value="' + ttlSub + '" min="1" max="365" style="max-width:60px;"></div>';
+      html += '<div class="option-row"><label>音频保留天数</label><input type="number" data-key="ttl_audio_days" value="' + ttlAud + '" min="1" max="90" style="max-width:60px;"></div>';
+      html += '<div class="option-help">处理完成后自动持久化选中文件。字幕较小默认保留90天，音频较大默认保留30天。</div>';
+      $('#opts-persistence').innerHTML = html;
+    },
+
+    async handleFetchModels() {
+      // Read from DOM directly (most current), fall back to state
+      const urlEl = $('#llm-base-url');
+      const keyEl = $('#llm-api-key');
+      if (!urlEl) { toast('API 地址输入框未找到', 'error'); return; }
+      const baseUrl = urlEl.value.trim() || App.ui._llmState.base_url;
+      const apiKey = (keyEl && keyEl.value.trim()) || App.ui._llmState.api_key || '';
+
+      if (!baseUrl) {
+        toast('请先配置 API 地址', 'error');
+        return;
+      }
+
+      // Sync state
+      App.ui._llmState.base_url = baseUrl;
+      localStorage.setItem('vocal_llm_url', baseUrl);
+      if (apiKey) { App.ui._llmState.api_key = apiKey; localStorage.setItem('vocal_llm_key', apiKey); }
+
+      const btn = $('#btn-fetch-models');
+      const status = $('#fetch-status');
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-sm"></span>获取中...';
+      if (status) { status.textContent = ''; status.style.color = ''; }
+
+      try {
+        const resp = await fetch('/api/llm/models', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ base_url: baseUrl, api_key: apiKey }),
+        });
+
+        if (!resp.ok) {
+          let errMsg = 'HTTP ' + resp.status;
+          try { const err = await resp.json(); errMsg = err.detail || errMsg; } catch(e) {}
+          throw new Error(errMsg);
+        }
+
+        const data = await resp.json();
+        const models = data.models || [];
+        const source = data.source || 'unknown';
+
+        if (models.length === 0) {
+          toast('未获取到模型列表，请检查 API 地址和密钥是否正确', 'error');
+          if (status) { status.textContent = '✗ 无模型返回'; status.style.color = 'var(--accent-red)'; }
+          return;
+        }
+
+        App.ui._populateModelList(models);
+        const sourceLabel = source === 'preset' ? '(预设) ' : '';
+        if (status) { status.textContent = '✓ ' + sourceLabel + '获取到 ' + models.length + ' 个模型'; status.style.color = 'var(--accent-green)'; }
+
+        toast('成功获取 ' + models.length + ' 个可用模型' + (source === 'preset' ? '（预设）' : ''), 'success');
+      } catch (ex) {
+        toast('获取模型失败: ' + ex.message, 'error');
+        if (status) { status.textContent = '✗ ' + ex.message; status.style.color = 'var(--accent-red)'; }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🔄 获取模型列表';
+      }
+    },
+
+    // Device Info
+    async initDeviceInfo() {
+      try {
+        const info = await App.api.getDeviceInfo();
+        const dot = $('#device-dot');
+        const label = $('#device-label');
+
+        if (info.device_type === 'cuda') {
+          dot.className = 'dot ok';
+          const name = (info.device_names && info.device_names[0]) ? info.device_names[0].split(' ').slice(0,2).join(' ') : 'GPU';
+          const mem = (info.memory_mb && info.memory_mb[0]) ? (info.memory_mb[0]/1024).toFixed(0) + 'GB' : '';
+          label.textContent = name + ' ' + mem + ' ✓';
+        } else if (info.device_type === 'mps') {
+          dot.className = 'dot ok';
+          label.textContent = 'Apple Silicon ✓';
+        } else {
+          dot.className = 'dot warn';
+          label.textContent = 'CPU 模式';
+        }
+      } catch (ex) {
+        $('#device-label').textContent = '设备检测失败';
+      }
+      // 刷新设备提示（如果 ASR 设备设置为 "auto"）
+      App.ui.updateDeviceHint();
+    },
+
+    // 设备下拉框变更处理
+    onDeviceChange() {
+      App.ui.updateDeviceHint();
+    },
+
+    // 更新设备提示文字（显示 "auto" 解析到的实际设备）
+    updateDeviceHint() {
+      var sel = document.querySelector('#options-panel [data-key="device"]');
+      var hint = $('#device-hint');
+      if (!sel || !hint) return;
+      if (sel.value === 'auto') {
+        var badge = $('#device-label');
+        var text = badge ? badge.textContent : '检测中...';
+        var isGpu = text.indexOf('GPU') >= 0 || text.indexOf('Silicon') >= 0 || text.indexOf('✓') >= 0;
+        hint.innerHTML = '→ <span class="' + (isGpu ? 'gpu' : 'cpu') + '">' + text + '</span>';
+        hint.style.display = 'inline';
+      } else {
+        hint.style.display = 'none';
+      }
+    },
+
+    // Progress Updates
+    stageStart(stage, total, description) {
+      const row = $('#stage-' + stage);
+      if (!row) return;
+      row.style.display = 'flex';  // Auto-show hidden stages
+      row.classList.add('active');
+      row.classList.remove('completed', 'error');
+      const desc = row.querySelector('.stage-desc');
+      if (desc) desc.textContent = description || '处理中...';
+      const bar = $('#bar-' + stage);
+      if (bar) {
+        bar.style.width = '0%';
+        bar.classList.remove('completed', 'error');
+        // Add indeterminate shimmer for stages that may not report granular progress
+        bar.classList.add('indeterminate');
+      }
+      // 不重置时间显示 — 多块处理时保留已累计的时间
+      // 仅首次显示 '...'
+      if (!row._stageAccumulatedTime) {
+        $('#time-' + stage).textContent = '...';
+      }
+      // Record start time for minimum visible duration
+      row._stageStartTime = performance.now();
+    },
+
+    stageProgress(stage, current, total, extra) {
+      const bar = $('#bar-' + stage);
+      if (bar && total > 0) {
+        // Real granular progress arriving — remove indeterminate shimmer
+        bar.classList.remove('indeterminate');
+        bar.style.width = Math.round((current / total) * 100) + '%';
+      }
+      // Update stage description with detailed progress info (e.g., "处理音频块: 26/53")
+      if (extra && extra.detail) {
+        const row = $('#stage-' + stage);
+        if (row) {
+          const desc = row.querySelector('.stage-desc');
+          if (desc) desc.textContent = extra.detail;
+        }
+      }
+    },
+
+    stageFinish(stage, elapsed) {
+      const row = $('#stage-' + stage);
+      if (!row) return;
+
+      // 累加耗时（多块处理场景：每个块完成都发一次 stage_finish）
+      if (!row._stageAccumulatedTime) row._stageAccumulatedTime = 0;
+      row._stageAccumulatedTime += (elapsed || 0);
+
+      const MIN_DISPLAY_MS = 350; // Minimum visible time so fast stages are perceivable
+
+      const doFinish = () => {
+        row.classList.remove('active');
+        row.classList.add('completed');
+        const bar = $('#bar-' + stage);
+        if (bar) {
+          bar.classList.remove('indeterminate');
+          bar.style.width = '100%';
+          bar.classList.add('completed');
+        }
+        // 显示累计耗时
+        $('#time-' + stage).textContent = row._stageAccumulatedTime.toFixed(1) + 's';
+        // Preserve informative detail text (e.g. "检测到 52 个语音段")
+        // only override generic placeholders
+        const desc = row.querySelector('.stage-desc');
+        if (desc) {
+          const cur = desc.textContent;
+          if (!cur || cur === '处理中...' || cur === '等待开始') {
+            desc.textContent = '完成';
+          }
+        }
+      };
+
+      const startTime = row._stageStartTime || 0;
+      const visibleDuration = performance.now() - startTime;
+
+      if (visibleDuration > 0 && visibleDuration < MIN_DISPLAY_MS) {
+        setTimeout(doFinish, MIN_DISPLAY_MS - visibleDuration);
+      } else {
+        doFinish();
+      }
+    },
+
+    renderStats(stats) {
+      stats = stats || {};
+      $('#stats-grid').innerHTML = `
+        <div class="stat-card"><div class="stat-value">${(stats.total_time || 0).toFixed(1)}s</div><div class="stat-label">总耗时</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.segment_count || 0}</div><div class="stat-label">语音片段</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.subtitle_count || 0}</div><div class="stat-label">字幕条数</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.duration_seconds ? (stats.duration_seconds/60).toFixed(1)+'min' : '—'}</div><div class="stat-label">音频时长</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.speaker_count || 0}</div><div class="stat-label">说话人数</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.local_speaker_split_count || 0}</div><div class="stat-label">局部换人切分</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.speaker_conflict_count || 0}</div><div class="stat-label">说话人冲突</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.unknown_speaker_count || 0}</div><div class="stat-label">未确认</div></div>
+        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.quality_status || 'pass')}</div><div class="stat-label">质量状态</div></div>
+        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml((stats.final_engine || stats.selected_engine || '—'))}</div><div class="stat-label">最终引擎</div></div>
+        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.detected_language || 'unknown')}</div><div class="stat-label">检测语言</div></div>
+        <div class="stat-card"><div class="stat-value" title="${App.ui._escapeAttr(stats.fallback_reason || '')}">${App.ui.escapeHtml(stats.fallback_reason ? '已回退' : '—')}</div><div class="stat-label">回退原因</div></div>
+      `;
+    },
+
+    async pipelineComplete(result) {
+      App.ws.disconnect();
+      App.state.isRunning = false;
+      App.ui.setRunning(false);
+
+      const stats = result.stats;
+      App.state.subtitleEvents = result.events || [];
+
+      // Show stats
+      App.ui.renderStats(stats);
+
+      // Render subtitle timeline
+      App.ui.renderTimeline(App.state.subtitleEvents);
+
+      // Render diagnostic report if available
+      App.ui.renderDiagnosticReport(result);
+
+      // Update button
+      $('#btn-run-text').textContent = '处理完成 ✓';
+      setTimeout(() => {
+        if (!App.state.isRunning) {
+          $('#btn-run-text').textContent = '开始处理';
+        }
+      }, 3000);
+
+      const qualityStatus = stats.quality_status || 'pass';
+      const qualityMessage = qualityStatus === 'pass'
+        ? '字幕生成完成'
+        : '字幕已生成，但质量状态为 ' + qualityStatus;
+      toast(qualityMessage + '，共 ' + App.state.subtitleEvents.length + ' 条', qualityStatus === 'pass' ? 'success' : 'warning');
+
+      // Refresh history and cache info
+      App.refreshHistory();
+      App.refreshCacheInfo();
+
+      // Show feedback learning entry
+      App.ui.showFeedbackEntry(result);
+      App.refreshFeedbackConfigs();
+
+      // Display LLM stage if enabled
+      if (stats.stage_timings && stats.stage_timings.llm) {
+        $('#stage-llm').style.display = 'flex';
+        App.ui.stageFinish('llm', stats.stage_timings.llm);
+      }
+
+      // Apply backend cumulative stage timings (authoritative, covers multi-chunk accumulation)
+      if (stats.stage_timings) {
+        var st = stats.stage_timings;
+        // Helper: apply cumulative time from backend, overriding frontend accumulator
+        var applyTiming = function(stageKey, displayName) {
+          if (st[stageKey] !== undefined) {
+            var row = $('#stage-' + stageKey);
+            if (row) {
+              row.style.display = 'flex';
+              if (!row.classList.contains('completed')) {
+                App.ui.stageFinish(stageKey, 0);  // mark completed
+              }
+              // Override accumulated time with authoritative backend value
+              row._stageAccumulatedTime = st[stageKey];
+              $('#time-' + stageKey).textContent = st[stageKey].toFixed(1) + 's';
+            }
+          }
+        };
+        applyTiming('macro_chunk');
+        applyTiming('separation');
+        applyTiming('vad');
+        applyTiming('ffmpeg_vad');
+        applyTiming('merging');
+        applyTiming('asr');
+        applyTiming('boundary_refine');
+        applyTiming('mapping');
+        applyTiming('acoustic');
+        applyTiming('llm');
+        applyTiming('llm_merge');
+      }
+
+      // Show/hide audio + subtitle export bars based on result
+      App.ui.updateAudioExportBar(result);
+      App.ui.updateExportBar(result);
+    },
+
+    pipelineError(message) {
+      App.ws.disconnect();
+      App.state.isRunning = false;
+      App.ui.setRunning(false);
+      toast('处理失败: ' + message, 'error');
+      $('#btn-run-text').textContent = '重试';
+    },
+
+    setRunning(running) {
+      const btn = $('#btn-run');
+      if (running) {
+        btn.classList.add('running');
+        btn.disabled = true;
+        $('#btn-run-text').textContent = '处理中...';
+        // Reset all stages
+        var allStages = ['macro_chunk','separation','vad','ffmpeg_vad','merging','asr','boundary_refine','mapping','acoustic','llm'];
+        allStages.forEach(function(s) {
+          var row = $('#stage-' + s);
+          if (row) {
+            row.classList.remove('active','completed','error');
+            row._stageAccumulatedTime = 0;     // 重置累计耗时
+            row._stageStartTime = 0;
+          }
+          var bar = $('#bar-' + s);
+          if (bar) { bar.style.width = '0%'; bar.classList.remove('completed','error'); }
+          var timeEl = $('#time-' + s);
+          if (timeEl) timeEl.textContent = '—';
+          var desc = row ? row.querySelector('.stage-desc') : null;
+          if (desc) desc.textContent = '等待开始';
+        });
+        // Hide optional stages
+        var optionalStages = ['macro_chunk','ffmpeg_vad','boundary_refine','acoustic','llm'];
+        optionalStages.forEach(function(s) {
+          var row = $('#stage-' + s);
+          if (row) row.style.display = 'none';
+        });
+        // Hide diagnostic report during processing
+        var diagPanel = document.getElementById('diagnostic-panel');
+        if (diagPanel) diagPanel.style.display = 'none';
+        // Hide audio export bar during processing
+        var audioBar = document.getElementById('audio-export-bar');
+        if (audioBar) audioBar.style.display = 'none';
+      } else {
+        btn.classList.remove('running');
+        btn.disabled = !App.state.selectedFile;
+      }
+    },
+
+    // Subtitle batch editing
+    initSubtitleBatchControls() {
+      var select = document.getElementById('batch-speaker-select');
+      var newInput = document.getElementById('batch-speaker-new');
+      var applyButton = document.getElementById('batch-speaker-apply');
+      var mergeButton = document.getElementById('batch-merge-menu');
+      var clearButton = document.getElementById('batch-clear-selection');
+      if (!select || !newInput || !applyButton || !mergeButton || !clearButton) return;
+
+      select.addEventListener('change', function() {
+        newInput.style.display = this.value === '__new__' ? '' : 'none';
+        if (this.value !== '__new__') newInput.value = '';
+        App.ui.refreshBatchToolbar();
+      });
+      newInput.addEventListener('input', function() { App.ui.refreshBatchToolbar(); });
+      applyButton.addEventListener('click', function() { App.ui.applyBatchSpeaker(); });
+      mergeButton.addEventListener('click', function() {
+        var menu = document.getElementById('batch-merge-options');
+        if (menu) menu.style.display = menu.style.display === 'none' ? 'inline-flex' : 'none';
+      });
+      document.querySelectorAll('#batch-merge-options [data-separator]').forEach(function(button) {
+        button.addEventListener('click', function() {
+          App.ui.applyBatchMerge(this.dataset.separator);
+        });
+      });
+      clearButton.addEventListener('click', function() { App.ui.clearSubtitleSelection(); });
+    },
+
+    clearBatchError() {
+      var error = document.getElementById('subtitle-batch-error');
+      if (error) { error.textContent = ''; error.style.display = 'none'; }
+    },
+
+    showBatchError(error) {
+      var message = error && error.message ? error.message : String(error || '批量操作失败');
+      try {
+        var payload = JSON.parse(message);
+        message = payload.detail || message;
+      } catch (_) {}
+      var errorEl = document.getElementById('subtitle-batch-error');
+      if (errorEl) { errorEl.textContent = message; errorEl.style.display = ''; }
+      toast(message, 'error');
+    },
+
+    clearSubtitleSelection(shouldRender) {
+      App.state.selectedSubtitleIndexes.clear();
+      App.state.selectionAnchorIndex = null;
+      var menu = document.getElementById('batch-merge-options');
+      if (menu) menu.style.display = 'none';
+      App.ui.clearBatchError();
+      if (shouldRender !== false) App.ui.renderTimeline(App.state.subtitleEvents);
+      else App.ui.refreshBatchToolbar();
+    },
+
+    updateSelectionPresentation() {
+      document.querySelectorAll('#subtitle-tbody tr[data-index]').forEach(function(row) {
+        var index = parseInt(row.dataset.index, 10);
+        var selected = App.state.selectedSubtitleIndexes.has(index);
+        row.classList.toggle('subtitle-selected', selected);
+        var checkbox = row.querySelector('.subtitle-select');
+        if (checkbox) checkbox.checked = selected;
+      });
+      App.ui.refreshBatchToolbar();
+    },
+
+    cancelQueuedRowPlayback() {
+      if (App.state.rowClickTimer !== null) {
+        clearTimeout(App.state.rowClickTimer);
+        App.state.rowClickTimer = null;
+      }
+    },
+
+    queueRowPlayback(event) {
+      App.ui.cancelQueuedRowPlayback();
+      App.state.rowClickTimer = setTimeout(function() {
+        App.state.rowClickTimer = null;
+        var row = document.querySelector('tr[data-index="' + event.index + '"]');
+        App.ui.playSegment(event, row ? row.querySelector('.play-btn') : null);
+      }, 220);
+    },
+
+    stopCurrentPlayback() {
+      if (App.state._audioPlayer) {
+        App.state._audioPlayer.pause();
+        App.state._audioPlayer = null;
+      }
+      document.querySelectorAll('.play-btn.playing').forEach(function(button) {
+        button.classList.remove('playing');
+      });
+    },
+
+    handleSubtitleKeyboard(event) {
+      var target = event.target;
+      var isField = target && target.closest && target.closest('input, textarea, select, [contenteditable="true"]');
+      if (isField) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        if (!App.state.subtitleEvents.length) return;
+        event.preventDefault();
+        App.state.selectedSubtitleIndexes = new Set(App.state.subtitleEvents.map(function(item) { return item.index; }));
+        App.state.selectionAnchorIndex = App.state.subtitleEvents[0].index;
+        App.ui.renderTimeline(App.state.subtitleEvents);
+      } else if (event.key === 'Escape' && App.state.selectedSubtitleIndexes.size > 0) {
+        event.preventDefault();
+        App.ui.clearSubtitleSelection();
+      }
+    },
+
+    handleSubtitleSelection(index, event) {
+      var selected = App.state.selectedSubtitleIndexes;
+      var events = App.state.subtitleEvents;
+      var position = events.findIndex(function(item) { return item.index === index; });
+      if (position < 0) return;
+
+      if (event && event.shiftKey && App.state.selectionAnchorIndex !== null) {
+        var anchor = events.findIndex(function(item) { return item.index === App.state.selectionAnchorIndex; });
+        if (anchor >= 0) {
+          selected.clear();
+          var start = Math.min(anchor, position);
+          var end = Math.max(anchor, position);
+          for (var i = start; i <= end; i++) selected.add(events[i].index);
+        }
+      } else if (event && (event.ctrlKey || event.metaKey)) {
+        if (selected.has(index)) selected.delete(index);
+        else selected.add(index);
+        App.state.selectionAnchorIndex = index;
+      } else {
+        selected.clear();
+        selected.add(index);
+        App.state.selectionAnchorIndex = index;
+      }
+      App.ui.updateSelectionPresentation();
+    },
+
+    selectedSubtitleIndexes() {
+      return Array.from(App.state.selectedSubtitleIndexes).sort(function(a, b) { return a - b; });
+    },
+
+    speakerCandidates() {
+      var candidates = new Map();
+      App.state.subtitleEvents.forEach(function(event) {
+        var label = (event.speaker_label || '').trim();
+        var id = event.speaker_id === null || event.speaker_id === undefined ? null : event.speaker_id;
+        if (!label && id === null) return;
+        var display = label || ('说话人 ' + (id < 26 ? String.fromCharCode(65 + id) : id));
+        var key = id === null ? 'label:' + encodeURIComponent(label) : 'id:' + id;
+        if (!candidates.has(key)) candidates.set(key, {key: key, id: id, label: display});
+      });
+      return Array.from(candidates.values());
+    },
+
+    refreshBatchToolbar() {
+      var toolbar = document.getElementById('subtitle-batch-toolbar');
+      var count = document.getElementById('subtitle-batch-count');
+      var select = document.getElementById('batch-speaker-select');
+      var newInput = document.getElementById('batch-speaker-new');
+      var applyButton = document.getElementById('batch-speaker-apply');
+      var mergeButton = document.getElementById('batch-merge-menu');
+      var mergeMenu = document.getElementById('batch-merge-options');
+      if (!toolbar || !count || !select || !newInput || !applyButton || !mergeButton) return;
+
+      var indexes = App.ui.selectedSubtitleIndexes();
+      toolbar.style.display = indexes.length ? 'flex' : 'none';
+      count.textContent = '已选择 ' + indexes.length + ' 条';
+      mergeButton.disabled = indexes.length < 2;
+      applyButton.disabled = !indexes.length || !select.value ||
+        (select.value === '__new__' && !newInput.value.trim());
+      if (!indexes.length && mergeMenu) mergeMenu.style.display = 'none';
+    },
+
+    renderBatchToolbar() {
+      var select = document.getElementById('batch-speaker-select');
+      if (!select) return;
+      var previous = select.value;
+      var html = '<option value="">选择说话人</option>';
+      App.ui.speakerCandidates().forEach(function(candidate) {
+        html += '<option value="' + App.ui._escapeAttr(candidate.key) + '">' + App.ui._escapeHtml(candidate.label) + '</option>';
+      });
+      html += '<option value="__new__">+ 添加说话人</option>';
+      select.innerHTML = html;
+      if (previous) {
+        Array.from(select.options).some(function(option) {
+          if (option.value === previous) { select.value = previous; return true; }
+          return false;
+        });
+      }
+      var newInput = document.getElementById('batch-speaker-new');
+      if (newInput) newInput.style.display = select.value === '__new__' ? '' : 'none';
+      App.ui.refreshBatchToolbar();
+    },
+
+    async applyBatchSpeaker() {
+      var select = document.getElementById('batch-speaker-select');
+      var newInput = document.getElementById('batch-speaker-new');
+      if (!select || !select.value || !App.state.taskId) return;
+      var payload = {action: 'speaker', indexes: App.ui.selectedSubtitleIndexes()};
+      if (select.value === '__new__') {
+        payload.speaker_label = (newInput.value || '').trim();
+      } else if (select.value.indexOf('id:') === 0) {
+        payload.speaker_id = parseInt(select.value.slice(3), 10);
+        payload.speaker_label = select.options[select.selectedIndex].textContent;
+      } else {
+        payload.speaker_label = decodeURIComponent(select.value.slice(6));
+      }
+      try {
+        var result = await App.api.batchEditSubtitles(App.state.taskId, payload);
+        App.state.subtitleEvents = result.events || [];
+        App.ui.clearSubtitleSelection(false);
+        App.ui.renderTimeline(App.state.subtitleEvents);
+        toast('已批量更新说话人并写入最终字幕', 'success');
+      } catch (ex) {
+        App.ui.showBatchError(ex);
+      }
+    },
+
+    async applyBatchMerge(separator) {
+      if (!App.state.taskId) return;
+      try {
+        var result = await App.api.batchEditSubtitles(App.state.taskId, {
+          action: 'merge', indexes: App.ui.selectedSubtitleIndexes(), separator: separator
+        });
+        App.state.subtitleEvents = result.events || [];
+        App.ui.clearSubtitleSelection(false);
+        App.ui.renderTimeline(App.state.subtitleEvents);
+        toast('字幕已合并并写入最终字幕', 'success');
+      } catch (ex) {
+        App.ui.showBatchError(ex);
+      }
+    },
+
+    // Timeline
+    renderTimeline(events) {
+      const tbody = $('#subtitle-tbody');
+      const thead = document.querySelector('.subtitle-table thead tr');
+      const hasComparison = events.some(function(e) { return e.original_text; });
+      const useCompare = hasComparison && App.state.subtitleViewMode !== 'simple';
+      const finalFmt = App.state.subtitleFinalFormat;  // 'srt' | 'ass'
+
+      // 更新表头（增加播放列）
+      if (useCompare) {
+        thead.innerHTML = '<th class="col-select">选</th><th class="col-idx">#</th><th class="col-time">开始</th><th class="col-time">结束</th><th class="col-speaker">说话人</th><th class="col-original">原文 (ASR)</th><th>优化后 (LLM)</th><th>最终版本 (' + finalFmt.toUpperCase() + ')</th><th class="col-play">播放</th>';
+      } else {
+        thead.innerHTML = '<th class="col-select">选</th><th class="col-idx">#</th><th class="col-time">开始</th><th class="col-time">结束</th><th class="col-speaker">说话人</th><th>最终版本 (' + finalFmt.toUpperCase() + ')</th><th class="col-play">播放</th>';
+      }
+
+      // 对比视图切换按钮 + 最终版本格式切换
+      var toggleEl = document.getElementById('view-toggle');
+      if (hasComparison && !toggleEl) {
+        toggleEl = document.createElement('div');
+        toggleEl.id = 'view-toggle';
+        toggleEl.className = 'view-toggle';
+        var tableWrap = document.querySelector('.subtitle-table-wrap');
+        tableWrap.parentNode.insertBefore(toggleEl, tableWrap);
+      } else if (!hasComparison && toggleEl) {
+        toggleEl.remove();
+        toggleEl = null;
+      }
+
+      // 重建 toggle bar 内容（含视图切换 + 格式切换）
+      if (toggleEl) {
+        toggleEl.innerHTML =
+          '<span style="font-size:0.74rem;color:var(--text-secondary);">视图：</span>' +
+          '<button class="view-toggle-btn ' + (App.state.subtitleViewMode !== 'simple' ? 'active' : '') + '" onclick="App.ui.switchView(\'compare\')">对比视图</button>' +
+          '<button class="view-toggle-btn ' + (App.state.subtitleViewMode === 'simple' ? 'active' : '') + '" onclick="App.ui.switchView(\'simple\')">简洁视图</button>' +
+          '<span class="final-format-toggle">' +
+            '<span style="font-size:0.68rem;color:var(--text-tertiary);">最终格式：</span>' +
+            '<button class="final-format-toggle-btn ' + (finalFmt === 'srt' ? 'active' : '') + '" onclick="App.ui.switchFinalFormat(\'srt\')">SRT</button>' +
+            '<button class="final-format-toggle-btn ' + (finalFmt === 'ass' ? 'active' : '') + '" onclick="App.ui.switchFinalFormat(\'ass\')">ASS</button>' +
+          '</span>';
+      } else if (!hasComparison) {
+        // 无对比数据时也有简洁视图 + 格式切换
+        if (!toggleEl) {
+          toggleEl = document.createElement('div');
+          toggleEl.id = 'view-toggle';
+          toggleEl.className = 'view-toggle';
+          var tableWrap2 = document.querySelector('.subtitle-table-wrap');
+          tableWrap2.parentNode.insertBefore(toggleEl, tableWrap2);
+        }
+        toggleEl.innerHTML =
+          '<span style="font-size:0.74rem;color:var(--text-secondary);">视图：</span>' +
+          '<button class="view-toggle-btn ' + (App.state.subtitleViewMode !== 'simple' ? 'active' : '') + '" onclick="App.ui.switchView(\'compare\')">对比视图</button>' +
+          '<button class="view-toggle-btn active" onclick="App.ui.switchView(\'simple\')">简洁视图</button>' +
+          '<span class="final-format-toggle">' +
+            '<span style="font-size:0.68rem;color:var(--text-tertiary);">最终格式：</span>' +
+            '<button class="final-format-toggle-btn ' + (finalFmt === 'srt' ? 'active' : '') + '" onclick="App.ui.switchFinalFormat(\'srt\')">SRT</button>' +
+            '<button class="final-format-toggle-btn ' + (finalFmt === 'ass' ? 'active' : '') + '" onclick="App.ui.switchFinalFormat(\'ass\')">ASS</button>' +
+          '</span>';
+      }
+
+      // 构建行
+      tbody.innerHTML = '';
+      events.forEach(function(e) {
+        // 格式化说话人显示
+        var speaker = '—';
+        if (e.speaker_label) {
+          speaker = App.ui.escapeHtml(e.speaker_label);
+        } else if (e.speaker_id !== null && e.speaker_id !== undefined) {
+          var letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+          var label = e.speaker_id < 26 ? letters[e.speaker_id] : String(e.speaker_id);
+          speaker = '说话人 ' + label;
+        }
+
+        // 格式化最终版本
+        var conflict = hasConflict(e, events);
+        var formatted = finalFmt === 'ass' ? formatEventAsASS(e) : formatEventAsSRT(e);
+        var finalHtml = App.ui.escapeHtml(formatted);
+        // 存在真实冲突时，在文本前添加警告标记（但仍显示最终版本）
+        if (conflict) {
+          finalHtml = '<span class="conflict-badge" title="LLM 修改存在潜在冲突，请人工审核">⚠️ 待确认</span> ' + finalHtml;
+        }
+
+        const tr = document.createElement('tr');
+        tr.dataset.index = String(e.index);
+        if (App.state.selectedSubtitleIndexes.has(e.index)) tr.classList.add('subtitle-selected');
+        var selectCell = '<td class="col-select"><input type="checkbox" class="subtitle-select" data-index="' + e.index + '" ' +
+          (App.state.selectedSubtitleIndexes.has(e.index) ? 'checked ' : '') +
+          'aria-label="选择字幕 ' + e.index + '"></td>';
+        if (useCompare) {
+          tr.innerHTML =
+            selectCell + '<td class="col-idx">' + e.index + '</td>' +
+            '<td class="col-time">' + formatTime(e.start) + '</td>' +
+            '<td class="col-time">' + formatTime(e.end) + '</td>' +
+            '<td class="col-speaker">' + speaker + '</td>' +
+            '<td class="col-original" data-index="' + e.index + '">' + App.ui.escapeHtml(e.original_text || '') + '</td>' +
+            '<td class="col-optimized" data-index="' + e.index + '">' + diffAndHighlight(e.original_text || '', e.text) + '</td>' +
+            '<td class="col-final' + (conflict ? ' conflict' : '') + '" data-index="' + e.index + '">' + finalHtml + '</td>' +
+            '<td class="col-play"><span class="play-btn" data-play="' + e.index + '" title="播放此段音频">▶</span></td>';
+        } else {
+          tr.innerHTML =
+            selectCell + '<td class="col-idx">' + e.index + '</td>' +
+            '<td class="col-time">' + formatTime(e.start) + '</td>' +
+            '<td class="col-time">' + formatTime(e.end) + '</td>' +
+            '<td class="col-speaker">' + speaker + '</td>' +
+            '<td class="col-final' + (conflict ? ' conflict' : '') + '" data-index="' + e.index + '">' + finalHtml + '</td>' +
+            '<td class="col-play"><span class="play-btn" data-play="' + e.index + '" title="播放此段音频">▶</span></td>';
+        }
+
+        // ---- Click / DblClick 交互模型 ----
+        // 单击行任意位置 → 播放；双击文本列 → 编辑对应文本；
+        // 双击时间/说话人区域 → 编辑该行最终字幕；播放按钮仅播放不编辑。
+        //
+        // 行级 click：先更新选区，再延迟播放；双击时由 dblclick 取消播放。
+        // 行级 dblclick：停止播放，对非文本列区域打开最终字幕编辑。
+        // 列级 dblclick：停止播放，对该列文本打开编辑。
+        // 播放按钮：stopPropagation 阻止事件冒泡到行级。
+
+        tr.addEventListener('click', function(ev) {
+          var target = ev.target;
+          if (target && target.closest && target.closest('.play-btn, input, button, select, textarea')) return;
+          App.ui.handleSubtitleSelection(e.index, ev);
+          App.ui.queueRowPlayback(e);
+        });
+
+        tr.addEventListener('dblclick', function(ev) {
+          var target = ev.target;
+          // 播放按钮 / 表单元素区域：消隐到行级不做任何事
+          if (target && target.closest && target.closest('.play-btn, input, button, select, textarea')) return;
+          // 文本列由各自的列级 dblclick 处理
+          if (target && target.closest && target.closest('.col-original, .col-optimized, .col-final')) return;
+          // 停止当前音频
+          App.ui.cancelQueuedRowPlayback();
+          App.ui.stopCurrentPlayback();
+          var rowFinalCell = tr.querySelector('.col-final');
+          if (rowFinalCell) App.ui.editSubtitle(rowFinalCell, e.index);
+        });
+
+        var finalCell = tr.querySelector('.col-final');
+        if (finalCell) {
+          finalCell.addEventListener('dblclick', function() {
+            // 停止当前音频
+            App.ui.cancelQueuedRowPlayback();
+            App.ui.stopCurrentPlayback();
+            App.ui.editSubtitle(finalCell, e.index);
+          });
+        }
+
+        // 为原文和优化列也添加双击编辑（对比视图）
+        if (useCompare) {
+          var origCell = tr.querySelector('.col-original');
+          var optCell = tr.querySelector('.col-optimized');
+          if (origCell) origCell.addEventListener('dblclick', function() {
+            App.ui.cancelQueuedRowPlayback();
+            App.ui.stopCurrentPlayback();
+            App.ui.editSubtitle(origCell, e.index);
+          });
+          if (optCell) optCell.addEventListener('dblclick', function() {
+            App.ui.cancelQueuedRowPlayback();
+            App.ui.stopCurrentPlayback();
+            App.ui.editSubtitle(optCell, e.index);
+          });
+        }
+
+        // 播放按钮：双击也仅播放，不进入编辑
+        var playBtn = tr.querySelector('.play-btn');
+        if (playBtn) {
+          playBtn.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            App.ui.cancelQueuedRowPlayback();
+            // 防抖：双击时避免重复触发播放
+            var now = Date.now();
+            var lastPlay = parseInt(this.getAttribute('data-last-play') || '0');
+            if (now - lastPlay < 400) return;
+            this.setAttribute('data-last-play', now);
+            App.ui.playSegment(e, this);
+          });
+          playBtn.addEventListener('dblclick', function(ev) {
+            ev.stopPropagation();
+          });
+        }
+
+        var checkbox = tr.querySelector('.subtitle-select');
+        if (checkbox) {
+          checkbox.addEventListener('click', function(ev) { ev.stopPropagation(); });
+          checkbox.addEventListener('change', function(ev) {
+            App.ui.handleSubtitleSelection(e.index, ev);
+          });
+        }
+
+        tbody.appendChild(tr);
+      });
+      App.ui.renderBatchToolbar();
+    },
+
+    switchView(mode) {
+      App.state.subtitleViewMode = mode;
+      App.ui.renderTimeline(App.state.subtitleEvents);
+    },
+
+    switchFinalFormat(fmt) {
+      App.state.subtitleFinalFormat = fmt;
+      App.ui.renderTimeline(App.state.subtitleEvents);
+    },
+
+    updateAudioExportBar(result) {
+      var bar = document.getElementById('audio-export-bar');
+      if (!bar) return;
+      var hasVocals = !!(result && result.vocals_path);
+      var hasAccomp = !!(result && result.accompaniment_path);
+      if (hasVocals || hasAccomp) {
+        bar.style.display = 'flex';
+        // 如果没有人声或伴奏，隐藏对应按钮
+        var btns = bar.querySelectorAll('.btn-export');
+        if (btns[0]) btns[0].style.display = hasVocals ? '' : 'none';
+        if (btns[1]) btns[1].style.display = hasAccomp ? '' : 'none';
+      } else {
+        bar.style.display = 'none';
+      }
+    },
+
+    // 根据 LLM 优化是否生效，调整字幕下载栏的按钮布局
+    // - LLM 启用时：隐藏主按钮，显示「干净版」+「LLM 优化版」
+    // - LLM 未启用时：只显示主按钮「字幕文件」
+    updateExportBar(result) {
+      var mainBtn = document.getElementById('btn-srt-main');
+      var cleanBtn = document.getElementById('btn-clean-srt');
+      var llmBtn = document.getElementById('btn-llm-srt');
+      var hasLLM = !!(result && result.llm_subtitle_path);
+
+      if (mainBtn) mainBtn.style.display = hasLLM ? 'none' : '';
+      if (cleanBtn) cleanBtn.style.display = hasLLM ? '' : 'none';
+      if (llmBtn) llmBtn.style.display = hasLLM ? '' : 'none';
+    },
+
+    editSubtitle(cell, index) {
+      if (cell.classList.contains('editing')) return;
+      const event = App.state.subtitleEvents.find(function(e) { return e.index === index; });
+      const originalText = event ? event.text : '';
+      const isFinalCol = cell.classList.contains('col-final');
+      cell.classList.add('editing');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.name = 'subtitle-edit-' + index;
+      input.autocomplete = 'off';
+      input.setAttribute('autocomplete', 'off');
+      input.setAttribute('data-lpignore', 'true');
+      input.setAttribute('aria-autocomplete', 'none');
+      input.setAttribute('role', 'textbox');
+      input.setAttribute('data-form-type', 'other');
+      input.placeholder = '编辑字幕文本…';
+      input.setAttribute('aria-label', '编辑第' + index + '行字幕文本');
+      input.value = originalText;
+      cell.textContent = '';
+      cell.appendChild(input);
+      input.focus();
+      input.select();
+
+      const save = async () => {
+        const newText = input.value.trim();
+        cell.classList.remove('editing');
+        if (newText && newText !== originalText) {
+          try {
+            await App.api.updateSubtitle(App.state.taskId, index, newText);
+            if (event) { event.text = newText; event.original_text = null; }  // 手动编辑后清除冲突标记
+            // 如果编辑的是最终版本列，重新格式化为 SRT/ASS
+            if (isFinalCol && !hasConflict(event, App.state.subtitleEvents)) {
+              var fmt = App.state.subtitleFinalFormat;
+              cell.textContent = fmt === 'ass' ? formatEventAsASS(event) : formatEventAsSRT(event);
+            } else {
+              cell.textContent = newText;
+            }
+            toast('字幕 #' + index + ' 已更新并自动保存到文件', 'success');
+          } catch (ex) {
+            cell.textContent = isFinalCol ? (App.state.subtitleFinalFormat === 'ass' ? formatEventAsASS(event) : formatEventAsSRT(event)) : originalText;
+            toast('更新失败: ' + ex.message, 'error');
+          }
+        } else {
+          cell.textContent = isFinalCol ? (App.state.subtitleFinalFormat === 'ass' ? formatEventAsASS(event) : formatEventAsSRT(event)) : originalText;
+        }
+      };
+
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { input.value = originalText; input.blur(); }
+      });
+    },
+
+    // Audio Playback
+    playSegment(event, btnEl) {
+      if (!App.state.taskId) {
+        toast('请先完成处理或从历史记录加载任务', 'info');
+        return;
+      }
+
+      // 停止当前播放
+      if (App.state._audioPlayer) {
+        App.state._audioPlayer.pause();
+        App.state._audioPlayer = null;
+      }
+      // 重置所有播放按钮
+      document.querySelectorAll('.play-btn.playing').forEach(function(c) { c.classList.remove('playing'); });
+
+      var audio = document.getElementById('audio-player');
+      var taskId = App.state.taskId;
+
+      // 如果音频源未加载或任务不同，重新加载
+      if (App.state._audioTaskId !== taskId) {
+        var streamUrl = '/api/tasks/' + taskId + '/audio/stream?type=vocals';
+        audio.src = streamUrl;
+        audio.load();
+        App.state._audioTaskId = taskId;
+      }
+
+      // 设置播放范围
+      var startTime = event.start;
+      var endTime = event.end;
+      var duration = endTime - startTime;
+
+      // 标记按钮为播放中
+      if (btnEl) btnEl.classList.add('playing');
+
+      // 高亮当前行
+      var row = btnEl ? btnEl.closest('tr') : null;
+      if (row) row.style.background = 'rgba(88,166,255,0.12)';
+
+      var onTimeUpdate = function() {
+        if (audio.currentTime >= endTime) {
+          audio.pause();
+          cleanup();
+        }
+      };
+
+      var onError = function() {
+        // Fallback: 尝试 input 类型
+        if (audio.src.indexOf('type=input') === -1) {
+          audio.src = '/api/tasks/' + taskId + '/audio/stream?type=input';
+          audio.load();
+          // 重试一次
+          var retryOnce = function() {
+            audio.removeEventListener('loadeddata', retryOnce);
+            try {
+              audio.currentTime = startTime;
+              audio.play().catch(function() { cleanup(); });
+            } catch(ex) { cleanup(); }
+          };
+          audio.addEventListener('loadeddata', retryOnce);
+        } else {
+          cleanup();
+          toast('音频播放失败', 'error');
+        }
+      };
+
+      var cleanup = function() {
+        audio.removeEventListener('timeupdate', onTimeUpdate);
+        audio.removeEventListener('error', onError);
+        if (btnEl) btnEl.classList.remove('playing');
+        if (row) row.style.background = '';
+        App.state._audioPlayer = null;
+      };
+
+      audio.addEventListener('timeupdate', onTimeUpdate);
+      audio.addEventListener('error', onError);
+
+      App.state._audioPlayer = audio;
+
+      // Seek and play
+      var playWhenReady = function() {
+        audio.removeEventListener('canplay', playWhenReady);
+        audio.removeEventListener('loadeddata', playWhenReady);
+        try {
+          audio.currentTime = startTime;
+          audio.play().catch(function() { cleanup(); });
+        } catch(ex) { cleanup(); }
+      };
+
+      if (audio.readyState >= 2) {
+        // Already has enough data
+        try {
+          audio.currentTime = startTime;
+          audio.play().catch(function() { cleanup(); });
+        } catch(ex) { cleanup(); }
+      } else {
+        audio.addEventListener('canplay', playWhenReady);
+        audio.addEventListener('loadeddata', playWhenReady);
+        audio.load();
+      }
+    },
+
+    // History Rendering
+    renderHistory(items) {
+      App.state.historyItems = items;
+      const panel = $('#history-panel');
+      if (!items || items.length === 0) {
+        panel.innerHTML = '<div class="history-empty">暂无历史记录</div>';
+        return;
+      }
+      panel.innerHTML = items.map((item, idx) => {
+        const date = item.created_at ? item.created_at.slice(0, 16).replace('T', ' ') : '';
+        const statusClass = item.status === 'completed' ? 'ok' : (item.status === 'failed' ? 'err' : '');
+        const statusText = item.status === 'completed' ? '✓' : (item.status === 'failed' ? '✗' : '…');
+        const duration = item.total_duration_seconds > 0 ? (item.total_duration_seconds / 60).toFixed(1) + 'min' : '';
+        const isClickable = item.status === 'completed';
+        return '<div class="history-item" data-idx="' + idx + '" style="' + (isClickable ? '' : 'cursor:default;opacity:0.6;') + '">' +
+          '<span class="h-status ' + statusClass + '">' + statusText + '</span>' +
+          '<span class="h-name" title="' + App.ui.escapeHtml(item.input_file_name) + '">' + App.ui.escapeHtml(item.input_file_name) + '</span>' +
+          '<span class="h-meta">' + duration + ' ' + date + '</span>' +
+          '<span class="h-delete" data-delete="' + item.id + '" title="删除">×</span>' +
+          '</div>';
+      }).join('');
+
+      // Bind click events
+      panel.querySelectorAll('.history-item[data-idx]').forEach(function(el) {
+        el.addEventListener('click', function() {
+          var idx = parseInt(this.dataset.idx);
+          if (idx >= 0 && App.state.historyItems[idx]) {
+            App.handleHistoryClick(App.state.historyItems[idx]);
+          }
+        });
+      });
+      panel.querySelectorAll('.h-delete[data-delete]').forEach(function(el) {
+        el.addEventListener('click', function(e) {
+          e.stopPropagation();
+          App.deleteHistoryItem(this.dataset.delete, e);
+        });
+      });
+    },
+
+    // ---- Diagnostic Report Rendering ----
+    renderDiagnosticReport(result) {
+      var stats = result.stats || {};
+      var report = stats.diagnostic_report;
+      var panel = $('#diagnostic-panel');
+      if (!panel) return;
+
+      if (!report || report.health_score === undefined) {
+        panel.style.display = 'none';
+        return;
+      }
+
+      panel.style.display = 'block';
+      var score = report.health_score;
+      var circle = $('#health-score-circle');
+      circle.textContent = score.toFixed(0) + '%';
+      circle.className = 'score-circle ' + (score >= 90 ? 'good' : (score >= 70 ? 'warn' : 'bad'));
+
+      // Render metrics
+      var metricsHtml = '';
+      var details = [];
+      if (report.start_in_silence > 0) {
+        metricsHtml += '<div class="diagnostic-metric issue"><span class="dm-icon">▶</span><span>开头误入静音:</span><span class="dm-value">' + report.start_in_silence + '</span></div>';
+      }
+      if (report.end_in_silence > 0) {
+        metricsHtml += '<div class="diagnostic-metric ' + (report.end_truncated > 0 ? 'bad' : 'issue') + '"><span class="dm-icon">⏹</span><span>结尾误入静音:</span><span class="dm-value">' + report.end_in_silence + '</span></div>';
+      }
+      if (report.end_truncated > 0) {
+        metricsHtml += '<div class="diagnostic-metric bad"><span class="dm-icon">✂</span><span>切尾事件:</span><span class="dm-value">' + report.end_truncated + '</span></div>';
+      }
+      if (report.snapped_starts !== undefined) {
+        metricsHtml += '<div class="diagnostic-metric ok"><span class="dm-icon">↔</span><span>吸附修正:</span><span class="dm-value">' + (report.snapped_starts + (report.snapped_ends || 0)) + '</span></div>';
+      }
+      if (report.total_events) {
+        metricsHtml += '<div class="diagnostic-metric"><span class="dm-icon">📋</span><span>校验事件:</span><span class="dm-value">' + report.total_events + '</span></div>';
+      }
+      $('#diagnostic-metrics').innerHTML = metricsHtml || '<span style="font-size:0.74rem;color:var(--text-tertiary);">全部通过 ✓</span>';
+
+      // Render flagged events detail
+      var flagged = report.events_flagged || [];
+      var detailEl = $('#diagnostic-detail');
+      if (flagged.length > 0) {
+        detailEl.style.display = 'block';
+        var detailHtml = '';
+        flagged.forEach(function(f) {
+          var tagClass = f.issue === 'end_truncated' || f.issue === 'possible_truncation' ? 'trunc' : 'deviate';
+          var tagText = f.issue === 'end_truncated' ? '切尾' : (f.issue === 'possible_truncation' ? '疑似切尾' : (f.issue === 'start_deviation' ? '偏移' : f.issue));
+          detailHtml += '<div class="dd-item" onclick="App.ui._scrollToEvent(' + f.id + ')">' +
+            '<span class="dd-tag ' + tagClass + '">' + tagText + '</span>' +
+            '<span>#' + f.id + '</span>' +
+            '<span style="color:var(--text-secondary);margin-left:4px;">' + (f.text_preview ? App.ui.escapeHtml(f.text_preview) : '') + '</span>' +
+            '<span style="margin-left:auto;font-family:var(--font-mono);font-size:0.7rem;color:var(--accent-orange);">' + (f.deviation_ms ? '+' + f.deviation_ms + 'ms' : '') + '</span>' +
+            '</div>';
+        });
+        detailEl.innerHTML = detailHtml;
+      } else {
+        detailEl.style.display = 'none';
+      }
+    },
+
+    _scrollToEvent(index) {
+      // Find and highlight the subtitle row
+      var rows = document.querySelectorAll('#subtitle-tbody tr');
+      rows.forEach(function(r) { r.style.background = ''; });
+      var target = document.querySelector('#subtitle-tbody .col-idx');
+      // Search by text content
+      rows.forEach(function(r) {
+        var idxCell = r.querySelector('.col-idx');
+        if (idxCell && idxCell.textContent.trim() === String(index)) {
+          r.style.background = 'rgba(88,166,255,0.15)';
+          r.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setTimeout(function() { r.style.background = ''; }, 3000);
+        }
+      });
+    },
+
+    escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    },
+
+    // ---- Feedback UI Rendering (Phase 5) ----
+    showFeedbackEntry(result) {
+      var emptyEl = $('#feedback-empty-state');
+      var controlsEl = $('#feedback-controls');
+      if (emptyEl) emptyEl.textContent = '处理后，可在此提交修订版进行反馈学习';
+      if (controlsEl) controlsEl.style.display = 'block';
+      // Show "learn from edits" button if we have subtitle events
+      var learnEditsBtn = $('#fb-learn-edits');
+      if (learnEditsBtn && App.state.subtitleEvents && App.state.subtitleEvents.length > 0) {
+        learnEditsBtn.style.display = '';
+      }
+      // Show learn/preview buttons if files are selected
+      App.ui._updateFbButtons();
+    },
+
+    renderFeedbackReport(report) {
+      var reportEl = $('#feedback-report');
+      var dividerEl = $('#feedback-divider');
+      if (!reportEl) return;
+      reportEl.style.display = 'block';
+      if (dividerEl) dividerEl.style.display = 'block';
+
+      var statusClass = report.status === 'ok' ? 'ok' : 'err';
+      var statusText = report.status === 'ok' ? '✓ 学习完成' : '✗ ' + (report.message || '错误');
+      var structuralNote = report.structural_revision ? ' <span style="color:var(--accent-orange);font-size:0.6rem;">(结构性修订, 权重降低)</span>' : '';
+
+      var html = '<div class="feedback-report">';
+      html += '<div class="fr-header"><span class="fr-title">学习报告</span><span class="fr-status ' + statusClass + '">' + statusText + '</span></div>';
+      if (report.status === 'ok') {
+        html += '<div class="feedback-metric-row"><span class="fm-label">对齐覆盖率</span><span class="fm-value">' + (report.alignment_coverage * 100).toFixed(1) + '% (' + report.total_pairs + ' 对)</span></div>';
+        html += '<div class="feedback-metric-row"><span class="fm-label">时间偏移</span><span class="fm-value">' + (report.time_shifts_count || 0) + ' 处</span></div>';
+        html += '<div class="feedback-metric-row"><span class="fm-label">合并/拆分</span><span class="fm-value">' + (report.merge_actions_count || 0) + ' 处</span></div>';
+        html += '<div class="feedback-metric-row"><span class="fm-label">文本编辑</span><span class="fm-value">' + (report.text_edits_count || 0) + ' 处</span></div>';
+      } else if (report.auto_event_count !== undefined) {
+        html += '<div class="feedback-metric-row"><span class="fm-label">对齐覆盖率</span><span class="fm-value" style="color:var(--danger)">' + (report.alignment_coverage * 100).toFixed(1) + '% (' + report.total_pairs + ' 对)</span></div>';
+        html += '<div class="feedback-metric-row"><span class="fm-label">事件数</span><span class="fm-value">自动: ' + report.auto_event_count + ' 条, 修订: ' + report.manual_event_count + ' 条</span></div>';
+      }
+      html += structuralNote;
+
+      if (report.param_adjustments && Object.keys(report.param_adjustments).length > 0) {
+        html += '<div style="font-size:0.72rem;font-weight:600;color:var(--text-primary);margin-top:6px;">参数调整建议</div>';
+        Object.entries(report.param_adjustments).forEach(function(entry) {
+          var path = entry[0], adj = entry[1];
+          html += '<div class="feedback-param-row">';
+          html += '<div class="fp-header"><span class="fp-path">' + App.ui.escapeHtml(path) + '</span>';
+          html += '<span class="feedback-badge ' + (adj.direction || '') + '">' + (adj.direction === 'increase' ? '↑ 增大' : '↓ 减小') + '</span>';
+         html += '<span class="feedback-badge ' + (adj.param_tier || '') + '">' + (adj.param_tier || '').replace('_', ' ') + '</span>';
+          if (adj.confidence !== undefined) {
+            var confClass = adj.confidence >= 0.7 ? 'high' : (adj.confidence >= 0.4 ? 'medium' : 'low');
+            html += '<span class="feedback-badge ' + confClass + '">置信度 ' + (adj.confidence * 100).toFixed(0) + '%</span>';
+          }
+          html += '</div>';
+          if (adj.reason) html += '<div class="fp-reason">' + App.ui.escapeHtml(adj.reason) + '</div>';
+          html += '</div>';
+        });
+      } else if (report.status === 'ok') {
+        html += '<div style="font-size:0.68rem;color:var(--text-tertiary);margin-top:4px;">无需调整参数 — 当前参数已匹配用户偏好</div>';
+      }
+      html += '</div>';
+      reportEl.innerHTML = html;
+    },
+
+    renderFeedbackConfigMgmt(profiles) {
+      var mgmtEl = $('#feedback-config-mgmt');
+      var dividerEl = $('#feedback-divider');
+      if (!mgmtEl) return;
+      mgmtEl.style.display = 'block';
+      if (dividerEl) dividerEl.style.display = 'block';
+
+      if (!profiles || profiles.length === 0) {
+        mgmtEl.innerHTML = '<div class="feedback-empty">暂无用户配置</div>';
+        return;
+      }
+
+      var html = '<div style="font-size:0.72rem;font-weight:600;color:var(--text-primary);margin-bottom:4px;">用户配置</div>';
+      html += '<div class="feedback-btn-row" style="margin-bottom:4px;">';
+      html += '<button class="feedback-mini-btn" onclick="App.refreshFeedbackConfigs()">🔄 刷新</button>';
+      html += '</div>';
+
+      profiles.forEach(function(p) {
+        html += '<div class="feedback-config-item" onclick="App.showFeedbackProfile(\'' + p.profile_id + '\')">';
+        html += '<span class="fci-name">' + App.ui.escapeHtml(p.profile_id) + '</span>';
+        html += '<span class="fci-meta">' + (p.feedback_count || 0) + ' 次学习</span>';
+        html += '<span class="fci-meta">' + (p.overrides ? Object.keys(p.overrides).length : 0) + ' 参数</span>';
+        html += '</div>';
+      });
+      mgmtEl.innerHTML = html;
+    },
+
+    renderFeedbackHealth(healthData) {
+      var reportEl = $('#feedback-report');
+      if (!reportEl || !healthData || !healthData.trend || healthData.trend.length === 0) return;
+      var latest = healthData.trend[healthData.trend.length - 1];
+      if (!latest || latest.health_after === undefined) return;
+      var score = latest.health_after;
+      var grade = score >= 85 ? 'excellent' : (score >= 70 ? 'good' : (score >= 50 ? 'fair' : 'poor'));
+      var gradeColors = {excellent: 'var(--accent-green)', good: 'var(--accent-green)', fair: 'var(--accent-orange)', poor: 'var(--accent-red)'};
+      var html = '<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">';
+      html += '<span style="font-size:0.68rem;color:var(--text-secondary);">健康度</span>';
+      html += '<span style="font-weight:700;font-size:0.82rem;color:' + (gradeColors[grade] || 'var(--text-primary)') + ';">' + score.toFixed(1) + '%</span>';
+      html += '<span class="feedback-badge ' + grade + '" style="font-size:0.6rem;">' + grade + '</span>';
+      html += '</div>';
+      reportEl.innerHTML = html + (reportEl.innerHTML || '');
+    },
+
+    _updateFbButtons() {
+      var refFile = App.state._fbRefFile;
+      var audioFile = App.state._fbAudioFile;
+      var learnBtn = $('#fb-learn-btn');
+      var previewBtn = $('#fb-preview-btn');
+      if (learnBtn) learnBtn.style.display = (refFile && audioFile) ? '' : 'none';
+      if (previewBtn) previewBtn.style.display = (refFile && audioFile) ? '' : 'none';
+    },
+  },
+
+  // ---- Feedback Business Logic (Phase 5) ----
+  _fbRefFile: null,
+  _fbAudioFile: null,
+
+  pickRefFile() {
+    var input = $('#fb-ref-input');
+    if (input) input.click();
+  },
+
+  pickAudioFile() {
+    var input = $('#fb-audio-input');
+    if (input) input.click();
+  },
+
+  async handleFeedbackLearn() {
+    var refFile = App.state._fbRefFile || (App.state._fbRefBlob ? new File([App.state._fbRefBlob], 'edited.srt', {type: 'text/plain'}) : null);
+    var audioFile = App.state._fbAudioFile;
+    if (!refFile || !audioFile) {
+      toast('请先选择修订字幕文件和音频文件', 'error');
+      return;
+    }
+    var learnBtn = $('#fb-learn-btn');
+    if (learnBtn) { learnBtn.disabled = true; learnBtn.textContent = '学习中...'; }
+    try {
+      var report = await App.api.feedbackLearn(audioFile, refFile, App.state.selectedProfile, 'user_default', true, false);
+      App.ui.renderFeedbackReport(report);
+      App.refreshFeedbackConfigs();
+      if (report.status === 'ok') {
+        toast('反馈学习完成！已更新 ' + Object.keys(report.param_adjustments || {}).length + ' 个参数', 'success');
+      } else {
+        toast('学习未完成: ' + (report.message || '未知错误'), 'info');
+      }
+    } catch (ex) {
+      toast('学习失败: ' + ex.message, 'error');
+    } finally {
+      if (learnBtn) { learnBtn.disabled = false; learnBtn.textContent = '📚 开始学习'; }
+    }
+  },
+
+  async handleFeedbackPreview() {
+    var refFile = App.state._fbRefFile;
+    var audioFile = App.state._fbAudioFile;
+    if (!refFile || !audioFile) {
+      toast('请先选择修订字幕文件和音频文件', 'error');
+      return;
+    }
+    var previewBtn = $('#fb-preview-btn');
+    if (previewBtn) { previewBtn.disabled = true; previewBtn.textContent = '分析中...'; }
+    try {
+      var report = await App.api.feedbackPreview(audioFile, refFile, App.state.selectedProfile);
+      App.ui.renderFeedbackReport(report);
+      toast('差异预览完成 — 未实际更新配置', 'info');
+    } catch (ex) {
+      toast('预览失败: ' + ex.message, 'error');
+    } finally {
+      if (previewBtn) { previewBtn.disabled = false; previewBtn.textContent = '🔍 预览差异'; }
+    }
+  },
+
+  async handleFeedbackLearnFromEdits() {
+    var events = App.state.subtitleEvents;
+    if (!events || events.length === 0) {
+      toast('当前没有字幕数据，请先处理音频', 'error');
+      return;
+    }
+    // Build SRT from current subtitle events
+    var srt = '';
+    events.forEach(function(e, i) {
+      srt += (i + 1) + '\n';
+      srt += formatEventAsSRT(e) + '\n\n';
+    });
+    var blob = new Blob([srt], {type: 'text/plain'});
+    App.state._fbRefBlob = blob;
+    App.state._fbRefFile = new File([blob], 'edited.srt', {type: 'text/plain'});
+
+    // Try to get audio from current task
+    if (App.state.taskId) {
+      try {
+        var audioUrl = '/api/tasks/' + App.state.taskId + '/audio?type=input';
+        var resp = await fetch(audioUrl);
+        if (resp.ok) {
+          var audioBlob = await resp.blob();
+          App.state._fbAudioFile = new File([audioBlob], 'audio.bin', {type: audioBlob.type || 'audio/wav'});
+        }
+      } catch(ex) { /* audio download failed, user will need to pick manually */ }
+    }
+
+    var statusEl = $('#fb-file-status');
+    if (statusEl) {
+      statusEl.textContent = '修订字幕: 从 ' + events.length + ' 条当前编辑结果生成' + (App.state._fbAudioFile ? ' | 音频: 已复用' : ' | ⚠️ 请手动选择音频文件');
+    }
+    App.ui._updateFbButtons();
+
+    if (!App.state._fbAudioFile) {
+      toast('修订字幕已就绪！请再选择音频文件后点击"开始学习"', 'info');
+    } else {
+      toast('修订字幕和音频已就绪！点击"开始学习"提交', 'success');
+    }
+  },
+
+  async refreshFeedbackConfigs() {
+    try {
+      var data = await App.api.feedbackProfiles();
+      App.ui.renderFeedbackConfigMgmt(data.profiles || []);
+      // Also check for conflicts
+      if (data.profiles && data.profiles.length > 0) {
+        try {
+          var conflicts = await App.api.feedbackConflicts(data.profiles[0].profile_id);
+          App.ui.renderFeedbackConflicts(conflicts);
+        } catch(ex) { /* conflicts check failed silently */ }
+      }
+    } catch (ex) {
+      console.error('Failed to load feedback configs:', ex);
+    }
+  },
+
+  async showFeedbackProfile(name) {
+    try {
+      var profile = await App.api.feedbackProfile(name);
+      var mgmtEl = $('#feedback-config-mgmt');
+      if (!mgmtEl) return;
+      var html = '<div style="font-size:0.72rem;font-weight:600;color:var(--text-primary);margin-top:4px;">' + App.ui.escapeHtml(name) + '</div>';
+      html += '<div style="font-size:0.65rem;color:var(--text-tertiary);">学习次数: ' + (profile.feedback_count || 0) + ' | Few-shot: ' + (profile.few_shot_examples_count || 0) + '</div>';
+      if (profile.overrides && Object.keys(profile.overrides).length > 0) {
+        html += '<div style="font-size:0.66rem;color:var(--text-secondary);margin-top:2px;">参数覆盖:</div>';
+        Object.entries(profile.overrides).forEach(function(e) {
+          html += '<div class="feedback-metric-row"><span class="fm-label" style="font-family:var(--font-mono);font-size:0.62rem;">' + App.ui.escapeHtml(e[0]) + '</span><span class="fm-value">' + (typeof e[1] === 'number' ? e[1].toFixed(3) : e[1]) + '</span></div>';
+        });
+      }
+      html += '<div class="feedback-btn-row" style="margin-top:4px;">';
+      html += '<button class="feedback-mini-btn" onclick="App.handleFeedbackRollback(\'' + name + '\')">↩ 回滚</button>';
+      html += '<button class="feedback-mini-btn danger" onclick="App.handleFeedbackReset(\'' + name + '\')">🗑 重置</button>';
+      html += '</div>';
+      mgmtEl.innerHTML = html;
+    } catch (ex) {
+      toast('加载配置失败: ' + ex.message, 'error');
+    }
+  },
+
+  async handleFeedbackRollback(profileName) {
+    if (!confirm('确认回滚配置 "' + profileName + '" 到上一个备份版本？')) return;
+    try {
+      var result = await App.api.feedbackProfileRollback(profileName);
+      toast('已回滚到 ' + result.updated_at + ' 的版本', 'success');
+      App.showFeedbackProfile(profileName);
+    } catch (ex) {
+      toast('回滚失败: ' + ex.message, 'error');
+    }
+  },
+
+  async handleFeedbackReset(profileName) {
+    if (profileName === 'user_default') {
+      if (!confirm('确认重置默认配置？所有学习到的参数将丢失。')) return;
+    }
+    try {
+      await App.api.feedbackProfileDelete(profileName);
+      toast('配置 "' + profileName + '" 已重置', 'success');
+      App.refreshFeedbackConfigs();
+    } catch (ex) {
+      if (ex.message && ex.message.indexOf('Cannot delete the default profile') >= 0) {
+        toast('无法删除默认配置文件，请使用回滚功能', 'error');
+      } else {
+        toast('重置失败: ' + ex.message, 'error');
+      }
+    }
+  },
+
+  renderFeedbackConflicts(conflicts) {
+    var reportEl = $('#feedback-report');
+    if (!conflicts || !conflicts.conflicts || conflicts.conflicts.length === 0) return;
+    var activeConflicts = conflicts.conflicts.filter(function(c) { return c.is_oscillating; });
+    if (activeConflicts.length === 0) return;
+
+    var html = '<div style="margin-top:6px;">';
+    html += '<div style="font-size:0.72rem;font-weight:600;color:var(--accent-orange);">⚠️ 参数冲突</div>';
+    activeConflicts.forEach(function(c) {
+      html += '<div class="feedback-conflict-warn">';
+      html += '<div class="fc-header">' + App.ui.escapeHtml(c.param_path) + ' (' + c.severity + ')</div>';
+      html += '<div style="font-size:0.62rem;color:var(--text-secondary);">震荡 ' + c.oscillation_count + ' 次 · 建议: ' + (c.recommended_action || 'review') + '</div>';
+      if (c.suggested_actions && c.suggested_actions.length > 0) {
+        html += '<div class="feedback-btn-row" style="margin-top:2px;">';
+        c.suggested_actions.forEach(function(a) {
+          html += '<button class="feedback-mini-btn" onclick="App.resolveFeedbackConflict(\'' + conflicts.profile_id + '\',\'' + c.param_path + '\',\'' + a.id + '\')">' + App.ui.escapeHtml(a.label) + '</button>';
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    // Append to report or config area
+    var configEl = $('#feedback-config-mgmt');
+    if (configEl) {
+      configEl.innerHTML = html + (configEl.innerHTML || '');
+    }
+  },
+
+  async resolveFeedbackConflict(profileName, paramPath, action) {
+    try {
+      var result = await App.api.feedbackConflictResolve(profileName, paramPath, action);
+      toast(result.message || '冲突已解决', 'success');
+      App.refreshFeedbackConfigs();
+    } catch (ex) {
+      toast('解决失败: ' + ex.message, 'error');
+    }
+  },
+
+  // ---- Init ----
+  init() {
+    document.addEventListener('DOMContentLoaded', () => App.ui.init());
+  }
+};
+
+// 暴露到全局作用域，使内联事件处理器 (onclick/oninput/onchange) 能找到 App
+window.App = App;
+
+App.init();
+
+})();

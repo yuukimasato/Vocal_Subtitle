@@ -180,27 +180,38 @@ class TestStaticFiles:
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
         assert "Vocal Subtitle" in resp.text
-        assert 'data-action="check"' in resp.text
+        # External CSS/JS referenced, not inlined
+        assert 'href="css/base.css"' in resp.text
+        assert 'src="js/app.js"' in resp.text
         assert "'speaker_embedding_hf_token'," not in resp.text
         assert "'speaker_embedding_hf_token': 'speaker_embedding_token'" not in resp.text
 
     def test_credential_fields_do_not_use_password_manager_semantics(self, client):
         html = client.get("/").text
+        # These patterns are in JS-templated HTML; check the JS source too
+        js_resp = client.get("/js/app.js")
+        js_text = html + (js_resp.text if js_resp.status_code == 200 else "")
 
-        assert 'id="llm-api-key" name="llm-api-key" type="text" class="credential-mask"' in html
-        assert 'data-key="speaker_embedding_hf_token" name="speaker-embedding-token" type="text" class="credential-mask"' in html
-        assert 'autocomplete="off"' in html
-        assert 'data-form-type="other"' in html
-        assert 'type="password"' not in html
+        assert 'id="llm-api-key" name="llm-api-key" type="text" class="credential-mask"' in js_text
+        assert 'data-key="speaker_embedding_hf_token" name="speaker-embedding-token" type="text" class="credential-mask"' in js_text
+        assert 'autocomplete="off"' in js_text
+        assert 'data-form-type="other"' in js_text
+        assert 'type="password"' not in js_text
 
     def test_funasr_ui_exposes_local_first_prepare_flow(self, client):
         html = client.get("/").text
+        # Check both HTML and JS files for FunASR references
+        js_text = html
+        for js_file in ["/js/state.js", "/js/api-client.js", "/js/progress.js", "/js/app.js"]:
+            js_resp = client.get(js_file)
+            if js_resp.status_code == 200:
+                js_text += js_resp.text
 
-        assert "/api/asr/funasr/status" in html
-        assert "/api/asr/funasr/prepare" in html
-        assert "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch" in html
-        assert "syncASREngineOptions" in html
-        assert "funasrPreparing" in html
+        assert "/api/asr/funasr/status" in js_text
+        assert "/api/asr/funasr/prepare" in js_text
+        assert "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch" in js_text
+        assert "syncASREngineOptions" in js_text
+        assert "funasrPreparing" in js_text
 
     def test_funasr_prepare_endpoints_use_local_first_manager(self, client, monkeypatch):
         monkeypatch.setattr(
