@@ -286,6 +286,9 @@ class FeatureExtractor:
                     roots = np.roots(a)
                     # 仅保留单位圆内的共轭根
                     roots = roots[np.abs(roots) < 1.0]
+                    # 零幅极点会使 log(幅度) 产生除零 warning，且本身不
+                    # 能对应有效共振峰。
+                    roots = roots[np.abs(roots) > 1e-12]
                     angles = np.angle(roots)
                     freqs = angles * (sr / (2 * np.pi))
                     # 仅保留正频率且带宽合理的根 (带宽由极点幅度决定)

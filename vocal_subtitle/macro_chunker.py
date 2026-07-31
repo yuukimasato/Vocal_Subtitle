@@ -161,6 +161,8 @@ class MacroChunker:
 
         for i in range(start_sample, end_sample - frame_size + 1, hop):
             frame = audio[i: i + frame_size]
+            if frame.size == 0:
+                continue
             rms = float(np.sqrt(np.mean(frame ** 2)))
             if rms < min_rms:
                 min_rms = rms

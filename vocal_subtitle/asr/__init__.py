@@ -19,6 +19,9 @@ from .funasr_engine import FunASREngine
 from .whisper_cpp_engine import WhisperCppEngine
 from .router import ASRRouteDecision, ASRRouter
 from .quality_gate import ASRQualityResult, evaluate_asr_quality
+from .global_path import GlobalASRPath, GlobalASRService
+from .review_path import ASRReviewPath, ASRReviewService
+from .segmented_path import SegmentedASRPath, SegmentedASRService
 
 __all__ = [
     "ASREngine",
@@ -31,4 +34,10 @@ __all__ = [
     "ASRRouter",
     "ASRQualityResult",
     "evaluate_asr_quality",
+    "ASRReviewPath",
+    "ASRReviewService",
+    "GlobalASRPath",
+    "GlobalASRService",
+    "SegmentedASRPath",
+    "SegmentedASRService",
 ]

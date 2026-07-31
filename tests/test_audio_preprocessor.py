@@ -66,6 +66,7 @@ class TestBurstNoiseSuppression:
         cleaned, report = preprocessor.process(audio, sample_rate=16000)
         assert len(cleaned) == 0
         assert not report["denoise_applied"]
+        assert report["input_rms"] == 0.0
 
 
 class TestSpectralGate:

@@ -83,8 +83,8 @@
 <body>
 
 <h1>🎤 Vocal Subtitle — 字幕识别完整流程</h1>
-<p class="subtitle">从音频输入到字幕输出的端到端流水线 · 基于 <code>vocal_subtitle/pipeline.py</code> (4628行) · 共 11 个阶段<br/>
-<strong>🆕 2026-07-29 更新:</strong> 物理优先中间层 (Phase 0-3) | 方向感知声学校验门控 | 字幕批量编辑 | FunASR 自动准备 | WhisperX 引擎</p>
+<p class="subtitle">从音频输入到字幕输出的端到端流水线 · 基于 <code>vocal_subtitle/pipeline.py</code> (5075 行) · 共 11 个阶段<br/>
+<strong>🆕 2026-07-31 更新:</strong> ASR 自动语言路由 (ASRRouter) | 物理证据质量门控 (evaluate_asr_quality) | 全局 ASR 上下文窗口 (GlobalTranscriber) | 局部恢复再识别 (LocalRecoveryEngine) | 多引擎复核</p>
 
 <div class="legend">
   <span><span class="dot" style="background:var(--cyan)"></span> 输入/预处理</span>
@@ -95,8 +95,9 @@
   <span><span class="dot" style="background:var(--red)"></span> 导出</span>
   <span><span class="dot" style="background:var(--yellow)"></span> 可选模块</span>
   <span><span class="dot" style="background:var(--teal)"></span> 反馈学习</span>
-  <span><span class="dot" style="background:#ff6b6b"></span> 🆕 物理层</span>
-  <span><span class="dot" style="background:#ffa500"></span> 🆕 2026-07-29 更新</span>
+  <span><span class="dot" style="background:#ffa500"></span> 🆕 物理层</span>
+  <span><span class="dot" style="background:#ff6b6b"></span> 🆕 声学门控</span>
+  <span><span class="dot" style="background:#a371f7"></span> 🆕 ASR 路由/质量门控</span>
 </div>
 
 <div class="toc">
@@ -106,6 +107,8 @@
   <a href="#preprocess">预处理</a>
   <a href="#vad">VAD</a>
   <a href="#asr">ASR</a>
+  <a href="#asr-routing">🆕 ASR 路由</a>
+  <a href="#global-asr">🆕 全局 ASR</a>
   <a href="#boundary">边界精修</a>
   <a href="#acoustic-gating">🆕 声学门控</a>
   <a href="#postprocess">后处理</a>
@@ -136,12 +139,24 @@ flowchart TD
     C --> D["🎵 ① 人声分离 (可选)<br/>UVR-BS-RoFormer / Spleeter / Open-Unmix"]
     D --> E["🔇 ② 音频预处理<br/>降噪 + 噪声画像 + 响度归一化"]
     E --> F["✂️ ③ 宏观分块<br/>MacroChunker → PipelineContext"]
-    F --> G["🗣️ ④ VAD 语音活动检测<br/>Silero VAD + ffmpeg silencedetect"]
+    F --> ROUTE["🔀 🆕 ASR 路由决策<br/>语言探测窗 → FunASR/Faster-Whisper"]
+    ROUTE --> G["🗣️ ④ VAD 语音活动检测<br/>Silero VAD + ffmpeg silencedetect"]
     G --> H["🧩 ⑤ 语音片段合并<br/>MergeStrategy.merge()"]
-    H --> I["📝 ⑥ ASR 语音识别 ⭐<br/>Faster-Whisper / FunASR / Whisper.cpp"]
-    I --> J["🔍 ⑦ 边界精修 + 语义仲裁<br/>BoundaryRefiner + ReASR + LLM Arbitration"]
+
+    H --> ASPATH{"🗂️ ASR 路径选择<br/>global_asr.routing"}
+
+    ASPATH -->|"global/auto"| GA["🌐 🆕 全局 ASR 路径<br/>GlobalTranscriber 上下文窗口<br/>逐窗转录 + 去重去冗"]
+    ASPATH -->|"segmented"| IA["📝 逐段 ASR 路径<br/>Faster-Whisper / FunASR / Whisper.cpp / WhisperX"]
+
+    GA --> QB{"🆕 质量门控<br/>evaluate_asr_quality()"}
+    QB -->|"pass/warning"| PHYA["→ 物理层"]
+    QB -->|"failed"| IA
+
+    IA --> J["🔍 ⑦ 边界精修 + 语义仲裁<br/>BoundaryRefiner + ReASR + LLM Arbitration"]
     J --> K["🗺️ ⑧ 时间轴映射<br/>TimeMapper.map() → SubtitleEvent[]"]
-    K --> PHY["🧱 🆕 ⑨ 物理优先层 (Phase 0-3)<br/>CoordinateMapper → PhysicalTimeline → WordAllocation"]
+    K --> PHYA
+
+    PHYA --> PHY["🧱 🆕 ⑨ 物理优先层 (Phase 0-3)<br/>CoordinateMapper → PhysicalTimeline → WordAllocation<br/>→ CoverageAudit → LocalRecovery → SubtitleBins"]
     PHY --> L["🎯 ⑩ 后处理管道<br/>说话人融合 / 角色标注 / 语义合并"]
     L --> L2["⑩.⑤ 声学校验门控<br/>方向感知 + 置信度门控 → AcousticValidator"]
     L2 --> M["📦 ⑪ 最终校验 + 导出<br/>EndTimeValidator → SRT / VTT / ASS"]
@@ -171,11 +186,16 @@ flowchart TD
     style D fill:#1a2520,stroke:#7ee787,color:#c9d1d9
     style E fill:#20201a,stroke:#39d2c0,color:#c9d1d9
     style F fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style ROUTE fill:#2a102a,stroke:#a371f7,stroke-width:3px,color:#d4bfff
     style G fill:#1a2520,stroke:#3fb950,color:#c9d1d9
     style H fill:#1a2025,stroke:#3fb950,color:#c9d1d9
-    style I fill:#1a1a30,stroke:#bc8cff,stroke-width:3px,color:#c9d1d9
+    style ASPATH fill:#1a2025,stroke:#a371f7,stroke-width:2px,color:#c9d1d9
+    style GA fill:#2a102a,stroke:#a371f7,stroke-width:3px,color:#d4bfff
+    style IA fill:#1a1a30,stroke:#bc8cff,stroke-width:3px,color:#c9d1d9
+    style QB fill:#2a102a,stroke:#a371f7,stroke-width:2px,color:#d4bfff
     style J fill:#25201a,stroke:#d2991d,color:#c9d1d9
     style K fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style PHYA fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
     style PHY fill:#2a1a10,stroke:#ffa500,stroke-width:3px,color:#ffccaa
     style L fill:#25201a,stroke:#f778ba,stroke-width:2px,color:#c9d1d9
     style L2 fill:#2a1010,stroke:#ff6b6b,stroke-width:3px,color:#ffaaaa
@@ -374,17 +394,19 @@ flowchart TD
 <h2 id="asr">📝 阶段 ⑥ — ASR 语音识别 (核心)</h2>
 
 <div class="mermaid-wrap">
-  <div class="caption">三种 ASR 引擎对比</div>
+  <div class="caption">四种 ASR 引擎对比 — 🆕 含 auto 自动路由</div>
   <div class="mermaid">
 flowchart TD
     SEG["SpeechSegment[]"]
     SEG --> ENGINE{"选择引擎: config.asr.engine"}
 
+    ENGINE -->|"auto (🆕 自动路由)"| AUTO2["🔀 ASRRouter.decide()<br/>语言探测窗 → 决策<br/>→ FunASR 或 Faster-Whisper"]
     ENGINE -->|"默认"| FW["🚀 Faster-Whisper<br/>CTranslate2 · large-v3<br/>多语言 99种 · CUDA/CPU/MPS<br/>float16/int8"]
     ENGINE -->|"中文场景"| FA["🧠 FunASR Paraformer<br/>阿里达摩院 · modelscope<br/>仅中文 · Apache 2.0<br/>WebUI 自动准备"]
     ENGINE -->|"低资源"| WC["⚡ Whisper.cpp<br/>GGML C++ 推理 · 多语言<br/>CPU/Apple Silicon"]
     ENGINE -->|"词级增强"| WX["🔬 WhisperX<br/>PyTorch + phoneme ASR<br/>强制音素对齐 · 多语言<br/>词级时间戳增强"]
 
+    AUTO2 --> TRANS
     FW --> TRANS["transcribe()"]
     FA --> TRANS
     WC --> TRANS
@@ -394,20 +416,21 @@ flowchart TD
 
     subgraph SUB[" "]
       direction LR
-      LANG["🌍 全局语言检测<br/>完整音频一次运行"]
-      SEGASR["📝 逐片段转录"]
+      LANG["🌍 🆕 全局语言检测<br/>完整音频一次运行 · detect_language()"]
+      SEGASR["📝 逐片段/逐窗口转录"]
       FALLBACK["🔄 回退转录<br/>avg_logprob &lt; -1.5 → language=None"]
       NORM["📋 TextNormalizer<br/>标点/数字/中英混排"]
       HALLUC["🚫 幻觉过滤<br/>训练模板短语"]
       DEDUP["♻️ 段内去重"]
-      CACHE["💾 片段级缓存"]
+      CACHE2["💾 片段级缓存"]
     end
 
-    LANG --> SEGASR --> FALLBACK --> NORM --> HALLUC --> DEDUP --> CACHE
-    CACHE --> RESULT["TranscriptionSegment[]<br/>text · start · end · words · confidence"]
+    LANG --> SEGASR --> FALLBACK --> NORM --> HALLUC --> DEDUP --> CACHE2
+    CACHE2 --> RESULT["TranscriptionSegment[]<br/>text · start · end · words · confidence"]
 
     style SEG fill:#1a1a30,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
     style ENGINE fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style AUTO2 fill:#2a102a,stroke:#a371f7,stroke-width:3px,color:#d4bfff
     style FW fill:#1c2a40,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
     style FA fill:#2a1010,stroke:#ff6b6b,stroke-width:2px,color:#c9d1d9
     style WC fill:#1a2520,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
@@ -420,7 +443,7 @@ flowchart TD
     style NORM fill:#1a2025,stroke:#8b949e,color:#c9d1d9
     style HALLUC fill:#201515,stroke:#f85149,color:#c9d1d9
     style DEDUP fill:#1a2025,stroke:#8b949e,color:#c9d1d9
-    style CACHE fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style CACHE2 fill:#1a2025,stroke:#8b949e,color:#c9d1d9
   </div>
 </div>
 
@@ -461,6 +484,297 @@ flowchart TD
     style PARSE fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
     style WORD fill:#152515,stroke:#3fb950,color:#c9d1d9
     style FULL fill:#152515,stroke:#3fb950,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ASR ROUTING -->
+<!-- ============================================================ -->
+<h2 id="asr-routing">🔀 🆕 阶段 ⑥.0 — ASR 自动语言路由</h2>
+<div class="mermaid-wrap">
+  <div class="caption" style="color:#a371f7;">asr/router.py (~307 行) — 任务级语言探测与引擎路由决策</div>
+  <div class="mermaid">
+flowchart TD
+    ROUTE_START["Task 开始 · 完整音频"]
+    ROUTE_START --> CHECK_AUTO{"config.asr.engine == 'auto'<br/>且 auto_routing.enabled?"}
+
+    CHECK_AUTO -->|"否 (显式引擎)"| EXPLICIT["使用指定引擎<br/>→ ASRRouteDecision<br/>reason: explicit_engine"]
+    CHECK_AUTO -->|"否 (语言锁定)"| LANG_LOCK["language 已配置<br/>→ zh: FunASR · 其他: Faster-Whisper<br/>reason: explicit_language_lock"]
+    CHECK_AUTO -->|"是"| PROBE["语言探测阶段<br/>build_probe_windows()"]
+
+    PROBE --> WINDOWS["构建探测窗口<br/>8 个 · 每窗 8s<br/>覆盖全部语音区间"]
+    WINDOWS --> PROBE_ENGINE["轻量探测引擎<br/>Faster-Whisper tiny<br/>逐窗检测语言"]
+
+    PROBE_ENGINE --> EVAL_R["评估探测结果<br/>merge_intervals() 合并窗口"]
+
+    EVAL_R --> ZH_CHECK{"所有窗口检测为 zh<br/>且概率 ≥ 85%<br/>且比例 ≥ 100%?"}
+    ZH_CHECK -->|"是"| ROUTE_FUNASR["✅ 路由到 FunASR<br/>reason: all_probe_windows_zh<br/>fallback_engine: faster-whisper"]
+    ZH_CHECK -->|"否"| ROUTE_FW["→ Faster-Whisper<br/>reason: non_chinese_or_uncertain_probe"]
+
+    ROUTE_FUNASR --> DECISION["ASRRouteDecision<br/>selected_engine · detected_language<br/>language_probability · window_evidence<br/>decision_reason · route_version"]
+
+    ROUTE_FW --> DECISION
+    EXPLICIT --> DECISION
+    LANG_LOCK --> DECISION
+
+    DECISION --> STORE["缓存到 Pipeline._asr_route_decision<br/>后续所有阶段复用<br/>_get_asr_engine() 自动选择"]
+
+    style ROUTE_START fill:#1a2a3a,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style CHECK_AUTO fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style EXPLICIT fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style LANG_LOCK fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style PROBE fill:#2a102a,stroke:#a371f7,stroke-width:3px,color:#d4bfff
+    style WINDOWS fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style PROBE_ENGINE fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style EVAL_R fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style ZH_CHECK fill:#1a2025,stroke:#a371f7,stroke-width:2px,color:#c9d1d9
+    style ROUTE_FUNASR fill:#2a102a,stroke:#a371f7,stroke-width:3px,color:#d4bfff
+    style ROUTE_FW fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style DECISION fill:#152515,stroke:#3fb950,stroke-width:3px,color:#c9d1d9
+    style STORE fill:#1c2a40,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+  </div>
+  <div class="detail-list" style="margin-top:12px; border-left: 3px solid #a371f7; padding-left: 16px;">
+    <strong style="color:#a371f7;">核心设计:</strong>
+    <ul>
+      <li><strong>语言探测窗</strong> — 不使用孤立的标准 ASR 片段，而是在音频的语音区间上构建最多 8 个确定性探测窗口（每窗 8 秒），确保语言检测不受 ASR 上下文窗口影响</li>
+      <li><strong>轻量引擎</strong> — 使用 Faster-Whisper tiny 作为专用探测引擎，避免加载大型模型</li>
+      <li><strong>严格阈值</strong> — 仅当所有探测窗口一致识别为中文且概率 ≥ 85% 时才路由到 FunASR；任何不确定窗口都安全降级为 Faster-Whisper</li>
+      <li><strong>显式锁定优先</strong> — 用户显式指定 language=zh 直接路由到 FunASR，无需探测</li>
+      <li><strong>质量回退准备</strong> — 路由到 FunASR 时预配置 fallback_engine=faster-whisper，供质量门控失败时使用</li>
+      <li><strong>版本化路由</strong> — route_version + quality_gate_version 确保全管道缓存键随路由策略变更而失效</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- GLOBAL ASR + QUALITY GATE + LOCAL RECOVERY -->
+<!-- ============================================================ -->
+<h2 id="global-asr">🌐 🆕 阶段 ⑥.1 — 全局 ASR 上下文窗口 + 质量门控 + 局部恢复</h2>
+<div class="mermaid-wrap">
+  <div class="caption" style="color:#a371f7;">pipeline.py · _run_global_transcription_path() (~600 行内联逻辑) + asr/global_transcriber.py + asr/quality_gate.py + asr/local_recovery.py</div>
+  <div class="mermaid">
+flowchart TD
+    G_START["Pipeline._run_global_transcription_path()<br/>global_asr.enabled 且 routing ∈ {auto, global}"]
+
+    G_START --> G_ENGINE["_get_global_asr_engine()<br/>获取路由决策选择的 ASR 引擎"]
+    G_ENGINE --> G_LOAD2["engine.load_model()"]
+    G_LOAD2 --> G_LANG["语言检测<br/>detect_language() 全局一次性<br/>非逐段不可靠检测"]
+
+    G_LANG --> G_WINDOWS["构建上下文窗口<br/>基于 PhysicalTimeline<br/>left_context=0.5s · right_context=0.5s"]
+    G_WINDOWS --> G_TRANSCRIBE["GlobalTranscriber.transcribe()<br/>逐窗口转录 · 可选强制音素对齐"]
+
+    G_TRANSCRIBE --> G_DEDUP["确定性去重去冗<br/>_is_duplicate() 时间重叠判定<br/>同词去重 · 高置信度优先"]
+    G_DEDUP --> G_IR["GlobalTranscript<br/>GlobalWord[] + GlobalTranscriptSegment[]<br/>backend · status · diagnostics"]
+
+    G_IR --> G_ALLOC["WordAllocation<br/>allocate_words() → PhysicalSpan[]<br/>单词分配到物理跨度"]
+    G_ALLOC --> G_BUILD["build_events()<br/>→ SubtitleEvent[]"]
+
+    G_BUILD --> G_COVERAGE["audit_physical_coverage()<br/>物理覆盖审计<br/>→ PhysicalCoverageReport"]
+
+    G_COVERAGE --> QG1["evaluate_asr_quality()<br/>质量门控检查"]
+
+    QG1 --> QG_CHECK{"门控结果?"}
+    QG_CHECK -->|"pass"| G_DONE["✅ 全局 ASR 成功<br/>→ 进入后处理"]
+    QG_CHECK -->|"warning"| G_WARN["⚠️ 标记 degraded<br/>但仍进入物理层"]
+    QG_CHECK -->|"failed"| G_FALLBACK["🔻 降级到逐段 ASR<br/>标准 ChunkPipeline 路径"]
+
+    G_COVERAGE --> COV_CHECK{"覆盖完整?"}
+    COV_CHECK -->|"否 (有 recovery_ranges)"| RECOVERY["🆕 LocalRecovery·尾恢复<br/>_repair_tail_evidence() 尾部延长<br/>逐区间再转录 · 时间钳制"]
+    COV_CHECK -->|"是"| G_DONE
+
+    RECOVERY --> RECOV_ENGINE["主引擎转写未覆盖区间<br/>→ RecoveryCandidate[]"]
+    RECOV_ENGINE --> RECOV_CLAMP["时间钳制<br/>r_start ≤ audio_duration<br/>r_end = max(r_start+10ms, transcribed_end)"]
+    RECOV_CLAMP --> RECOV_SPAN["构建 PhysicalSpan<br/>→ WordAllocation 加入事件"]
+    RECOV_SPAN --> RECOV_RECHECK["二次覆盖审计<br/>audit_physical_coverage()"]
+    RECOV_RECHECK --> RECOV_STATUS{"恢复成功?"}
+    RECOV_STATUS -->|"是"| G_DONE
+    RECOV_STATUS -->|"否"| G_DEGRADED["状态 = degraded<br/>但仍产出部分结果"]
+
+    G_WARN --> G_DONE
+    G_DEGRADED --> G_DONE
+
+    style G_START fill:#2a102a,stroke:#a371f7,stroke-width:3px,color:#d4bfff
+    style G_ENGINE fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style G_LOAD2 fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style G_LANG fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style G_WINDOWS fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style G_TRANSCRIBE fill:#2a102a,stroke:#a371f7,stroke-width:2px,color:#d4bfff
+    style G_DEDUP fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style G_IR fill:#201a20,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style G_ALLOC fill:#2a1a10,stroke:#ffa500,color:#ffccaa
+    style G_BUILD fill:#2a1a10,stroke:#ffa500,color:#ffccaa
+    style G_COVERAGE fill:#2a1a10,stroke:#ffa500,color:#ffccaa
+    style QG1 fill:#2a102a,stroke:#a371f7,stroke-width:3px,color:#d4bfff
+    style QG_CHECK fill:#1a2025,stroke:#a371f7,stroke-width:2px,color:#c9d1d9
+    style G_DONE fill:#152515,stroke:#3fb950,stroke-width:3px,color:#c9d1d9
+    style G_WARN fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style G_FALLBACK fill:#25201a,stroke:#d2991d,stroke-width:2px,color:#c9d1d9
+    style COV_CHECK fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style RECOVERY fill:#2a1010,stroke:#ff6b6b,stroke-width:3px,color:#ffaaaa
+    style RECOV_ENGINE fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style RECOV_CLAMP fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style RECOV_SPAN fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style RECOV_RECHECK fill:#2a1010,stroke:#ff6b6b,stroke-width:2px,color:#ffaaaa
+    style RECOV_STATUS fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style G_DEGRADED fill:#25201a,stroke:#d2991d,stroke-width:2px,color:#c9d1d9
+  </div>
+  <div class="detail-list" style="margin-top:12px; border-left: 3px solid #a371f7; padding-left: 16px;">
+    <strong style="color:#a371f7;">核心设计:</strong>
+    <ul>
+      <li><strong>全局上下文窗口</strong> — 基于 PhysicalTimeline 构建重叠上下文窗口（左右各 0.5s），逐窗口转录后确定性去重，比逐片段 ASR 更充分利用上下文</li>
+      <li><strong>确定性去重算法</strong> — <code>_is_duplicate()</code>：文本归一化 + 语言匹配 + 时间重叠 ≥ 50% → 保留高置信度词，丢弃低置信度重复</li>
+      <li><strong>物理覆盖审计</strong> — 使用物理语音时长（而非文件时长）计算覆盖率，确保 ASR 不遗漏真实语音区间</li>
+      <li><strong>质量门控指标</strong> — coverage_ratio (≥80%) · text_density (≥20 字符/秒) · max_event_duration · overlap_ratio (≤35%) · 长音频最低文字量</li>
+      <li><strong>局部恢复 (LocalRecovery)</strong> — 音频尾部修复 (<code>_repair_tail_evidence</code>)：当 ffmpeg 骨架过早结束时，从 Silero/粗检测延长覆盖 · 逐区间再转录 · 时间钳制防溢出</li>
+      <li><strong>降级路径</strong> — 质量门控失败时自动降级到标准逐段 ASR (ChunkPipeline)，不丢失结果</li>
+      <li><strong>状态传播</strong> — GlobalTranscript.status (ok/degraded/empty) 随 IR 传播，下游模块据此调整行为</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- QUALITY GATE DETAIL -->
+<!-- ============================================================ -->
+<h2>🛡️ 🆕 质量门控 — 物理证据校验</h2>
+<div class="mermaid-wrap">
+  <div class="caption" style="color:#a371f7;">asr/quality_gate.py (~126 行) — evaluate_asr_quality() 后置校验</div>
+  <div class="mermaid">
+flowchart TD
+    QG_IN["SubtitleEvent[] + SpeechInterval[] + audio_duration"]
+
+    QG_IN --> QG_FILTER["过滤无效事件<br/>text 为空 · end ≤ start<br/>时间超出音频范围"]
+    QG_FILTER --> QG_MERGE2["合并有效事件区间<br/>→ 覆盖总时间跨度"]
+
+    QG_MERGE2 --> QG_METRICS["计算 7 项指标"]
+    QG_METRICS --> M1["coverage_ratio — 物理语音覆盖率"]
+    QG_METRICS --> M2["text_density — 字符/秒密度"]
+    QG_METRICS --> M3["max_event_duration — 最长单事件"]
+    QG_METRICS --> M4["long_event_count — 超时事件数 (>12s)"]
+    QG_METRICS --> M5["overlap_ratio — 重叠比例"]
+    QG_METRICS --> M6["invalid_event_count — 无效事件数"]
+    QG_METRICS --> M7["physical_speech_duration — 物理语音总长"]
+
+    M1 --> QG_JUDGE{"判定"}
+    M2 --> QG_JUDGE
+    M3 --> QG_JUDGE
+    M4 --> QG_JUDGE
+    M5 --> QG_JUDGE
+    M6 --> QG_JUDGE
+    M7 --> QG_JUDGE
+
+    QG_JUDGE -->|"所有通过"| QG_PASS["status: pass<br/>+ 宽松阈值: coverage≥95% 或 density≥0.4"]
+    QG_JUDGE -->|"宽松未达"| QG_WARN2["status: warning<br/>覆盖率/密度偏低但仍有结果"]
+    QG_JUDGE -->|"任一项失败"| QG_FAIL["status: failed<br/>reasons[] 记录失败项"]
+
+    QG_PASS --> QG_RESULT["ASRQualityResult<br/>→ 全局 ASR 继续"]
+    QG_WARN2 --> QG_RESULT
+    QG_FAIL --> QG_FALLBACK2["→ 触发降级路径<br/>回退到逐段 ASR"]
+
+    style QG_IN fill:#2a102a,stroke:#a371f7,stroke-width:2px,color:#d4bfff
+    style QG_FILTER fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style QG_MERGE2 fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style QG_METRICS fill:#2a102a,stroke:#a371f7,stroke-width:2px,color:#d4bfff
+    style M1 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style M2 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style M3 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style M4 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style M5 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style M6 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style M7 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style QG_JUDGE fill:#1a2025,stroke:#a371f7,stroke-width:2px,color:#c9d1d9
+    style QG_PASS fill:#152515,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style QG_WARN2 fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style QG_FAIL fill:#201515,stroke:#f85149,stroke-width:2px,color:#c9d1d9
+    style QG_RESULT fill:#152515,stroke:#3fb950,stroke-width:3px,color:#c9d1d9
+    style QG_FALLBACK2 fill:#25201a,stroke:#d2991d,stroke-width:2px,color:#c9d1d9
+  </div>
+  <div class="detail-list" style="margin-top:12px; border-left: 3px solid #a371f7; padding-left: 16px;">
+    <strong style="color:#a371f7;">门控检查项:</strong>
+    <ul>
+      <li><strong>覆盖率</strong> — 基于物理语音时长而非文件时长，避免静音占比大的音频误报</li>
+      <li><strong>文字密度</strong> — 防止 ASR 仅在部分区间产出稀疏文字</li>
+      <li><strong>重叠检测</strong> — 超过 35% 的事件存在时间重叠即标记异常</li>
+      <li><strong>长事件检测</strong> — 单事件超过 12s 且音频 >60s → 标记</li>
+      <li><strong>长音频低文字量</strong> — 长音频（>60s）文字总量 <12 字符 → 明显异常</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- LOCAL RECOVERY DETAIL -->
+<!-- ============================================================ -->
+<h2>🔧 🆕 局部再识别恢复 (LocalRecovery)</h2>
+<div class="mermaid-wrap">
+  <div class="caption" style="color:#a371f7;">asr/local_recovery.py (~434 行) — 包含限次尝试、置信度过滤、备用引擎</div>
+  <div class="mermaid">
+flowchart TD
+    LR_TRIGGER["触发来源"]
+    LR_TRIGGER --> T1["物理覆盖审计 → recovery_ranges<br/>→ make_recovery_requests_from_coverage()"]
+    LR_TRIGGER --> T2["低置信度词区间"]
+    LR_TRIGGER --> T3["LLM 复核请求 (review_request)"]
+
+    T1 --> LR_REQ["LocalRecoveryRequest<br/>start · end · reasons · metadata"]
+    T2 --> LR_REQ
+    T3 --> LR_REQ
+
+    LR_REQ --> LR_ENGINE["LocalRecoveryEngine.process_requests()"]
+
+    LR_ENGINE --> LR_LOOP["逐请求处理<br/>每个请求 ≤ 3 次尝试"]
+
+    LR_LOOP --> LR_PREP["扩展上下文窗口<br/>request ± context_window (0.5s)"]
+    LR_PREP --> LR_MIN{"音频 ≥ 50ms?"}
+    LR_MIN -->|"否"| LR_SKIP["outcome: skipped"]
+
+    LR_MIN -->|"是"| LR_ASR["主引擎 transcribe()<br/>可选 fallback_asr 备用"]
+
+    LR_ASR --> LR_FILTER["候选过滤"]
+    LR_FILTER --> F1["词级置信度 ≥ min_confidence (0.5)"]
+    LR_FILTER --> F2["必须与请求区间有正重叠"]
+    LR_FILTER --> F3["时间偏移矫正 (time_offset)"]
+
+    F1 --> LR_RESULT{"有可接受候选?"}
+    F2 --> LR_RESULT
+    F3 --> LR_RESULT
+    LR_RESULT -->|"是"| LR_RECOVERED["outcome: recovered<br/>RecoveryCandidate[] → GlobalWord"]
+    LR_RESULT -->|"否 (尝试 < 3)"| LR_RETRY["重试 · attempt +1"]
+    LR_RESULT -->|"否 (尝试 = 3)"| LR_FAIL["outcome: max_attempts_exceeded<br/>或 asr_error"]
+
+    LR_RETRY --> LR_ASR
+    LR_RECOVERED --> LR_OUT["RecoveryCandidate.to_global_word()<br/>→ 注入主 GlobalTranscript"]
+    LR_FAIL --> LR_OUT2["记录到 diagnostics<br/>不阻塞主流程"]
+    LR_SKIP --> LR_OUT2
+
+    style LR_TRIGGER fill:#1a2a3a,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style T1 fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style T2 fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style T3 fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style LR_REQ fill:#2a102a,stroke:#a371f7,stroke-width:2px,color:#d4bfff
+    style LR_ENGINE fill:#2a102a,stroke:#a371f7,stroke-width:3px,color:#d4bfff
+    style LR_LOOP fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style LR_PREP fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style LR_MIN fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style LR_SKIP fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style LR_ASR fill:#2a102a,stroke:#a371f7,stroke-width:2px,color:#d4bfff
+    style LR_FILTER fill:#2a102a,stroke:#a371f7,color:#d4bfff
+    style F1 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style F2 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style F3 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style LR_RESULT fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style LR_RECOVERED fill:#152515,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style LR_RETRY fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style LR_FAIL fill:#201515,stroke:#f85149,color:#c9d1d9
+    style LR_OUT fill:#152515,stroke:#3fb950,stroke-width:3px,color:#c9d1d9
+    style LR_OUT2 fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+  </div>
+  <div class="detail-list" style="margin-top:12px; border-left: 3px solid #a371f7; padding-left: 16px;">
+    <strong style="color:#a371f7;">关键契约:</strong>
+    <ul>
+      <li><strong>限次尝试</strong> — 每个区间最多 3 次再识别尝试，防止无限重试</li>
+      <li><strong>候选过滤</strong> — 候选词必须 (1) 置信度 ≥ 0.5 (2) 与请求区间有正重叠 (epsilon=0.01s) (3) 时间偏移已矫正</li>
+      <li><strong>备用引擎</strong> — 主引擎无结果时自动尝试 fallback_asr（例如 FunASR 失败时用 Faster-Whisper）</li>
+      <li><strong>不阻塞</strong> — 恢复失败时返回 outcome=asr_error 或 max_attempts_exceeded，但不会中断整个管道</li>
+      <li><strong>溯源标记</strong> — 恢复词标记 source="local_recovery"，方便下游审计</li>
+    </ul>
   </div>
 </div>
 
@@ -530,7 +844,7 @@ flowchart LR
 <!-- ============================================================ -->
 <h2 id="physical">🧱 🆕 阶段 ⑨ — 物理优先中间层 (Phase 0-3)</h2>
 <div class="mermaid-wrap">
-  <div class="caption" style="color:#ffa500;">physical/ 模块 — 2026-07-28 新增 · 15 个模块 (~4187 行)</div>
+  <div class="caption" style="color:#ffa500;">physical/ 模块 — 2026-07-28 新增 · 15 个模块 (~4187 行) · 🆕 集成 LocalRecovery 尾部修复</div>
   <div class="mermaid">
 flowchart TD
     CHUNKS["MacroChunk[] + TranscriptionSegment[]"]
@@ -542,15 +856,24 @@ flowchart TD
 
     EVID --> TIMELINE["④ PhysicalTimeline<br/>承载所有物理证据<br/>SpeechEvidenceSpan[]"]
 
-    TIMELINE --> IR["⑤ GlobalTranscript<br/>全局 IR 表达<br/>GlobalWord[] · GlobalTranscriptSegment[]"]
+    TIMELINE --> TAIL["🆕 _repair_tail_evidence()<br/>尾部证据延长<br/>ffmpeg 骨架过早结束时<br/>从 Silero/粗检测延长覆盖"]
+    TAIL --> IR["⑤ GlobalTranscript<br/>全局 IR 表达<br/>GlobalWord[] · GlobalTranscriptSegment[]"]
 
     IR --> ALLOC["⑥ WordAllocation<br/>allocate_words()<br/>每个词分配到物理跨度<br/>→ PhysicalSpan[]"]
 
     ALLOC --> REPAIR["⑦ repair_late_words()<br/>修复迟到词<br/>→ WordAllocation[]"]
 
-    REPAIR --> COVERAGE["⑧ audit_physical_coverage()<br/>物理覆盖审计<br/>遮盖空白 · 过分配 · 欠分配<br/>→ PhysicalCoverageReport"]
+    REPAIR --> COVERAGE["⑧ audit_physical_coverage()<br/>物理覆盖审计<br/>遮盖空白 · 过分配 · 欠分配<br/>→ PhysicalCoverageReport<br/>🆕 未覆盖区间 → recovery_ranges"]
 
-    COVERAGE --> BINS["⑨ build_physical_subtitle_bins()<br/>物理字幕分箱<br/>assign_word_to_bin()<br/>→ PhysicalSubtitleBin[]"]
+    COVERAGE --> RECOVER{"🆕 覆盖不完整?"}
+    RECOVER -->|"是"| LOC_REC["🆕 LocalRecovery<br/>逐 recovery_range 再转录<br/>时间钳制 · 二次审计"]
+    RECOVER -->|"否"| BINS
+
+    LOC_REC --> LOC_STATUS{"恢复成功?"}
+    LOC_STATUS -->|"是"| BINS
+    LOC_STATUS -->|"否"| DEGRADED["标记 degraded<br/>仍继续处理"]
+
+    BINS["⑨ build_physical_subtitle_bins()<br/>物理字幕分箱<br/>assign_word_to_bin()<br/>→ PhysicalSubtitleBin[]"]
 
     BINS --> EVENTS["⑩ build_events()<br/>GlobalSubtitleEvent[]<br/>→ 送入后处理管道"]
 
@@ -559,10 +882,15 @@ flowchart TD
     style CTX fill:#2a1a10,stroke:#ffa500,color:#ffccaa
     style EVID fill:#2a1a10,stroke:#ffa500,stroke-width:2px,color:#ffccaa
     style TIMELINE fill:#2a1a10,stroke:#ffa500,stroke-width:2px,color:#ffccaa
+    style TAIL fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
     style IR fill:#201a20,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
     style ALLOC fill:#2a1a10,stroke:#ffa500,stroke-width:2px,color:#ffccaa
     style REPAIR fill:#2a1a10,stroke:#ffa500,color:#ffccaa
     style COVERAGE fill:#2a1a10,stroke:#ffa500,stroke-width:2px,color:#ffccaa
+    style RECOVER fill:#2a102a,stroke:#a371f7,stroke-width:2px,color:#d4bfff
+    style LOC_REC fill:#2a102a,stroke:#a371f7,stroke-width:3px,color:#d4bfff
+    style LOC_STATUS fill:#1a2025,stroke:#a371f7,stroke-width:2px,color:#c9d1d9
+    style DEGRADED fill:#25201a,stroke:#d2991d,stroke-width:2px,color:#c9d1d9
     style BINS fill:#2a1a10,stroke:#ffa500,stroke-width:2px,color:#ffccaa
     style EVENTS fill:#152515,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
   </div>
@@ -574,6 +902,8 @@ flowchart TD
       <li><strong>证据适配</strong> — VAD segments、ffmpeg 骨架、diarization 结果均适配到统一 IR</li>
       <li><strong>词级分配</strong> — 将 ASR 的每个词分配到物理跨度，修复跨 chunk 边界的迟到词</li>
       <li><strong>覆盖审计</strong> — 检测遮盖空白 (gap)、过分配 (overlap)、欠分配 (underfill)</li>
+      <li><strong>🆕 尾部证据延长</strong> — <code>_repair_tail_evidence()</code> 当 ffmpeg 骨架过早结束时从 Silero/粗检测延长覆盖</li>
+      <li><strong>🆕 局部恢复集成</strong> — 物理覆盖审计产生 recovery_ranges → LocalRecovery → 逐区间再转录 → 二次审计</li>
       <li><strong>物理分箱</strong> — 按物理语音间隔自动分箱，替代启发式事件操作</li>
       <li><strong>Shadow 支持</strong> — ShadowBuilder 为对比评估生成影子输出</li>
       <li><strong>IR 缓存</strong> — IR 可持久化到 diskcache，避免重建物理时间线</li>
@@ -1029,7 +1359,7 @@ flowchart LR
 <!-- ============================================================ -->
 <h2 id="module-map">📂 模块架构总图</h2>
 <div class="mermaid-wrap">
-  <div class="caption">vocal_subtitle/ 目录结构 & 数据流向 — 🆕 标记 2026-07-29 变更</div>
+  <div class="caption">vocal_subtitle/ 目录结构 & 数据流向 — 🆕 标记 2026-07-30/31 变更</div>
   <div class="mermaid">
 flowchart TB
     subgraph ENTRY["🔌 入口"]
@@ -1039,29 +1369,29 @@ flowchart TB
         EDIT2["🆕 webui/subtitle_editing.py"]
     end
 
-    subgraph CORE["⚙️ 核心管道"]
-        PL["pipeline.py (4628行)<br/>Pipeline.run()"]
-        CFG2["config.py<br/>PipelineConfig"]
+    subgraph CORE["⚙️ 核心管道 (5075 行 · 单体编排)"]
+        PL["pipeline.py (5075 行)<br/>Pipeline.run() · 全局编排<br/>路由决策 · 质量门控 · 恢复"]
+        CFG2["config.py<br/>24 dataclass 配置类<br/>ASRAutoRoutingConfig<br/>GlobalASRConfig"]
         CTX2["pipeline_context.py"]
     end
 
     subgraph STAGES["🔧 处理阶段"]
-        SEP2["separation/ 人声分离"]
-        VAD2["vad/ 语音检测"]
-        MERGE2["merging/ 片段合并"]
-        ASR2["asr/ 语音识别 ⭐<br/>🆕 funasr_manager.py"]
-        BOUND2["asr/boundary_* 边界精修"]
-        MAP2["mapping/ 时间轴·导出"]
-        DIAR2["diarization/ 说话人分离<br/>(10 modules, ~4237 行)"]
-        PHYS2["🆕 physical/ 物理优先层<br/>(15 modules, ~4187 行)<br/>CoordinateMapper · Timeline<br/>WordAllocation · Coverage · Bins"]
+        SEP2["separation/ 人声分离<br/>(3 引擎 · 4 文件)"]
+        VAD2["vad/ 语音检测<br/>(4 引擎 + 融合 · 6 文件)"]
+        MERGE2["merging/ 片段合并<br/>(4 文件)"]
+        ASR2["asr/ 语音识别 ⭐<br/>(15 文件 · ~5,690 行)<br/>🆕 router.py · quality_gate.py<br/>🆕 global_transcriber.py<br/>🆕 local_recovery.py<br/>🆕 whisperx_engine.py<br/>boundary_refiner/reasr/arbitration"]
+        BOUND2["🆕 asr/boundary_* 边界精修<br/>refiner · confidence · reasr<br/>arbitration (LLM 语义仲裁)"]
+        MAP2["mapping/ 时间轴·导出<br/>(14 文件)"]
+        DIAR2["diarization/ 说话人分离<br/>(12 文件, ~4,237 行)"]
+        PHYS2["🆕 physical/ 物理优先层<br/>(15 文件, ~4,187 行)<br/>🆕 集成 LocalRecovery 恢复"]
     end
 
     subgraph EXTRA["🔗 附属系统"]
-        FB2["feedback/ 反馈学习"]
-        UTILS2["utils/ 缓存·会话·历史"]
+        FB2["feedback/ 反馈学习<br/>(11 文件)"]
+        UTILS2["utils/ 缓存·会话·历史<br/>(10 文件)"]
         STREAM2["streaming.py"]
         MACRO2["macro_chunker.py"]
-        ACOUSTIC2["🆕 acoustic_validator.py<br/>(~1037 行)"]
+        ACOUSTIC2["🆕 acoustic_validator.py<br/>(~1,037 行)"]
     end
 
     ENTRY --> CORE
@@ -1109,17 +1439,21 @@ flowchart TB
   <span><span class="dot" style="background:var(--yellow)"></span> 可选模块</span>
   <span><span class="dot" style="background:var(--teal)"></span> 反馈学习</span>
   <span><span class="dot" style="background:#ffa500"></span> 🆕 物理层</span>
-  <span><span class="dot" style="background:#ff6b6b"></span> 🆕 2026-07-29 变更</span>
+  <span><span class="dot" style="background:#ff6b6b"></span> 🆕 声学门控</span>
+  <span><span class="dot" style="background:#a371f7"></span> 🆕 ASR 路由/质量门控</span>
 </div>
 
 <p style="color:var(--muted);font-size:11px;text-align:center;margin-bottom:10px;">
-  基于 vocal_subtitle/pipeline.py · 11 个阶段 · 3 种运行模式 · 4 种 ASR 引擎<br/>
+  基于 vocal_subtitle/pipeline.py (5075 行) · 11 个阶段 · 3 种运行模式 · 4 种 ASR 引擎<br/>
   所有流程图使用 Mermaid.js 渲染 · 深色主题
 </p>
 <p style="color:#ffa500;font-size:11px;text-align:center;margin-bottom:30px;">
-  🆕 2026-07-29 更新内容:<br/>
-  Physical-first Architecture (Phase 0-3) — CoordinateMapper · PhysicalTimeline · WordAllocation · CoverageAudit · SubtitleBins<br/>
-  Direction-aware Acoustic Boundary Gating (Plan 7 重构)  ·  WhisperX 引擎  ·  FunASR 自动准备  ·  字幕批量编辑
+  🆕 2026-07-30/31 更新内容:<br/>
+  ASR 自动语言路由 (ASRRouter · 语言探测窗 · FunASR/Faster-Whisper 决策)<br/>
+  全局 ASR 上下文窗口 (GlobalTranscriber · 确定性去重 · 强制音素对齐 · GlobalTranscript)<br/>
+  物理证据质量门控 (evaluate_asr_quality · 7 项指标 · pass/warning/failed 三级判定)<br/>
+  局部再识别恢复 (LocalRecoveryEngine · 限次尝试 · 备用引擎 · 尾部证据延长 · _repair_tail_evidence)<br/>
+  多引擎复核 (主引擎 → 备用引擎 · 降级路径 · 质量回退)
 </p>
 
 <script>

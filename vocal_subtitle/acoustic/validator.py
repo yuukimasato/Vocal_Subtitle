@@ -19,7 +19,12 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .merging.llm_merge_engine import _physical_owner_compatible_for_events
+from ..merging.merge_engine import _physical_owner_compatible_for_events
+from .export import export_skeleton_segments
+from . import boundary as boundary_policy
+from .diagnostics import generate_diagnostic_report as build_diagnostic_report
+from . import event_checks
+from . import skeleton as skeleton_queries
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +160,7 @@ class AcousticValidator:
             logger.warning("No audio_path for skeleton extraction")
             return []
 
-        from .vad.ffmpeg_vad import FFmpegSilenceVAD
+        from ..vad.ffmpeg_vad import FFmpegSilenceVAD
 
         cfg = self.config
         silence_intervals = FFmpegSilenceVAD._detect_silence(
@@ -443,65 +448,12 @@ class AcousticValidator:
         events: List,
         speech_skeleton: List[Tuple[float, float]],
     ) -> Dict:
-        """生成物理校验诊断报告"""
-        report = {
-            "total_events": len(events),
-            "start_in_silence": 0,
-            "end_in_silence": 0,
-            "end_truncated": 0,
-            "start_out_of_range": 0,
-            "end_out_of_range": 0,
-            "events_flagged": [],
-        }
-
-        for event in events:
-            # 检查 start
-            is_start_ok = _is_time_in_speech(event.start, speech_skeleton)
-            if not is_start_ok:
-                report["start_in_silence"] += 1
-                _, nearest, _ = _find_directional_boundary(
-                    event.start, speech_skeleton, "start",
-                )
-                if nearest is not None and abs(nearest - event.start) > (
-                    self.config.flag_threshold_ms / 1000.0
-                ):
-                    report["start_out_of_range"] += 1
-
-            # 检查 end
-            is_end_ok = _is_time_in_speech(event.end, speech_skeleton)
-            if not is_end_ok:
-                report["end_in_silence"] += 1
-                # 检查是否切尾
-                if _has_speech_in_range(
-                    event.end, event.end + 0.2, speech_skeleton,
-                ):
-                    report["end_truncated"] += 1
-                    report["events_flagged"].append({
-                        "id": getattr(event, "index", 0),
-                        "issue": "end_truncated",
-                        "current_end": event.end,
-                        "text_preview": (
-                            getattr(event, "text", "")[:50]
-                            if hasattr(event, "text") else ""
-                        ),
-                    })
-
-                _, nearest, _ = _find_directional_boundary(
-                    event.end, speech_skeleton, "end",
-                )
-                if nearest is not None and abs(nearest - event.end) > (
-                    self.config.flag_threshold_ms / 1000.0
-                ):
-                    report["end_out_of_range"] += 1
-
-        # 计算健康度评分
-        total_checks = len(events) * 2
-        issues = report["start_in_silence"] + report["end_in_silence"]
-        report["health_score"] = round(
-            (1 - issues / max(total_checks, 1)) * 100, 1,
+        """生成物理校验诊断报告，保留旧实例方法入口。"""
+        return build_diagnostic_report(
+            events,
+            speech_skeleton,
+            flag_threshold_ms=self.config.flag_threshold_ms,
         )
-
-        return report
 
 
 # ------------------------------------------------------------------
@@ -675,7 +627,7 @@ def _rms_energy_check(
     Returns:
         True 如果检测到语音能量
     """
-    from .utils.audio_utils import AudioUtils
+    from ..utils.audio_utils import AudioUtils
 
     silence_rms = AudioUtils.estimate_silence_rms(audio, sample_rate)
     half_window = window_ms / 2000.0  # 转秒再折半
@@ -840,198 +792,17 @@ def classify_acoustic_events(
     return classified
 
 
-# ------------------------------------------------------------------
-# 骨架段导出（供人工验证）
-# ------------------------------------------------------------------
-
-
-def export_skeleton_segments(
-    audio_path: Path,
-    output_dir: Path,
-    noise_db: float = -40.0,
-    min_silence_duration: float = 0.1,
-    min_speech_duration: float = 0.05,
-    include_silence: bool = True,
-    include_mixed: bool = False,
-) -> Dict:
-    """将声学骨架的语音段和静音段导出为独立音频文件。
-
-    用途：人工验证 ffmpeg silencedetect 的静音/人声划分是否准确。
-
-    对每个骨架段（语音或静音），提取音频并保存为 WAV 文件，
-    同时生成一个 metadata.json 描述所有段的时间轴和类型。
-
-    Args:
-        audio_path: 原始（人声）音频路径
-        output_dir: 导出目录（将创建骨架段子目录）
-        noise_db: 静音检测阈值 (dB)
-        min_silence_duration: 最小静音段时长 (s)
-        min_speech_duration: 最小语音段时长 (s)
-        include_silence: 是否同时导出静音段（用于对比）
-        include_mixed: 是否导出混合音频（每段前后扩展 200ms 上下文）
-
-    Returns:
-        {
-            "output_dir": str,
-            "total_segments": int,
-            "speech_segments": int,
-            "silence_segments": int,
-            "metadata_path": str,
-        }
-    """
-    import json
-    import wave
-
-    from .utils.audio_utils import AudioUtils
-    from .vad.ffmpeg_vad import FFmpegSilenceVAD
-
-    output_dir = Path(output_dir)
-    segments_dir = output_dir / "skeleton_segments"
-    segments_dir.mkdir(parents=True, exist_ok=True)
-
-    # Step 1: 获取声学骨架
-    silence_intervals = FFmpegSilenceVAD._detect_silence(
-        audio_path, noise_db=noise_db, min_silence_duration=min_silence_duration,
-    )
-    total_duration = FFmpegSilenceVAD._get_duration(audio_path)
-    speech_skeleton = FFmpegSilenceVAD._invert_intervals(
-        silence_intervals, total_duration, min_speech_duration=min_speech_duration,
-    )
-
-    # Step 2: 加载音频
-    audio, sr = AudioUtils.load_audio(audio_path)
-
-    # Step 3: 构建完整的段列表（交替：静音/语音）
-    all_segments = []  # [(start, end, type), ...]
-
-    # 开头可能的静音
-    cursor = 0.0
-    for s_start, s_end in silence_intervals:
-        # 静音前的语音
-        if cursor < s_start:
-            speech_dur = s_start - cursor
-            if speech_dur >= min_speech_duration:
-                all_segments.append((cursor, s_start, "speech"))
-            elif speech_dur > 0:
-                all_segments.append((cursor, s_start, "speech_short"))
-        # 静音段
-        if include_silence and (s_end - s_start) >= min_silence_duration:
-            all_segments.append((s_start, s_end, "silence"))
-        elif not include_silence:
-            all_segments.append((s_start, s_end, "silence"))
-        cursor = s_end
-
-    # 最后一段语音
-    if cursor < total_duration:
-        remaining = total_duration - cursor
-        if remaining >= min_speech_duration:
-            all_segments.append((cursor, total_duration, "speech"))
-        elif remaining > 0:
-            all_segments.append((cursor, total_duration, "speech_short"))
-
-    # 如果所有段都是语音（无静音检测到），使用骨架
-    if not all_segments and speech_skeleton:
-        for s_start, s_end in speech_skeleton:
-            all_segments.append((s_start, s_end, "speech"))
-
-    # Step 4: 导出每段
-    metadata_segments = []
-    speech_count = 0
-    silence_count = 0
-
-    for idx, (seg_start, seg_end, seg_type) in enumerate(all_segments):
-        start_sample = int(seg_start * sr)
-        end_sample = int(seg_end * sr)
-        start_sample = max(0, start_sample)
-        end_sample = min(len(audio), end_sample)
-
-        if end_sample <= start_sample:
-            continue
-
-        seg_audio = audio[start_sample:end_sample].copy()
-
-        # 文件名
-        type_prefix = {"speech": "S", "speech_short": "SS", "silence": "M"}.get(seg_type, "X")
-        time_label = f"{seg_start:.2f}s-{seg_end:.2f}s"
-        filename = f"{idx:04d}_{type_prefix}_{time_label}.wav"
-        filepath = segments_dir / filename
-
-        AudioUtils.save_audio(seg_audio, filepath, sr)
-
-        meta = {
-            "index": idx,
-            "start": round(seg_start, 3),
-            "end": round(seg_end, 3),
-            "duration": round(seg_end - seg_start, 3),
-            "type": seg_type,
-            "filename": filename,
-        }
-        metadata_segments.append(meta)
-
-        if "speech" in seg_type:
-            speech_count += 1
-        else:
-            silence_count += 1
-
-    # Step 5: 可选 — 导出带上下文的混合音频（每语音段前后 200ms）
-    if include_mixed:
-        mixed_dir = output_dir / "skeleton_segments_mixed"
-        mixed_dir.mkdir(parents=True, exist_ok=True)
-        context_ms = 200
-
-        for meta in metadata_segments:
-            if "speech" not in meta["type"]:
-                continue
-
-            seg_start = meta["start"]
-            seg_end = meta["end"]
-
-            ctx_start = max(0.0, seg_start - context_ms / 1000.0)
-            ctx_end = min(total_duration, seg_end + context_ms / 1000.0)
-
-            start_sample = int(ctx_start * sr)
-            end_sample = int(ctx_end * sr)
-            seg_audio = audio[start_sample:end_sample].copy()
-
-            filename = f"{meta['index']:04d}_CTX_{ctx_start:.2f}s-{ctx_end:.2f}s.wav"
-            AudioUtils.save_audio(seg_audio, mixed_dir / filename, sr)
-
-    # Step 6: 写 metadata.json
-    metadata = {
-        "source_audio": str(audio_path),
-        "total_duration": round(total_duration, 3),
-        "noise_db": noise_db,
-        "min_silence_duration": min_silence_duration,
-        "min_speech_duration": min_speech_duration,
-        "total_segments": len(metadata_segments),
-        "speech_segments": speech_count,
-        "silence_segments": silence_count,
-        "speech_skeleton": [
-            {"start": round(s, 3), "end": round(e, 3)}
-            for s, e in speech_skeleton
-        ],
-        "silence_intervals": [
-            {"start": round(s, 3), "end": round(e, 3)}
-            for s, e in silence_intervals
-        ],
-        "segments": metadata_segments,
-    }
-
-    metadata_path = segments_dir / "metadata.json"
-    with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
-
-    logger.info(
-        "Exported %d skeleton segments → %s (speech=%d, silence=%d)",
-        len(metadata_segments), segments_dir, speech_count, silence_count,
-    )
-
-    return {
-        "output_dir": str(segments_dir),
-        "total_segments": len(metadata_segments),
-        "speech_segments": speech_count,
-        "silence_segments": silence_count,
-        "metadata_path": str(metadata_path),
-        "skeleton": speech_skeleton,
-        "silence_intervals": silence_intervals,
-    }
+# Route all helper consumers through the isolated policies.  The private names
+# remain here as compatibility exports for historical callers and tests.
+_find_boundary_in_skeleton = boundary_policy.find_boundary_in_skeleton
+_find_directional_boundary = boundary_policy.find_directional_boundary
+_boundary_confidence = boundary_policy.boundary_confidence
+_preserve_reliable_asr_boundary = boundary_policy.preserve_reliable_asr_boundary
+_record_boundary_diagnostic = boundary_policy.record_boundary_diagnostic
+_is_time_in_speech = skeleton_queries.is_time_in_speech
+_has_speech_in_range = skeleton_queries.has_speech_in_range
+_rms_energy_check = skeleton_queries.rms_energy_check
+_silence_confirmed = skeleton_queries.silence_confirmed
+_compute_vad_overlap = skeleton_queries.compute_vad_overlap
+_classify_energy_type = event_checks.classify_energy_type
+classify_acoustic_events = event_checks.classify_acoustic_events

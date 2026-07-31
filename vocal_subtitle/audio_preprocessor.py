@@ -95,7 +95,9 @@ class AudioPreprocessor:
             "denoise_applied": False,
             "engine": cfg.engine,
             "burst_events_detected": 0,
-            "input_rms": float(np.sqrt(np.mean(audio ** 2))),
+            "input_rms": (
+                float(np.sqrt(np.mean(audio ** 2))) if audio.size else 0.0
+            ),
         }
 
         if not cfg.enabled:

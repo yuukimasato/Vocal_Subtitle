@@ -1,6 +1,8 @@
 """FastAPI 应用工厂"""
 
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +32,13 @@ def _mark_stale_running_tasks():
         pass
 
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Run startup cleanup without FastAPI's deprecated event API."""
+    _mark_stale_running_tasks()
+    yield
+
+
 def create_app() -> FastAPI:
     """创建并配置 FastAPI 应用
 
@@ -40,6 +49,7 @@ def create_app() -> FastAPI:
         title="Vocal Subtitle",
         description="人声分离 + 字幕生成全链路工具 — Web GUI",
         version="0.1.0",
+        lifespan=_lifespan,
     )
 
     # CORS 中间件（允许本地开发）
@@ -65,10 +75,5 @@ def create_app() -> FastAPI:
         StaticFiles(directory=str(static_dir), html=True),
         name="static",
     )
-
-    # 启动事件：清理因服务器重启而残留的 running 状态任务
-    @app.on_event("startup")
-    async def _startup_cleanup():
-        _mark_stale_running_tasks()
 
     return app
