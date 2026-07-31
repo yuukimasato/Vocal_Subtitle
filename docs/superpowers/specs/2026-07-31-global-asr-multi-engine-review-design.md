@@ -41,12 +41,12 @@
 VAD/FFmpeg/RMS 声学范围、边界和有效能量证据
 SED           sigh/breathing/cough/non-speech 等辅助标签
 Qwen3-ASR     高风险窗口的异质文本复核
-ForcedAligner 通过文本与音频生成次级词级时间证据
+Qwen3-ForcedAligner-0.6B 通过文本与音频生成次级词级时间证据
 LLM           训练语句和上下文语义风险审查
 物理时间线    最终时间边界和长静音约束
 ```
 
-faster-whisper 与 whisper.cpp 都属于 Whisper 体系，可能共享类似的训练语料幻觉。Qwen3-ASR 的作用是增加模型异质性，但必须先通过目标语言和呻吟样例验证其识别质量。Qwen3-ASR 即使输出词级时间，也不能单独覆盖物理时间线。
+faster-whisper 与 whisper.cpp 都属于 Whisper 体系，可能共享类似的训练语料幻觉。Qwen3-ASR 的作用是增加模型异质性，但必须先通过目标语言和呻吟样例验证其识别质量。Qwen3-ASR 的词级时间能力来自配套的 `Qwen3-ForcedAligner-0.6B`，因此该能力属于独立对齐模型，不应等同于 Qwen3-ASR 原生识别时间。即使 Qwen3-ASR 或其对齐模型输出词级时间，也不能单独覆盖物理时间线。
 
 ## 4. 默认处理流程
 
@@ -161,20 +161,52 @@ Qwen3-ASR 只处理高风险窗口，不处理完整音频。
 
 多模型不采用简单多数投票。应综合比较文本、音素/字符相似度、词级证据、声学范围、置信度和上下文完整性。
 
-## 8. ForcedAligner 对齐
+## 8. Qwen3-ForcedAligner 对齐
 
-如果 Qwen3-ASR 只输出纯文本，可以使用支持目标语言的 MFA 或其他 ForcedAligner 生成次级词级时间。
+如果 Qwen3-ASR 只输出纯文本，优先使用支持目标语言的 `Qwen3-ForcedAligner-0.6B` 生成次级词级时间；目标语言不受支持或模型不可用时，再回退到 MFA 或其他 ForcedAligner。
 
 处理约束：
 
 1. Qwen 文本必须先通过基本语义和声学检查；
 2. 未通过检查的训练短语不能直接强制对齐；
-3. 强制对齐结果标记为 `qwen_forced_alignment`；
+3. 强制对齐结果标记为 `qwen_forced_alignment`，不能伪装成原生 ASR 词级时间；
 4. 原生词级时间的优先级高于强制对齐时间；
-5. 强制对齐只能参与 `split` 和边界候选，不能单独决定 `keep`；
-6. 对齐失败时保留文本冲突诊断，不伪造时间戳。
+5. 强制对齐只能参与 `split`、边界候选和时间冲突诊断，不能单独决定 `keep`；
+6. 强制对齐结果必须通过物理语音范围检查；不能把训练短语强行对齐到呻吟或静音；
+7. 对齐失败时保留文本冲突诊断，不伪造时间戳。
 
-强制对齐可以改善时间定位，但不能证明文本一定真实。
+Qwen3-ForcedAligner 的时间精度指标只描述对齐模型在有效参考文本上的定位能力，不能证明参考文本一定真实。它是时间冗余证据，不是新的主时间轴。
+
+### 8.1 时间轴冗余策略
+
+保留现有架构作为主时间轴，同时为高风险窗口增加独立的时间证据。证据类型必须显式区分：
+
+```text
+native_word_timestamp       主 ASR 原生词级时间
+qwen_forced_alignment       Qwen 文本经 ForcedAligner 得到的时间
+physical_acoustic_boundary  VAD/FFmpeg/RMS/SED 物理范围
+segment_boundary            原始分段或字幕事件边界
+```
+
+建议的默认优先级是：
+
+```text
+主 ASR 原生词级时间
+  > Qwen3-ForcedAligner 次级时间
+  > 其他引擎的分段级时间
+  > VAD/FFmpeg 物理边界
+```
+
+该优先级不是直接覆盖关系，而是用于构造一致性判断：
+
+- 只对高风险窗口调用 Qwen3-ForcedAligner；
+- 主 ASR 与 Qwen 时间差在 `50-100ms` 容差内时，视为相互印证；
+- 差异超过容差时，重新检查局部音频、文本分词和相邻词；
+- 仍无法解释时进入 `unresolved`，不能强行选择一个时间轴；
+- 最终事件必须同时满足词级证据和物理语音范围约束；
+- Qwen 对齐时间可以帮助拆分多句，但不能单独生成字幕事件。
+
+因此，增加的是“时间证据冗余”，不是第二套独立字幕时间轴。这样既能利用 Qwen 对齐能力修复上下文重识别结果，又不会让错误文本通过强制对齐污染最终输出。
 
 ## 9. 声学边界仲裁
 
@@ -324,7 +356,7 @@ Qwen3-ASR、ForcedAligner、LLM 和黑名单都不能单独触发 `drop`。
 
 ### 阶段五：对齐、SED 与 LLM
 
-在验证 Qwen 文本质量后接入 ForcedAligner；按需增加 SED 和结构化 LLM 语义审查。
+在验证 Qwen 文本质量后接入 `Qwen3-ForcedAligner-0.6B` 作为高风险窗口的次级时间证据；目标语言不支持时回退到其他 ForcedAligner；按需增加 SED 和结构化 LLM 语义审查。
 
 ### 阶段六：正式启用
 
@@ -336,8 +368,9 @@ Qwen3-ASR、ForcedAligner、LLM 和黑名单都不能单独触发 `drop`。
 - 正常字幕继续沿用现有分段和声学边界逻辑。
 - 高风险窗口可以通过主引擎上下文 Re-ASR 修复。
 - Qwen3-ASR 只在高风险窗口调用。
-- Qwen 纯文本可以在通过文本检查后使用 ForcedAligner 补充时间证据。
-- ForcedAligner 不会把未经验证的幻觉文本提升为可靠字幕。
+- Qwen 纯文本可以在通过文本检查后使用 `Qwen3-ForcedAligner-0.6B` 补充时间证据。
+- Qwen 对齐时间与主 ASR 时间差在容差内时可以相互印证，超出容差时不会强行覆盖。
+- Qwen ForcedAligner 不会把未经验证的幻觉文本提升为可靠字幕。
 - LLM 只能输出结构化风险判断，不能单独删除或生成时间。
 - `ご視聴ありがとうございました` 等无声训练短语不会进入最终字幕。
 - `はぁ`、`え?`、`ください` 等真实短片段不会因 CPS 单项规则被批量删除。
