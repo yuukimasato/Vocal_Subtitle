@@ -90,6 +90,9 @@ webrtcvad = [
 faster-whisper = [
     "faster-whisper>=1.0",
 ]
+funasr = [
+    "funasr>=1.0",
+]
 # Web GUI 图形界面
 webui = [
     "fastapi>=0.110",
@@ -113,7 +116,7 @@ speaker-embedding = [
 ]
 # 全量安装 (含所有可选依赖)
 all = [
-    "vocal-subtitle[gpu,silero-vad,llm,local-nlp,uvr,spleeter,openunmix,webrtcvad,faster-whisper,webui,diarization,speaker-embedding]",
+    "vocal-subtitle[gpu,silero-vad,llm,local-nlp,uvr,spleeter,openunmix,webrtcvad,faster-whisper,funasr,webui,diarization,speaker-embedding]",
 ]
 
 [project.scripts]

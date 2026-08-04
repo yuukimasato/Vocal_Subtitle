@@ -8,6 +8,7 @@
 #
 # 可选扩展:
 #   pip install -e ".[faster-whisper]"       # ASR 语音识别 (faster-whisper)
+#   pip install -e ".[funasr]"               # FunASR 中文语音识别
 #   pip install -e ".[silero-vad]"           # Silero VAD (需 torch ~2GB)
 #   pip install -e ".[llm]"                  # LLM 字幕优化
 #   pip install -e ".[local-nlp]"            # 本地 NLP 语义合并 (CPU, ~120MB)

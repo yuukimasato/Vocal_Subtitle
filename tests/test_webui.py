@@ -184,6 +184,47 @@ class TestStaticFiles:
         assert "'speaker_embedding_hf_token'," not in resp.text
         assert "'speaker_embedding_hf_token': 'speaker_embedding_token'" not in resp.text
 
+    def test_credential_fields_do_not_use_password_manager_semantics(self, client):
+        html = client.get("/").text
+
+        assert 'id="llm-api-key" name="llm-api-key" type="text" class="credential-mask"' in html
+        assert 'data-key="speaker_embedding_hf_token" name="speaker-embedding-token" type="text" class="credential-mask"' in html
+        assert 'autocomplete="off"' in html
+        assert 'data-form-type="other"' in html
+        assert 'type="password"' not in html
+
+    def test_funasr_ui_exposes_local_first_prepare_flow(self, client):
+        html = client.get("/").text
+
+        assert "/api/asr/funasr/status" in html
+        assert "/api/asr/funasr/prepare" in html
+        assert "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch" in html
+        assert "syncASREngineOptions" in html
+        assert "funasrPreparing" in html
+
+    def test_funasr_prepare_endpoints_use_local_first_manager(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "vocal_subtitle.webui.api.funasr_status",
+            lambda model: {
+                "engine": "funasr",
+                "model": "normalized-model",
+                "package_installed": True,
+                "model_cached": True,
+                "ready": True,
+            },
+        )
+        status = client.get("/api/asr/funasr/status?model=large-v3")
+        assert status.status_code == 200
+        assert status.json()["ready"] is True
+
+        monkeypatch.setattr(
+            "vocal_subtitle.webui.api.ensure_funasr_ready",
+            lambda model: {"engine": "funasr", "model": model, "ready": True},
+        )
+        prepared = client.post("/api/asr/funasr/prepare", json={"model": "large-v3"})
+        assert prepared.status_code == 200
+        assert prepared.json()["ready"] is True
+
     def test_api_docs_available(self, client):
         """GET /docs 返回 Swagger UI"""
         resp = client.get("/docs")

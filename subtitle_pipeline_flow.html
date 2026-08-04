@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocal Subtitle — 字幕识别流程图</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --orange: #d2991d;
+    --purple: #bc8cff;
+    --red: #f85149;
+    --cyan: #39d2c0;
+    --pink: #f778ba;
+    --teal: #7ee787;
+    --yellow: #e3b341;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 24px;
+  }
+  h1 { font-size: 24px; margin-bottom: 8px; }
+  h2 { font-size: 20px; margin: 28px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 18px 0 10px; color: var(--accent); }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+  .mermaid-wrap {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 16px;
+    margin-bottom: 20px;
+    overflow-x: auto;
+  }
+  .mermaid-wrap .caption {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 12px;
+    padding-left: 4px;
+  }
+
+  .detail-list { font-size: 12px; color: var(--muted); }
+  .detail-list li { margin-bottom: 4px; }
+  .detail-list strong { color: var(--text); }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;
+    font-size: 11px; color: var(--muted);
+  }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+  .toc {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 24px;
+  }
+  .toc a {
+    color: var(--accent); font-size: 12px; text-decoration: none;
+    padding: 3px 10px; border: 1px solid var(--border); border-radius: 12px;
+  }
+  .toc a:hover { background: #1c3550; }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>🎤 Vocal Subtitle — 字幕识别完整流程</h1>
+<p class="subtitle">从音频输入到字幕输出的端到端流水线 · 基于 <code>vocal_subtitle/pipeline.py</code> (4403行) · 共 10 个阶段<br/>
+<strong>🆕 2026-07-28 更新:</strong> 方向感知声学校验门控 | 字幕批量编辑 | FunASR WebUI 自动准备</p>
+
+<div class="legend">
+  <span><span class="dot" style="background:var(--cyan)"></span> 输入/预处理</span>
+  <span><span class="dot" style="background:var(--green)"></span> VAD 语音检测</span>
+  <span><span class="dot" style="background:var(--purple)"></span> ASR 语音识别</span>
+  <span><span class="dot" style="background:var(--orange)"></span> 边界精修</span>
+  <span><span class="dot" style="background:var(--pink)"></span> 后处理/融合</span>
+  <span><span class="dot" style="background:var(--red)"></span> 导出</span>
+  <span><span class="dot" style="background:var(--yellow)"></span> 可选模块</span>
+  <span><span class="dot" style="background:var(--teal)"></span> 反馈学习</span>
+  <span><span class="dot" style="background:#ff6b6b"></span> 🆕 本次更新</span>
+</div>
+
+<div class="toc">
+  <a href="#overview">总览</a>
+  <a href="#entry">入口</a>
+  <a href="#separation">人声分离</a>
+  <a href="#preprocess">预处理</a>
+  <a href="#vad">VAD</a>
+  <a href="#asr">ASR</a>
+  <a href="#boundary">边界精修</a>
+  <a href="#acoustic-gating">🆕 声学门控</a>
+  <a href="#postprocess">后处理</a>
+  <a href="#export">导出</a>
+  <a href="#subtitle-editing">🆕 字幕编辑</a>
+  <a href="#branches">三模式分支</a>
+  <a href="#feedback">反馈学习</a>
+  <a href="#cache">缓存</a>
+  <a href="#module-map">模块总图</a>
+</div>
+
+<!-- ============================================================ -->
+<!-- 1. OVERVIEW -->
+<!-- ============================================================ -->
+<h2 id="overview">🗺️ 总体流程图</h2>
+<div class="mermaid-wrap">
+  <div class="caption">完整管道概览 — 从音频输入到字幕输出</div>
+  <div class="mermaid">
+flowchart TD
+    A["📥 音频输入<br/>WAV / MP3 / M4A / FLAC"]
+    A --> B{"🔀 运行模式"}
+
+    B -->|"标准离线 (默认)"| C["⚙️ 配置加载<br/>ConfigLoader ← YAML scenarios"]
+    B -->|"流式"| S1["🌊 流式模式<br/>Sliding Window 2s/0.5s overlap"]
+    B -->|"骨架分段"| K1["🦴 骨架分段模式<br/>ffmpeg acoustic skeleton"]
+
+    C --> D["🎵 ① 人声分离 (可选)<br/>UVR-BS-RoFormer / Spleeter / Open-Unmix"]
+    D --> E["🔇 ② 音频预处理<br/>降噪 + 噪声画像 + 响度归一化"]
+    E --> F["✂️ ③ 宏观分块<br/>MacroChunker → PipelineContext"]
+    F --> G["🗣️ ④ VAD 语音活动检测<br/>Silero VAD + ffmpeg silencedetect"]
+    G --> H["🧩 ⑤ 语音片段合并<br/>MergeStrategy.merge()"]
+    H --> I["📝 ⑥ ASR 语音识别 ⭐<br/>Faster-Whisper / FunASR / Whisper.cpp"]
+    I --> J["🔍 ⑦ 边界精修 + 语义仲裁<br/>BoundaryRefiner + ReASR + LLM Arbitration"]
+    J --> K["🗺️ ⑧ 时间轴映射<br/>TimeMapper.map() → SubtitleEvent[]"]
+    K --> L["🎯 ⑨ 后处理管道<br/>说话人融合 / 角色标注 / 语义合并"]
+    L --> L2["🆕 ⑨.⑤ 声学校验门控<br/>方向感知 + 置信度门控 → AcousticValidator"]
+    L2 --> M["📦 ⑩ 最终校验 + 导出<br/>EndTimeValidator → SRT / VTT / ASS"]
+
+    S1 --> S2["StreamingBuffer 滑动窗口管理"]
+    S2 --> S3["简化的 ASR 处理"]
+    S3 --> S4["StreamingMergeEngine 相邻窗口整合"]
+    S4 --> S5["实时字幕输出"]
+
+    K1 --> K2["ffmpeg 语音能量包络<br/>物理分割为连续语音段"]
+    K2 --> K3["逐片段独立 ASR"]
+    K3 --> K4["时间轴重组"]
+    K4 --> L
+
+    M --> N{"LLM 文本优化?"}
+    N -->|"是"| O["🤖 LLM 润色"]
+    N -->|"否"| P["✅ 最终字幕文件"]
+    O --> P
+
+    P --> Q["💾 缓存 + 会话持久化<br/>CacheManager / TaskHistory / SessionManager"]
+    Q -.->|"用户提供参考字幕"| R["🔄 反馈学习<br/>SubtitleAligner → DiffAnalyzer → ParamLearner"]
+    R -.->|"更新参数"| C
+
+    style A fill:#1a2a3a,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style B fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style C fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style D fill:#1a2520,stroke:#7ee787,color:#c9d1d9
+    style E fill:#20201a,stroke:#39d2c0,color:#c9d1d9
+    style F fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style G fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style H fill:#1a2025,stroke:#3fb950,color:#c9d1d9
+    style I fill:#1a1a30,stroke:#bc8cff,stroke-width:3px,color:#c9d1d9
+    style J fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style K fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style L fill:#25201a,stroke:#f778ba,stroke-width:2px,color:#c9d1d9
+    style L2 fill:#2a1010,stroke:#ff6b6b,stroke-width:3px,color:#ffaaaa
+    style M fill:#201515,stroke:#f85149,stroke-width:2px,color:#c9d1d9
+    style P fill:#152515,stroke:#3fb950,stroke-width:3px,color:#c9d1d9
+    style R fill:#202515,stroke:#7ee787,color:#c9d1d9
+    style O fill:#1a2520,stroke:#e3b341,color:#c9d1d9
+    style S1 fill:#1a2a30,stroke:#39d2c0,color:#c9d1d9
+    style K1 fill:#201a25,stroke:#bc8cff,color:#c9d1d9
+    style Q fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 2. ENTRY POINTS -->
+<!-- ============================================================ -->
+<h2 id="entry">🔌 入口点</h2>
+<div class="two-col">
+  <div class="mermaid-wrap">
+    <div class="caption">CLI 命令行入口</div>
+    <div class="mermaid">
+flowchart TD
+    CLI["$ vocal_subtitle run audio.wav"]
+    CLI --> MAIN["main.py"]
+    MAIN --> CLICK["cli.py (Click Group)"]
+    CLICK --> CMDS["命令组"]
+    CMDS --> R1["run — 单文件处理"]
+    CMDS --> R2["batch — 批量 glob 处理"]
+    CMDS --> R3["download-models — 预下载模型"]
+    CMDS --> R4["profiles — 列出场景模板"]
+    CMDS --> R5["info — 系统/GPU 诊断"]
+    CMDS --> R6["feedback — 学习/展示/回滚/重置"]
+
+    style CLI fill:#1a2a3a,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style MAIN fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style CLICK fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style CMDS fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style R1 fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style R2 fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style R3 fill:#20201a,stroke:#e3b341,color:#c9d1d9
+    style R4 fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style R5 fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style R6 fill:#202515,stroke:#7ee787,color:#c9d1d9
+    </div>
+  </div>
+  <div class="mermaid-wrap">
+    <div class="caption">WebUI 入口 🆕 新增 FunASR 准备 + 批量编辑端点</div>
+    <div class="mermaid">
+flowchart TD
+    GUI["$ python main_gui.py"]
+    GUI --> FAST["FastAPI (uvicorn :8613)"]
+    FAST --> SPA["SPA 前端<br/>static/index.html"]
+    FAST --> REST["REST API<br/>api.py"]
+    FAST --> WS["WebSocket<br/>websocket.py 实时进度"]
+
+    REST --> EP1["POST /run — 执行管道<br/>🆕 自动触发 FunASR 准备"]
+    REST --> EP2["GET /tasks — 任务管理"]
+    REST --> EP5["GET /asr/funasr/status — 状态<br/>🆕 POST /asr/funasr/prepare — 安装"]
+    REST --> EP3["GET/PUT /subtitle/{id}/{idx} — 单条编辑<br/>🆕 PUT /subtitle/{id}/batch — 批量编辑"]
+    REST --> EP4["GET /subtitle/{id}/export — 导出<br/>🆕 自动写回磁盘 + 持久化"]
+    REST --> EP6["POST /feedback/learn — 反馈学习"]
+
+    style GUI fill:#1a2a3a,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style FAST fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style SPA fill:#201a25,stroke:#bc8cff,color:#c9d1d9
+    style REST fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style WS fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style EP1 fill:#2a1010,stroke:#ff6b6b,color:#c9d1d9
+    style EP2 fill:#1a2a30,stroke:#39d2c0,color:#c9d1d9
+    style EP3 fill:#2a1010,stroke:#ff6b6b,color:#c9d1d9
+    style EP4 fill:#2a1010,stroke:#ff6b6b,color:#c9d1d9
+    style EP5 fill:#2a1010,stroke:#ff6b6b,color:#c9d1d9
+    style EP6 fill:#1a2a30,stroke:#39d2c0,color:#c9d1d9
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 3. SEPARATION -->
+<!-- ============================================================ -->
+<h2 id="separation">🎵 阶段 ① — 人声分离 (可选)</h2>
+<div class="mermaid-wrap">
+  <div class="caption">separation/ 模块 — 三种引擎可选</div>
+  <div class="mermaid">
+flowchart LR
+    IN["原始音频 (带背景音乐)"]
+    CFG{"separation.enabled?"}
+    CFG -->|"否"| SKIP["⏭️ 跳过"]
+    CFG -->|"是"| ENGINE{"选择引擎"}
+
+    ENGINE -->|"默认/推荐"| UVR["UVR BS-RoFormer<br/>SDR 12.97 · 自动下载"]
+    ENGINE -->|"备选"| SPL["Spleeter<br/>Py3.12+ 不支持"]
+    ENGINE -->|"备选"| OUM["Open-Unmix<br/>umxhq 预训练"]
+
+    UVR --> OUT["🎤 vocals.wav + 🥁 accompaniment.wav"]
+    SPL --> OUT
+    OUM --> OUT
+    SKIP --> NEXT["继续下一阶段"]
+    OUT --> NEXT
+
+    style IN fill:#1a2a3a,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style CFG fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style ENGINE fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style UVR fill:#1a2520,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style SPL fill:#20201a,stroke:#e3b341,color:#c9d1d9
+    style OUM fill:#20201a,stroke:#e3b341,color:#c9d1d9
+    style OUT fill:#152515,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style SKIP fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style NEXT fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 4. AUDIO PREPROCESSING -->
+<!-- ============================================================ -->
+<h2 id="preprocess">🔇 阶段 ②③ — 音频预处理 + 宏观分块</h2>
+<div class="mermaid-wrap">
+  <div class="caption">utils/audio_utils.py + macro_chunker.py</div>
+  <div class="mermaid">
+flowchart TD
+    AUDIO["🎵 音频信号 (vocals)"]
+    AUDIO --> NR["频谱门控降噪<br/>AudioPreprocessor (noisereduce)"]
+    NR --> NF["噪声底板估计<br/>→ NoiseProfile (RMS / 阈值)"]
+    NF --> NORM["响度归一化<br/>LUFS / Peak"]
+    NORM --> MC{"音频 > 阈值?"}
+
+    MC -->|"是"| CHUNK["✂️ MacroChunker<br/>切分为多个 MacroChunk"]
+    MC -->|"否 (短音频)"| CTX["创建 PipelineContext"]
+
+    CHUNK --> C1["Chunk 1 → CTX #1"]
+    CHUNK --> C2["Chunk 2 → CTX #2"]
+    CHUNK --> C3["Chunk N → CTX #N"]
+
+    CTX --> VAD["▶ 进入 VAD 阶段"]
+    C1 --> VAD
+    C2 --> VAD
+    C3 --> VAD
+
+    style AUDIO fill:#1a2a3a,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style NR fill:#20201a,stroke:#39d2c0,color:#c9d1d9
+    style NF fill:#20201a,stroke:#39d2c0,color:#c9d1d9
+    style NORM fill:#20201a,stroke:#39d2c0,color:#c9d1d9
+    style MC fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style CHUNK fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style C1 fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style C2 fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style C3 fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style CTX fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style VAD fill:#1a2520,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 5. VAD + MERGE -->
+<!-- ============================================================ -->
+<h2 id="vad">🗣️ 阶段 ④⑤ — VAD 语音检测 + 片段合并</h2>
+<div class="mermaid-wrap">
+  <div class="caption">vad/ + merging/merge_strategy.py</div>
+  <div class="mermaid">
+flowchart TD
+    SIG["音频信号"]
+    SIG --> SIL["Silero VAD<br/>ONNX 神经网络 (主要)"]
+    SIG --> FF["ffmpeg silencedetect<br/>基于能量 (辅助 + 骨架)"]
+
+    SIL --> FUSION{"启用 BoundaryFusion? (方案 2)"}
+    FF --> FUSION
+
+    FUSION -->|"否"| RAW["原始语音段列表"]
+    FUSION -->|"是"| TEN["TEN / WebRTC VAD"]
+    TEN --> BF["BoundaryFusion<br/>三方法加权融合"]
+    BF --> FUSED["融合后的语音段列表"]
+
+    RAW --> MERGE["MergeStrategy.merge()"]
+    FUSED --> MERGE
+
+    MERGE --> RULES["合并规则: min_silence_gap · max_segment_length · adaptive_padding · 段内预切分"]
+    RULES --> SEGS["SpeechSegment[] ▶ 送入 ASR"]
+
+    style SIG fill:#1a2a3a,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style SIL fill:#1a2520,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style FF fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style FUSION fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style TEN fill:#20201a,stroke:#e3b341,color:#c9d1d9
+    style BF fill:#20201a,stroke:#e3b341,stroke-width:2px,color:#c9d1d9
+    style RAW fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style FUSED fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style MERGE fill:#1a2025,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style RULES fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style SEGS fill:#1a1a30,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 6. ASR ENGINE -->
+<!-- ============================================================ -->
+<h2 id="asr">📝 阶段 ⑥ — ASR 语音识别 (核心)</h2>
+
+<div class="mermaid-wrap">
+  <div class="caption">三种 ASR 引擎对比</div>
+  <div class="mermaid">
+flowchart TD
+    SEG["SpeechSegment[]"]
+    SEG --> ENGINE{"选择引擎: config.asr.engine"}
+
+    ENGINE -->|"默认"| FW["🚀 Faster-Whisper<br/>CTranslate2 · large-v3<br/>多语言 99种 · CUDA/CPU/MPS<br/>float16/int8"]
+    ENGINE -->|"中文场景"| FA["🧠 FunASR Paraformer<br/>阿里达摩院 · modelscope<br/>仅中文 · Apache 2.0<br/>🆕 WebUI 自动准备"]
+    ENGINE -->|"低资源"| WC["⚡ Whisper.cpp<br/>GGML C++ 推理 · 多语言<br/>CPU/Apple Silicon"]
+
+    FW --> TRANS["transcribe()"]
+    FA --> TRANS
+    WC --> TRANS
+
+    TRANS --> SUB["ASR 内部子流程"]
+
+    subgraph SUB[" "]
+      direction LR
+      LANG["🌍 全局语言检测<br/>完整音频一次运行"]
+      SEGASR["📝 逐片段转录"]
+      FALLBACK["🔄 回退转录<br/>avg_logprob &lt; -1.5 → language=None"]
+      NORM["📋 TextNormalizer<br/>标点/数字/中英混排"]
+      HALLUC["🚫 幻觉过滤<br/>训练模板短语"]
+      DEDUP["♻️ 段内去重"]
+      CACHE["💾 片段级缓存"]
+    end
+
+    LANG --> SEGASR --> FALLBACK --> NORM --> HALLUC --> DEDUP --> CACHE
+    CACHE --> RESULT["TranscriptionSegment[]<br/>text · start · end · words · confidence"]
+
+    style SEG fill:#1a1a30,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style ENGINE fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style FW fill:#1c2a40,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style FA fill:#2a1010,stroke:#ff6b6b,stroke-width:2px,color:#c9d1d9
+    style WC fill:#1a2520,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style TRANS fill:#1a1a30,stroke:#bc8cff,color:#c9d1d9
+    style RESULT fill:#1a1a30,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style LANG fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style SEGASR fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style FALLBACK fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style NORM fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style HALLUC fill:#201515,stroke:#f85149,color:#c9d1d9
+    style DEDUP fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style CACHE fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- FunASR detail -->
+<!-- ============================================================ -->
+<div class="mermaid-wrap">
+  <div class="caption">🆕 FunASR 引擎详细流程 — asr/funasr_engine.py + funasr_manager.py (WebUI 自动准备)</div>
+  <div class="mermaid">
+flowchart TD
+    CHECK{"funasr 已安装?"}
+    CHECK -->|"否"| INSTALL["pip install funasr<br/>ensure_funasr_ready()"]
+    CHECK -->|"是"| LOCAL{"模型已在本地缓存?"}
+    INSTALL --> LOCAL
+
+    LOCAL -->|"否"| DOWNLOAD["modelscope.snapshot_download()<br/>~/.cache/modelscope/hub/"]
+    LOCAL -->|"是"| LOAD["find_local_model()<br/>搜索多个缓存位置"]
+    DOWNLOAD --> LOAD
+
+    LOAD --> AUTO["funasr.AutoModel()<br/>Paraformer-large · ncpu=4"]
+
+    AUTO --> TRANS2["transcribe(audio)"]
+    TRANS2 --> CONV["float32 → int16"]
+    CONV --> GEN["generate(batch_size_s=300)"]
+    GEN --> PARSE{"有 timestamp?"}
+    PARSE -->|"是"| WORD["词级时间戳 ms→s<br/>→ TranscriptionSegment[]"]
+    PARSE -->|"否"| FULL["整段作为单个 segment"]
+
+    style CHECK fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style INSTALL fill:#20201a,stroke:#e3b341,color:#c9d1d9
+    style LOCAL fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style DOWNLOAD fill:#20201a,stroke:#e3b341,color:#c9d1d9
+    style LOAD fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style AUTO fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style TRANS2 fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style CONV fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style GEN fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style PARSE fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style WORD fill:#152515,stroke:#3fb950,color:#c9d1d9
+    style FULL fill:#152515,stroke:#3fb950,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 7. BOUNDARY REFINEMENT -->
+<!-- ============================================================ -->
+<h2 id="boundary">🔍 阶段 ⑦ — ASR 边界精修 + 语义仲裁</h2>
+<div class="mermaid-wrap">
+  <div class="caption">asr/boundary_*.py — 多方案级联精修</div>
+  <div class="mermaid">
+flowchart TD
+    RAW2["TranscriptionSegment[] 粗边界"]
+    RAW2 --> REFINE["BoundaryRefiner.refine_all()<br/>(方案 4) 双向边界调整"]
+
+    REFINE --> CONF{"需要边界置信度? (方案 4.6)"}
+    CONF -->|"是"| BCE["BoundaryConfidenceEstimator<br/>评估每个边界的置信度"]
+    CONF -->|"否"| MAPPED
+
+    BCE --> REASR["SlidingWindowReASR<br/>边界处滑动窗口重新 ASR"]
+    REASR --> ARB["BoundaryArbitrator<br/>LLM 语义仲裁 — 最佳切分点"]
+    ARB --> APPLY["apply_arbitration_results()"]
+    APPLY --> MAPPED["精修后的 TranscriptionSegment[]"]
+
+    REFINE --> MAPPED
+    MAPPED --> NEXT_PHASE["▶ 进入时间轴映射"]
+
+    style RAW2 fill:#1a1a30,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style REFINE fill:#25201a,stroke:#d2991d,stroke-width:2px,color:#c9d1d9
+    style CONF fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style BCE fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style REASR fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style ARB fill:#201a20,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style APPLY fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style MAPPED fill:#1a2520,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style NEXT_PHASE fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TIME MAP -->
+<!-- ============================================================ -->
+<h2>🗺️ 阶段 ⑧ — 时间轴映射</h2>
+<div class="mermaid-wrap">
+  <div class="caption">mapping/time_mapper.py</div>
+  <div class="mermaid">
+flowchart LR
+    ASR_OUT["TranscriptionSegment[]<br/>(text, start, end, words, confidence)"]
+    SPEECH["SpeechSegment[]"]
+    NOISE["NoiseProfile"]
+
+    ASR_OUT --> TM["TimeMapper.map()"]
+    SPEECH --> TM
+    NOISE --> TM
+
+    TM --> EVT["SubtitleEvent[]<br/>text · start · end · speaker_id<br/>words · confidence · language"]
+
+    style ASR_OUT fill:#1a1a30,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style SPEECH fill:#1a2520,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style NOISE fill:#20201a,stroke:#39d2c0,stroke-width:2px,color:#c9d1d9
+    style TM fill:#201a20,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style EVT fill:#25201a,stroke:#f778ba,stroke-width:2px,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 8. ACOUSTIC VALIDATOR GATING — NEW! -->
+<!-- ============================================================ -->
+<h2 id="acoustic-gating">🆕 阶段 ⑨.⑤ — 方向感知声学校验门控</h2>
+<div class="mermaid-wrap">
+  <div class="caption" style="color:#ff6b6b;">Physical Boundary Gating — 2026-07-28 新增 · acoustic_validator.py (重构 ~320行)</div>
+  <div class="mermaid">
+flowchart TD
+    EVENTS2["SubtitleEvent[] (来自语义合并后)"]
+    SPEECH_SKEL["ffmpeg 声学骨架<br/>连续语音区间列表<br/>[&#40;s1,e1&#41;, &#40;s2,e2&#41;, ...]"]
+
+    EVENTS2 --> LOOP["逐事件校验"]
+    SPEECH_SKEL --> LOOP
+
+    LOOP --> DIR{"_find_directional_boundary()<br/>🆕 方向感知查询"}
+
+    DIR -->|"boundary_type=start"| START_Q{"start 在语音段内?"}
+    START_Q -->|"是"| NEXT_EVENT
+    START_Q -->|"否 (在静音间隙)"| START_DIR["🆕 只向后找下一个 speech_start<br/>不对前一个 speech_end 吸附"]
+
+    START_DIR --> CONF_START{"_preserve_reliable_asr_boundary()<br/>🆕 置信度门控"}
+
+    CONF_START -->|"有词级时间戳 + 置信度 ≥ 阈值"| SKIP_START["🚫 保留 ASR 边界<br/>物理层只报告异常<br/>→ boundary_diagnostics: skipped"]
+    CONF_START -->|"无可靠时间戳 或 置信度不足"| CHECK_DIST{"距离 ≤ max_snap_distance?"}
+
+    CHECK_DIST -->|"是"| RMS_START{"RMS 能量确认?<br/>(50ms 窗口 · 2x 噪声底)"}
+    CHECK_DIST -->|"否 (但 ≤ 0.5s)"| FLAG_START["⚠️ 标记需复核<br/>→ events_flagged"]
+    CHECK_DIST -->|"否"| NEXT_EVENT
+
+    RMS_START -->|"是"| SNAP_START["✅ 吸附到 next_start + margin<br/>→ boundary_diagnostics: snapped"]
+    RMS_START -->|"否"| SKIP_RMS["🚫 跳過<br/>→ boundary_diagnostics: rms_not_confirmed"]
+
+    DIR -->|"boundary_type=end"| END_Q{"end 在语音段内?"}
+
+    END_Q -->|"是 (连续语音内部)"| TRUNC{"语音剩余 > 0.02s<br/>且 ≤ max_snap_distance?"}
+    TRUNC -->|"是"| REPORT_TRUNC["🆕 只报告 possible_truncation<br/>不自动跨静音延长<br/>→ events_flagged"]
+    TRUNC -->|"否"| NEXT_EVENT
+
+    END_Q -->|"否 (在静音间隙)"| END_DIR["🆕 只向前找上一个 speech_end<br/>禁止用后续 speech_start 延长"]
+
+    END_DIR --> CONF_END{"_preserve_reliable_asr_boundary()?"}
+    CONF_END -->|"是 (可靠 ASR)"| SKIP_END["🚫 保留 ASR 边界<br/>→ boundary_diagnostics: skipped"]
+    CONF_END -->|"否"| CHECK_END{"距离 ≤ max_snap_distance<br/>且 candidate < event.end?"}
+
+    CHECK_END -->|"是 (允许缩短)"| SILENCE{"_silence_confirmed()?<br/>(间隙确实为静音)"}
+    CHECK_END -->|"否"| FORBID_EXTEND["🆕 禁止跨静音延长<br/>→ boundary_diagnostics:<br/>end_extension_forbidden"]
+
+    SILENCE -->|"是"| SNAP_END["✅ 回缩到 previous_end - margin<br/>→ boundary_diagnostics: snapped"]
+    SILENCE -->|"否"| SKIP_SIL["🚫 跳過<br/>→ boundary_diagnostics: silence_not_confirmed"]
+
+    NEXT_EVENT["继续下一个事件"]
+
+    SNAP_START --> REPORT["📊 汇总报告<br/>snapped_starts · snapped_ends<br/>skipped_high_confidence 🆕<br/>skipped_low_confidence<br/>rms_overrides · events_flagged<br/>🆕 boundary_diagnostics[]<br/>(每个决策可审计:<br/>方向 · 原因 · 原始/候选时间 · 距离)"]
+    SKIP_START --> REPORT
+    SKIP_RMS --> REPORT
+    FLAG_START --> REPORT
+    REPORT_TRUNC --> REPORT
+    SKIP_END --> REPORT
+    SNAP_END --> REPORT
+    SKIP_SIL --> REPORT
+    FORBID_EXTEND --> REPORT
+    NEXT_EVENT --> REPORT
+
+    REPORT --> VALIDATED["校验后的 SubtitleEvent[]"]
+
+    style EVENTS2 fill:#25201a,stroke:#f778ba,stroke-width:2px,color:#c9d1d9
+    style SPEECH_SKEL fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style LOOP fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style DIR fill:#2a1010,stroke:#ff6b6b,stroke-width:3px,color:#ffaaaa
+    style START_Q fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style END_Q fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style START_DIR fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style END_DIR fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style CONF_START fill:#2a1010,stroke:#ff6b6b,stroke-width:2px,color:#ffaaaa
+    style CONF_END fill:#2a1010,stroke:#ff6b6b,stroke-width:2px,color:#ffaaaa
+    style TRUNC fill:#2a1010,stroke:#ff6b6b,stroke-width:2px,color:#ffaaaa
+    style REPORT_TRUNC fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style FORBID_EXTEND fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style SKIP_START fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style SKIP_END fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style CHECK_DIST fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style CHECK_END fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style RMS_START fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style SILENCE fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style SNAP_START fill:#152515,stroke:#3fb950,color:#c9d1d9
+    style SNAP_END fill:#152515,stroke:#3fb950,color:#c9d1d9
+    style SKIP_RMS fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style SKIP_SIL fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style FLAG_START fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style REPORT fill:#2a1010,stroke:#ff6b6b,stroke-width:3px,color:#ffaaaa
+    style VALIDATED fill:#201515,stroke:#f85149,stroke-width:2px,color:#c9d1d9
+    style NEXT_EVENT fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+  </div>
+  <div class="detail-list" style="margin-top:12px; border-left: 3px solid #ff6b6b; padding-left: 16px;">
+    <strong style="color:#ff6b6b;">核心变更 (vs 旧版):</strong>
+    <ul>
+      <li><strong>方向感知查询</strong> — <code>_find_directional_boundary()</code> 替代旧的 <code>_find_boundary_in_skeleton()</code>。start 端点只找下一个语音起点，end 端点只找上一个语音终点</li>
+      <li><strong>禁止跨静音延长</strong> — end 不再通过后续 speech_start 自动延长到下一段语音。ASR 结束在连续语音内部时只报告 <code>possible_truncation</code></li>
+      <li><strong>置信度门控</strong> — <code>_preserve_reliable_asr_boundary()</code> + <code>_boundary_confidence()</code>：有词级时间戳且置信度 ≥ 阈值 → 保留 ASR 边界</li>
+      <li><strong>静音确认</strong> — <code>_silence_confirmed()</code>：无音频时只允许 ≤30ms 的结构性吸附，防止无证据改写</li>
+      <li><strong>诊断追踪</strong> — <code>_record_boundary_diagnostic()</code>：记录每个端点的决策（方向、原因、原始/候选时间、距离），纳入 <code>boundary_diagnostics[]</code></li>
+      <li><strong>新增指标</strong> — <code>skipped_high_confidence</code> 计数 · <code>ends_shortened</code> 缩短计数 · 逐决策审计日志</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 9. POST-PROCESSING (simplified, with reference to acoustic detail) -->
+<!-- ============================================================ -->
+<h2 id="postprocess">🎯 阶段 ⑨ — 后处理管道 (说话人 + 合并 + 声学门控)</h2>
+<div class="mermaid-wrap">
+  <div class="caption">_post_process_events() — 涉及 7+ 个模块</div>
+  <div class="mermaid">
+flowchart TD
+    EVENTS["SubtitleEvent[]"]
+
+    EVENTS --> P1["① 说话人融合 (方案 3)"]
+    P1 --> P1_DETAIL["全局 pyannote 聚类 + 局部 SpeakerID 嵌入精修<br/>→ run_speaker_fusion() / speaker_clusterer / speaker_embedding"]
+    P1_DETAIL --> P2
+
+    P2{"② 角色标注 (可选)"}
+    P2 -->|"启用"| P2_LLM["LLM 角色命名<br/>→ role_labeler.py"]
+    P2 -->|"跳过"| P3
+    P2_LLM --> P3
+
+    P3["③ 帧级无缝缝合 (方案 6)"]
+    P3 --> P3_DETAIL["合并间隙 ≤120ms → apply_frame_seamless_stitching()"]
+    P3_DETAIL --> P4
+
+    P4["④ LLM 语义合并 (方案 5)"]
+    P4 --> P4_DETAIL["LLM/规则合并短且连续事件到 ≤5s → LLMMergeEngine"]
+    P4_DETAIL --> P5
+
+    P5["🆕 ⑤ 方向感知声学校验门控"]
+    P5 --> P5_DETAIL["_find_directional_boundary() 方向感知<br/>_preserve_reliable_asr_boundary() 置信度门控<br/>_silence_confirmed() 静音确认<br/>禁止跨静音延长 · 边界决策审计<br/>→ AcousticValidator.validate() (重构)"]
+    P5_DETAIL --> P6
+
+    P6["⑥ 最终去重"]
+    P6 --> P6_DETAIL["移除时间重叠 → TimeMapper._deduplicate_overlapping()"]
+    P6_DETAIL --> FINAL["最终 SubtitleEvent[]"]
+
+    style EVENTS fill:#25201a,stroke:#f778ba,stroke-width:2px,color:#c9d1d9
+    style P1 fill:#201a25,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style P1_DETAIL fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style P2 fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style P2_LLM fill:#20201a,stroke:#e3b341,color:#c9d1d9
+    style P3 fill:#1a2520,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style P3_DETAIL fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style P4 fill:#201a20,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style P4_DETAIL fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style P5 fill:#2a1010,stroke:#ff6b6b,stroke-width:3px,color:#ffaaaa
+    style P5_DETAIL fill:#2a1515,stroke:#ff6b6b,color:#ffcccc
+    style P6 fill:#201515,stroke:#f85149,stroke-width:2px,color:#c9d1d9
+    style P6_DETAIL fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style FINAL fill:#152515,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 10. EXPORT -->
+<!-- ============================================================ -->
+<h2 id="export">📦 阶段 ⑩ — 最终校验 + 导出</h2>
+<div class="mermaid-wrap">
+  <div class="caption">mapping/ + 🆕 WebUI 字幕编辑回写</div>
+  <div class="mermaid">
+flowchart TD
+    EVT2["最终 SubtitleEvent[]"]
+
+    EVT2 --> VAL["EndTimePostValidator<br/>修复不合理/过长的结束时间"]
+
+    VAL --> LLM_OPT{"LLM 文本优化?"}
+    LLM_OPT -->|"是"| OPT["🤖 LLM 润色"]
+    LLM_OPT -->|"否"| BUILD
+    OPT --> BUILD
+
+    BUILD["SubtitleBuilder.build()"]
+    BUILD --> FIN["finalize_subtitle_events()"]
+
+    FIN --> SRT["📄 .srt"]
+    FIN --> VTT["📄 .vtt"]
+    FIN --> ASS["📄 .ass"]
+
+    SRT --> SESSION["📁 SessionManager<br/>标准化输出目录"]
+    VTT --> SESSION
+    ASS --> SESSION
+
+    SESSION --> WEBUI{"🆕 WebUI 字幕编辑?"}
+    WEBUI -->|"单条编辑"| SINGLE["PUT /subtitle/{id}/{idx}<br/>修改 text · speaker_id · start/end"]
+    WEBUI -->|"批量编辑"| BATCH["🆕 PUT /subtitle/{id}/batch<br/>合并/拆分/批量设说话人"]
+    WEBUI -->|"仅查看/导出"| DONE
+
+    SINGLE --> REWRITE["🆕 _rewrite_subtitle_files()<br/>自动写回磁盘 + 持久化到 SQLite"]
+    BATCH --> REWRITE
+    REWRITE --> DONE["✅ 最终交付"]
+
+    style EVT2 fill:#25201a,stroke:#f778ba,stroke-width:2px,color:#c9d1d9
+    style VAL fill:#201515,stroke:#f85149,stroke-width:2px,color:#c9d1d9
+    style LLM_OPT fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style OPT fill:#20201a,stroke:#e3b341,color:#c9d1d9
+    style BUILD fill:#201515,stroke:#f85149,stroke-width:2px,color:#c9d1d9
+    style FIN fill:#201515,stroke:#f85149,stroke-width:2px,color:#c9d1d9
+    style SRT fill:#152515,stroke:#3fb950,color:#c9d1d9
+    style VTT fill:#152515,stroke:#3fb950,color:#c9d1d9
+    style ASS fill:#152515,stroke:#3fb950,color:#c9d1d9
+    style SESSION fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style WEBUI fill:#2a1010,stroke:#ff6b6b,stroke-width:2px,color:#ffaaaa
+    style SINGLE fill:#1a2a30,stroke:#39d2c0,color:#c9d1d9
+    style BATCH fill:#2a1010,stroke:#ff6b6b,stroke-width:2px,color:#ffaaaa
+    style REWRITE fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style DONE fill:#152515,stroke:#3fb950,stroke-width:3px,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SUBTITLE EDITING DETAIL -->
+<!-- ============================================================ -->
+<h2 id="subtitle-editing">🆕 字幕批量编辑系统</h2>
+<div class="mermaid-wrap">
+  <div class="caption" style="color:#ff6b6b;">subtitle_editing.py — 2026-07-28 新增</div>
+  <div class="mermaid">
+flowchart TD
+    EDIT_IN["SubtitleEvent[] (已完成管道)"]
+
+    EDIT_IN --> BATCH_EP["PUT /subtitle/{task_id}/batch<br/>SubtitleBatchEditRequest"]
+
+    BATCH_EP --> LOAD["_load_completed_subtitle_task()<br/>内存 → 回退 SQLite 历史"]
+
+    LOAD --> DISPATCH{"action 类型?"}
+
+    DISPATCH -->|"merge"| MERGE_ACT["合并相邻字幕<br/>按 indexes 列表<br/>用 separator 拼接 text<br/>取最早 start + 最晚 end"]
+    DISPATCH -->|"split"| SPLIT_ACT["拆分字幕<br/>按 separator 切分 text<br/>均分时间跨度"]
+    DISPATCH -->|"set_speaker_id"| SPK_ID["批量设 speaker_id<br/>应用到 indexes 中所有事件"]
+    DISPATCH -->|"set_speaker_label"| SPK_LABEL["批量设 speaker_label<br/>(角色名) 应用到 indexes"]
+
+    MERGE_ACT --> VALIDATE["校验:<br/>indexes 连续 · 至少2个<br/>indexes 存在且不重复"]
+    SPLIT_ACT --> VALIDATE
+    SPK_ID --> VALIDATE
+    SPK_LABEL --> VALIDATE
+
+    VALIDATE --> APPLY2["apply_batch_edit()<br/>返回 updated_events"]
+
+    APPLY2 --> PERSIST["_persist_subtitle_result()<br/>更新内存 + SQLite 历史"]
+
+    PERSIST --> REWRITE2["_rewrite_subtitle_files()<br/>写回 .srt / .vtt / .ass / LLM 文件"]
+
+    REWRITE2 --> RESPONSE["响应: status · action · events · subtitle_count"]
+
+    style EDIT_IN fill:#25201a,stroke:#f778ba,stroke-width:2px,color:#c9d1d9
+    style BATCH_EP fill:#2a1010,stroke:#ff6b6b,stroke-width:2px,color:#ffaaaa
+    style LOAD fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style DISPATCH fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style MERGE_ACT fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style SPLIT_ACT fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style SPK_ID fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style SPK_LABEL fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style VALIDATE fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style APPLY2 fill:#201a20,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style PERSIST fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style REWRITE2 fill:#2a1010,stroke:#ff6b6b,color:#ffaaaa
+    style RESPONSE fill:#152515,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 11. THREE BRANCHES -->
+<!-- ============================================================ -->
+<h2 id="branches">🔀 三种运行模式 / 分支</h2>
+<div class="mermaid-wrap">
+  <div class="caption">Pipeline.run() 中的分支决策</div>
+  <div class="mermaid">
+flowchart TD
+    START["Pipeline.run() — pipeline.py:883"]
+    START --> MODE{"config.mode?"}
+
+    MODE -->|"streaming"| STREAM["🌊 分支 B: 流式模式<br/>run_streaming() L:1528"]
+    MODE -->|"offline"| SKEL{"skeleton_mode?"}
+
+    SKEL -->|"是"| SKELETON["🦴 分支 C: 骨架分段<br/>_process_skeleton_segmented() L:3780"]
+    SKEL -->|"否"| STD["⚙️ 分支 A: 标准模式<br/>_process_chunk_pipeline() L:3463"]
+
+    STREAM --> SW["Sliding Window 2s/0.5s"]
+    SW --> SW2["简化管道 per window"]
+    SW2 --> SW3["StreamingBuffer + StreamingMergeEngine"]
+    SW3 --> SW_OUT["实时字幕流"]
+
+    SKELETON --> SK1["ffmpeg 语音能量包络"]
+    SK1 --> SK2["物理分割连续语音段"]
+    SK2 --> SK3["逐片段独立 ASR"]
+    SK3 --> SK4["时间轴重组"]
+    SK4 --> POST["进入完整后处理"]
+
+    STD --> STD1["预处理 → VAD → 合并 → ASR"]
+    STD1 --> STD2["边界精修 → 时间轴映射"]
+    STD2 --> POST
+
+    POST --> POST2["说话人 / 合并 / 🆕声学门控 / 去重"]
+    POST2 --> EXPORT["导出"]
+
+    SW_OUT --> EXPORT
+
+    style START fill:#1c2a40,stroke:#58a6ff,stroke-width:3px,color:#c9d1d9
+    style MODE fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style SKEL fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style STREAM fill:#1a2a30,stroke:#39d2c0,stroke-width:2px,color:#c9d1d9
+    style SKELETON fill:#201a25,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style STD fill:#1c2a40,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style SW fill:#1a2a30,stroke:#39d2c0,color:#c9d1d9
+    style SW2 fill:#1a2a30,stroke:#39d2c0,color:#c9d1d9
+    style SW3 fill:#1a2a30,stroke:#39d2c0,color:#c9d1d9
+    style SW_OUT fill:#152515,stroke:#3fb950,color:#c9d1d9
+    style SK1 fill:#201a25,stroke:#bc8cff,color:#c9d1d9
+    style SK2 fill:#201a25,stroke:#bc8cff,color:#c9d1d9
+    style SK3 fill:#201a25,stroke:#bc8cff,color:#c9d1d9
+    style SK4 fill:#201a25,stroke:#bc8cff,color:#c9d1d9
+    style POST fill:#25201a,stroke:#f778ba,color:#c9d1d9
+    style STD1 fill:#1c2128,stroke:#8b949e,color:#c9d1d9
+    style STD2 fill:#1c2128,stroke:#8b949e,color:#c9d1d9
+    style POST2 fill:#2a1010,stroke:#ff6b6b,color:#ffcccc
+    style EXPORT fill:#201515,stroke:#f85149,stroke-width:2px,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 12. SPEAKER FUSION -->
+<!-- ============================================================ -->
+<h2>👥 说话人融合详细流程 (方案 3)</h2>
+<div class="mermaid-wrap">
+  <div class="caption">diarization/ 模块 — 全局聚类 + 局部精修</div>
+  <div class="mermaid">
+flowchart TD
+    AUDIO2["音频"]
+    EVT3["SubtitleEvent[]"]
+
+    AUDIO2 --> EMB["SpeakerEmbeddingEngine<br/>speechbrain ECAPA-TDNN<br/>逐段提取 x-vector"]
+    AUDIO2 --> PYNN["PyannoteDiarizationEngine<br/>speaker-diarization-3.1<br/>全局说话人聚类"]
+    EVT3 --> EMB
+
+    PYNN --> GLOB["全局聚类结果<br/>说话人标签 + 时间范围"]
+    EMB --> LOCAL["局部嵌入<br/>逐字幕段的声纹特征"]
+
+    GLOB --> FUSION2["run_speaker_fusion()<br/>全局聚类 + 局部嵌入精修"]
+    LOCAL --> FUSION2
+
+    FUSION2 --> RECON["turn_reconciler.py 话轮协调"]
+    RECON --> CANON["canonicalizer.py 规范标签"]
+    CANON --> ROLE{"启用角色标注?"}
+
+    ROLE -->|"是"| ROLE_L["role_labeler.py<br/>LLM: '主持人'·'嘉宾'·'旁白'"]
+    ROLE -->|"否"| DONE
+    ROLE_L --> DONE["SubtitleEvent[] 带 speaker_id + 角色"]
+
+    style AUDIO2 fill:#1a2a3a,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style EVT3 fill:#25201a,stroke:#f778ba,stroke-width:2px,color:#c9d1d9
+    style EMB fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style PYNN fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style GLOB fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style LOCAL fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style FUSION2 fill:#25201a,stroke:#f778ba,stroke-width:2px,color:#c9d1d9
+    style RECON fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style CANON fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style ROLE fill:#1a2025,stroke:#8b949e,stroke-width:2px,color:#c9d1d9
+    style ROLE_L fill:#20201a,stroke:#e3b341,color:#c9d1d9
+    style DONE fill:#152515,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 13. FEEDBACK LEARNING -->
+<!-- ============================================================ -->
+<h2 id="feedback">🔄 反馈学习系统</h2>
+<div class="mermaid-wrap">
+  <div class="caption">feedback/ 模块 — 自适应学习引擎</div>
+  <div class="mermaid">
+flowchart TD
+    USER["用户提供参考字幕 + 原始音频"]
+    AUTO2["系统自动生成字幕"]
+
+    USER --> ALIGN["SubtitleAligner<br/>参考 ↔ 自动字幕对齐"]
+    AUTO2 --> ALIGN
+
+    ALIGN --> DIFF["DiffAnalyzer 差异分析"]
+    DIFF --> D1["边界偏移量"]
+    DIFF --> D2["内容差异 (错字/漏字)"]
+    DIFF --> D3["漏检 / 误检率"]
+
+    D1 --> FP["AudioFingerprinter<br/>声学场景指纹 → 场景匹配"]
+    D2 --> FP
+    D3 --> FP
+
+    FP --> LEARN["ParamLearner 学习参数规则"]
+    LEARN --> CONFLICT["ConflictDetector 冲突检测"]
+    CONFLICT --> IMPACT["ImpactEstimator 影响评估"]
+    IMPACT --> PROFILE["UserProfileManager<br/>保存偏好 + 自适应参数"]
+
+    PROFILE -.->|"下次执行"| PIPELINE["Pipeline 应用学习参数"]
+
+    style USER fill:#202515,stroke:#7ee787,stroke-width:2px,color:#c9d1d9
+    style AUTO2 fill:#202515,stroke:#7ee787,stroke-width:2px,color:#c9d1d9
+    style ALIGN fill:#1c2a40,stroke:#58a6ff,stroke-width:2px,color:#c9d1d9
+    style DIFF fill:#25201a,stroke:#d2991d,stroke-width:2px,color:#c9d1d9
+    style D1 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style D2 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style D3 fill:#1c2128,stroke:#8b949e,color:#8b949e
+    style FP fill:#201a20,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style LEARN fill:#1a2520,stroke:#3fb950,stroke-width:2px,color:#c9d1d9
+    style CONFLICT fill:#201515,stroke:#f85149,color:#c9d1d9
+    style IMPACT fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style PROFILE fill:#202515,stroke:#7ee787,stroke-width:2px,color:#c9d1d9
+    style PIPELINE fill:#1c2a40,stroke:#58a6ff,stroke-width:3px,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 14. CACHE & PERSISTENCE -->
+<!-- ============================================================ -->
+<h2 id="cache">💾 缓存与会话持久化</h2>
+<div class="mermaid-wrap">
+  <div class="caption">utils/ — cache_manager.py + session_manager.py + task_history.py</div>
+  <div class="mermaid">
+flowchart LR
+    subgraph CACHE_SYS["缓存基础设施"]
+        CM["CacheManager (diskcache)<br/>分离/转录 TTL 7天 · 最大 5GB"]
+        FULL["全管道缓存<br/>相同输入+配置哈希 → 跳过"]
+    end
+
+    subgraph PERSIST["持久化层"]
+        TH["TaskHistoryManager (SQLite)<br/>cache/task_history.db"]
+        SM["SessionManager<br/>vocals.wav · ASR-generated.{srt,vtt,ass}<br/>LLM-generated.* · metadata.json"]
+        PM["PersistenceManager<br/>文件级持久化 · WebUI 任务恢复<br/>🆕 字幕编辑后自动写回"]
+    end
+
+    CACHE_SYS --> PERSIST
+
+    style CACHE_SYS fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style PERSIST fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style CM fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style FULL fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style TH fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style SM fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style PM fill:#2a1010,stroke:#ff6b6b,color:#c9d1d9
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 15. MODULE MAP -->
+<!-- ============================================================ -->
+<h2 id="module-map">📂 模块架构总图</h2>
+<div class="mermaid-wrap">
+  <div class="caption">vocal_subtitle/ 目录结构 & 数据流向 — 🆕 标记 2026-07-28 变更</div>
+  <div class="mermaid">
+flowchart TB
+    subgraph ENTRY["🔌 入口"]
+        CLI2["cli.py"]
+        API2["webui/api.py 🆕"]
+        GUI2["main_gui.py"]
+        EDIT2["🆕 webui/subtitle_editing.py"]
+    end
+
+    subgraph CORE["⚙️ 核心管道"]
+        PL["pipeline.py (4403行)<br/>Pipeline.run()"]
+        CFG2["config.py<br/>PipelineConfig"]
+        CTX2["pipeline_context.py"]
+    end
+
+    subgraph STAGES["🔧 处理阶段"]
+        SEP2["separation/ 人声分离"]
+        VAD2["vad/ 语音检测"]
+        MERGE2["merging/ 片段合并"]
+        ASR2["asr/ 语音识别 ⭐<br/>🆕 funasr_manager.py"]
+        BOUND2["asr/boundary_* 边界精修"]
+        MAP2["mapping/ 时间轴·导出"]
+        DIAR2["diarization/ 说话人分离"]
+        PHYS2["physical/ 物理层 IR"]
+    end
+
+    subgraph EXTRA["🔗 附属系统"]
+        FB2["feedback/ 反馈学习"]
+        UTILS2["utils/ 缓存·会话·历史"]
+        STREAM2["streaming.py"]
+        MACRO2["macro_chunker.py"]
+        ACOUSTIC2["🆕 acoustic_validator.py<br/>(重构 ~320行)"]
+    end
+
+    ENTRY --> CORE
+    CORE --> STAGES
+    STAGES --> EXTRA
+
+    style ENTRY fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style CORE fill:#1a1a30,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style STAGES fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style EXTRA fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style CLI2 fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style API2 fill:#2a1010,stroke:#ff6b6b,color:#c9d1d9
+    style GUI2 fill:#1c2a40,stroke:#58a6ff,color:#c9d1d9
+    style EDIT2 fill:#2a1010,stroke:#ff6b6b,stroke-width:2px,color:#ffaaaa
+    style PL fill:#1a1a30,stroke:#bc8cff,stroke-width:3px,color:#c9d1d9
+    style CFG2 fill:#1a1a30,stroke:#bc8cff,color:#c9d1d9
+    style CTX2 fill:#1a1a30,stroke:#bc8cff,color:#c9d1d9
+    style SEP2 fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style VAD2 fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style MERGE2 fill:#1a2520,stroke:#3fb950,color:#c9d1d9
+    style ASR2 fill:#201a20,stroke:#bc8cff,stroke-width:2px,color:#c9d1d9
+    style BOUND2 fill:#25201a,stroke:#d2991d,color:#c9d1d9
+    style MAP2 fill:#201515,stroke:#f85149,color:#c9d1d9
+    style DIAR2 fill:#201a25,stroke:#bc8cff,color:#c9d1d9
+    style PHYS2 fill:#201a25,stroke:#bc8cff,color:#c9d1d9
+    style FB2 fill:#202515,stroke:#7ee787,color:#c9d1d9
+    style UTILS2 fill:#1a2025,stroke:#8b949e,color:#c9d1d9
+    style STREAM2 fill:#1a2a30,stroke:#39d2c0,color:#c9d1d9
+    style MACRO2 fill:#201a20,stroke:#bc8cff,color:#c9d1d9
+    style ACOUSTIC2 fill:#2a1010,stroke:#ff6b6b,stroke-width:3px,color:#ffaaaa
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- FOOTER -->
+<!-- ============================================================ -->
+<hr>
+<div class="legend" style="margin-top:20px;margin-bottom:20px;">
+  <span><span class="dot" style="background:var(--cyan)"></span> 输入/预处理</span>
+  <span><span class="dot" style="background:var(--green)"></span> VAD 语音检测</span>
+  <span><span class="dot" style="background:var(--purple)"></span> ASR 语音识别</span>
+  <span><span class="dot" style="background:var(--orange)"></span> 边界精修</span>
+  <span><span class="dot" style="background:var(--pink)"></span> 后处理/融合</span>
+  <span><span class="dot" style="background:var(--red)"></span> 导出</span>
+  <span><span class="dot" style="background:var(--yellow)"></span> 可选模块</span>
+  <span><span class="dot" style="background:var(--teal)"></span> 反馈学习</span>
+  <span><span class="dot" style="background:#ff6b6b"></span> 🆕 2026-07-28 变更</span>
+</div>
+
+<p style="color:var(--muted);font-size:11px;text-align:center;margin-bottom:10px;">
+  基于 vocal_subtitle/pipeline.py · 10 个阶段 · 3 种运行模式 · 3 种 ASR 引擎<br/>
+  所有流程图使用 Mermaid.js 渲染 · 深色主题
+</p>
+<p style="color:#ff6b6b;font-size:11px;text-align:center;margin-bottom:30px;">
+  🆕 2026-07-28 更新内容:<br/>
+  Physical Boundary Gating (方向感知声学校验门控)  ·  WebUI FunASR 自动准备  ·  字幕批量编辑 (合并/拆分/说话人)  ·  编辑后自动写回磁盘 + 持久化
+</p>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1c2128',
+      primaryTextColor: '#c9d1d9',
+      primaryBorderColor: '#30363d',
+      lineColor: '#8b949e',
+      secondaryColor: '#161b22',
+      tertiaryColor: '#0d1117',
+      fontSize: '13px',
+    },
+    flowchart: {
+      useMaxWidth: true,
+      htmlLabels: true,
+      curve: 'basis',
+      padding: 15,
+    },
+  });
+</script>
+
+</body>
+</html>

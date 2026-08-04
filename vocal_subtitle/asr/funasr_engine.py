@@ -15,6 +15,7 @@ from typing import List, Optional
 import numpy as np
 
 from .base import ASREngine, TranscriptionSegment, WordTimestamp
+from .funasr_manager import DEFAULT_FUNASR_MODEL, find_local_model, normalize_model_id
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,7 @@ class FunASREngine(ASREngine):
     """
 
     # 推荐的中文模型
-    DEFAULT_MODEL = (
-        "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
-    )
+    DEFAULT_MODEL = DEFAULT_FUNASR_MODEL
 
     def __init__(
         self,
@@ -49,7 +48,7 @@ class FunASREngine(ASREngine):
             ncpu: CPU 线程数
         """
         self._model = None
-        self._model_id = model or self.DEFAULT_MODEL
+        self._model_id = normalize_model_id(model)
         self._device = device
         self._ncpu = ncpu
 
@@ -97,8 +96,9 @@ class FunASREngine(ASREngine):
         try:
             from funasr import AutoModel
 
+            local_model = find_local_model(self._model_id)
             self._model = AutoModel(
-                model=self._model_id,
+                model=str(local_model) if local_model else self._model_id,
                 device=self._device,
                 ncpu=self._ncpu,
                 disable_pbar=True,

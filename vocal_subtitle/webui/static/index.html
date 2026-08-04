@@ -226,6 +226,10 @@ body {
 .option-row input[type=range] { accent-color: var(--accent); height: 4px; cursor: pointer; border: none; padding: 0; }
 .option-row input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
 .option-row .value-display { font-size: 0.72rem; color: var(--accent); min-width: 32px; text-align: right; font-family: var(--font-mono); }
+.credential-mask {
+  -webkit-text-security: disc;
+  text-security: disc;
+}
 .device-hint { font-size: 12px; margin-left: 6px; }
 .device-hint .gpu { color: #2ecc71; }
 .device-hint .cpu { color: #e67e22; }
@@ -411,6 +415,8 @@ body {
 .subtitle-table tr:hover td { background: var(--surface-hover); }
 .subtitle-table tbody tr { cursor: pointer; }
 .subtitle-table .col-idx { width: 36px; color: var(--text-tertiary); text-align: center; }
+.subtitle-table .col-select { width: 34px; text-align: center; }
+.subtitle-table .col-select input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
 .subtitle-table .col-time { width: 80px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--accent); white-space: nowrap; }
 .subtitle-table .col-speaker { width: 70px; color: var(--accent-purple); font-size: 0.78rem; white-space: nowrap; text-align: center; }
 .subtitle-table .col-text { cursor: pointer; transition: color var(--transition); }
@@ -436,6 +442,30 @@ body {
 }
 .col-play .play-btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
 .col-play .play-btn.playing { background: var(--accent-green); border-color: var(--accent-green); color: #fff; animation: pulse-btn 1.5s infinite; }
+.subtitle-table tbody tr.subtitle-selected td { background: rgba(88,166,255,0.14); }
+.subtitle-table tbody tr.subtitle-selected td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.subtitle-batch-toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 10px; margin-bottom: 8px;
+  background: var(--bg-tertiary); border: 1px solid var(--border);
+  border-left: 2px solid var(--accent); border-radius: var(--radius-sm);
+}
+.subtitle-batch-toolbar .batch-count { color: var(--text-primary); font-size: 0.78rem; font-weight: 600; margin-right: 4px; }
+.subtitle-batch-toolbar select, .subtitle-batch-toolbar input {
+  min-height: 30px; padding: 5px 8px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface); color: var(--text-primary);
+  font-size: 0.74rem; outline: none;
+}
+.subtitle-batch-toolbar select:focus, .subtitle-batch-toolbar input:focus { border-color: var(--accent); }
+.subtitle-batch-toolbar button {
+  min-height: 30px; padding: 5px 10px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface); color: var(--text-secondary);
+  font-size: 0.74rem; cursor: pointer; transition: all var(--transition);
+}
+.subtitle-batch-toolbar button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.subtitle-batch-toolbar button:disabled { cursor: not-allowed; opacity: 0.45; }
+.subtitle-batch-toolbar button.primary { border-color: var(--accent); color: var(--accent); }
+.subtitle-batch-toolbar .batch-error { flex-basis: 100%; color: var(--accent-red); font-size: 0.7rem; }
 
 /* ============================================================
    MAIN — Export Bar
@@ -1087,11 +1117,26 @@ body {
         <div class="panel" style="margin-bottom:16px;">
           <div class="panel-header">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
-            字幕时间轴 <span style="font-weight:400;color:var(--text-secondary);margin-left:4px;font-size:0.78rem;">(单击行任意位置播放，双击文本编辑内容，双击时间/说话人编辑整行字幕)</span>
+            字幕时间轴 <span style="font-weight:400;color:var(--text-secondary);margin-left:4px;font-size:0.78rem;">(单击播放并选择，双击文本编辑内容)</span>
+          </div>
+          <div class="subtitle-batch-toolbar" id="subtitle-batch-toolbar" style="display:none;">
+            <span class="batch-count" id="subtitle-batch-count">已选择 0 条</span>
+            <select id="batch-speaker-select" aria-label="批量选择说话人">
+              <option value="">选择说话人</option>
+            </select>
+            <input id="batch-speaker-new" type="text" maxlength="80" placeholder="输入新说话人名称" autocomplete="off" style="display:none;">
+            <button type="button" id="batch-speaker-apply" class="primary" disabled>应用说话人</button>
+            <button type="button" id="batch-merge-menu" disabled>合并字幕 ▾</button>
+            <button type="button" id="batch-clear-selection">清除选择</button>
+            <div id="batch-merge-options" style="display:none;">
+              <button type="button" data-separator="newline">用换行合并</button>
+              <button type="button" data-separator="space">用空格合并</button>
+            </div>
+            <span class="batch-error" id="subtitle-batch-error" role="alert" style="display:none;"></span>
           </div>
           <div class="subtitle-table-wrap">
             <table class="subtitle-table">
-              <thead><tr><th class="col-idx">#</th><th class="col-time">开始</th><th class="col-time">结束</th><th class="col-speaker">说话人</th><th>文本</th></tr></thead>
+              <thead><tr><th class="col-select">选</th><th class="col-idx">#</th><th class="col-time">开始</th><th class="col-time">结束</th><th class="col-speaker">说话人</th><th>文本</th></tr></thead>
               <tbody id="subtitle-tbody"></tbody>
             </table>
           </div>
@@ -1349,6 +1394,10 @@ const App = {
     historyItems: [],
     subtitleViewMode: 'auto',  // 'auto' | 'compare' | 'simple'
     subtitleFinalFormat: 'srt',  // 'srt' | 'ass' — 最终版本字幕格式
+    funasrPreparing: false,
+    selectedSubtitleIndexes: new Set(),
+    selectionAnchorIndex: null,
+    rowClickTimer: null,
     ws: null,
     _audioPlayer: null,          // 当前音频播放器实例
     _audioTaskId: null,          // 音频播放器加载的任务 ID
@@ -1463,11 +1512,26 @@ const App = {
     async getProfiles() { return this._fetch('/api/profiles'); },
     async getProfileConfig(name) { return this._fetch('/api/profiles/' + name); },
     async getDeviceInfo() { return this._fetch('/api/device'); },
+    async getFunASRStatus(model) {
+      return this._fetch('/api/asr/funasr/status?model=' + encodeURIComponent(model || ''));
+    },
+    async prepareFunASR(model) {
+      return this._fetch('/api/asr/funasr/prepare', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({model: model || ''})
+      });
+    },
     async getSubtitles(taskId) { return this._fetch('/api/subtitle/' + taskId); },
     async updateSubtitle(taskId, index, text) {
       return this._fetch('/api/subtitle/' + taskId + '/' + index, {
         method: 'PUT', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({index: index, text: text})
+      });
+    },
+    async batchEditSubtitles(taskId, payload) {
+      return this._fetch('/api/subtitle/' + taskId + '/batch', {
+        method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
       });
     },
     async getTaskStatus(taskId) { return this._fetch('/api/tasks/' + taskId); },
@@ -1620,7 +1684,13 @@ const App = {
   // ---- Business Logic ----
   async handleRun() {
     if (App.state.isRunning || !App.state.selectedFile) return;
+    if (App.state.funasrPreparing) {
+      toast('FunASR 正在准备，请等待本地模型就绪后再开始处理', 'info');
+      return;
+    }
 
+    App.state.selectedSubtitleIndexes.clear();
+    App.state.selectionAnchorIndex = null;
     App.state.isRunning = true;
     App.ui.setRunning(true);
 
@@ -1813,6 +1883,7 @@ const App = {
 	    }
 	    // 设置 taskId 以启用导出/下载按钮（在异步加载详情前就设置）
 	    App.state.taskId = item.id;
+	    App.ui.clearSubtitleSelection(false);
 
 	    // 先用列表摘要快速显示统计信息
 	    if (item.result_summary && item.result_summary.stats) {
@@ -1956,6 +2027,11 @@ const App = {
         skipSepCb.addEventListener('change', function() { App.saveSettings(); });
       }
 
+      App.ui.initSubtitleBatchControls();
+      document.addEventListener('keydown', function(event) {
+        App.ui.handleSubtitleKeyboard(event);
+      });
+
       // Feedback file input handlers
       var fbRefInput = $('#fb-ref-input');
       var fbAudioInput = $('#fb-audio-input');
@@ -2069,6 +2145,19 @@ const App = {
     },
 
     renderOptions(config) {
+      const asrEngine = config.asr_engine || 'faster-whisper';
+      const genericASRModels = ['large-v3', 'medium', 'small', 'tiny'];
+      const configuredASRModel = config.asr_model || 'large-v3';
+      const funasrDefaultModel = 'iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch';
+      const initialFunASRModel = asrEngine === 'funasr' && genericASRModels.indexOf(configuredASRModel) >= 0
+        ? funasrDefaultModel : configuredASRModel;
+      const asrModelOptions = asrEngine === 'funasr'
+        ? '<option value="' + App.ui._escapeAttr(initialFunASRModel) + '" selected>FunASR Paraformer（中文）</option>'
+        : '<option value="large-v3" ' + (configuredASRModel === 'large-v3' ? 'selected' : '') + '>large-v3</option>' +
+          '<option value="medium" ' + (configuredASRModel === 'medium' ? 'selected' : '') + '>medium</option>' +
+          '<option value="small" ' + (configuredASRModel === 'small' ? 'selected' : '') + '>small</option>' +
+          '<option value="tiny" ' + (configuredASRModel === 'tiny' ? 'selected' : '') + '>tiny</option>';
+
       // Separation options
       $('#opts-separation').innerHTML = `
         <div class="option-row"><label>引擎</label><select data-key="separator">
@@ -2096,12 +2185,7 @@ const App = {
           <option value="whisper-cpp" ${config.asr_engine==='whisper-cpp'?'selected':''}>whisper.cpp</option>
           <option value="funasr" ${config.asr_engine==='funasr'?'selected':''}>FunASR (中文优化)</option>
         </select></div>
-        <div class="option-row"><label>模型</label><select data-key="asr_model">
-          <option value="large-v3" ${config.asr_model==='large-v3'?'selected':''}>large-v3</option>
-          <option value="medium" ${config.asr_model==='medium'?'selected':''}>medium</option>
-          <option value="small" ${config.asr_model==='small'?'selected':''}>small</option>
-          <option value="tiny" ${config.asr_model==='tiny'?'selected':''}>tiny</option>
-        </select></div>
+        <div class="option-row"><label>模型</label><select data-key="asr_model">${asrModelOptions}</select><span class="device-hint" id="funasr-status" style="display:none;"></span></div>
         <div class="option-row"><label>设备</label><select data-key="device" onchange="App.ui.onDeviceChange()">
           <option value="auto" ${(!config.asr_device||config.asr_device==='auto')?'selected':''}>自动 (跟随系统)</option>
           <option value="cuda" ${config.asr_device==='cuda'?'selected':''}>CUDA (GPU)</option>
@@ -2121,6 +2205,14 @@ const App = {
           <option value="ar" ${config.language==='ar'?'selected':''}>العربية (Arabic)</option>
         </select></div>
       `;
+
+      const asrEngineSelect = $('#opts-asr [data-key="asr_engine"]');
+      if (asrEngineSelect) {
+        asrEngineSelect.addEventListener('change', function() {
+          App.ui.syncASREngineOptions(this.value, true);
+          App.saveSettings();
+        });
+      }
 
       // Subtitle options
       $('#opts-subtitle').innerHTML = `
@@ -2209,6 +2301,62 @@ const App = {
         } else {
           el.value = saved[key];
         }
+      }
+      App.ui.syncASREngineOptions(
+        document.querySelector('#opts-asr [data-key="asr_engine"]')?.value || asrEngine,
+        true,
+      );
+    },
+
+    syncASREngineOptions(engine, prepare) {
+      var modelSelect = document.querySelector('#opts-asr [data-key="asr_model"]');
+      var status = document.getElementById('funasr-status');
+      if (!modelSelect) return;
+      var funasrModel = 'iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch';
+      var current = modelSelect.value;
+      if (engine === 'funasr') {
+        if (['large-v3', 'large-v2', 'medium', 'small', 'tiny', ''].indexOf(current) >= 0) current = funasrModel;
+        modelSelect.innerHTML = '<option value="' + App.ui._escapeAttr(current) + '" selected>FunASR Paraformer（中文）</option>';
+        if (status) {
+          status.style.display = 'inline';
+          status.textContent = prepare ? '正在检查 FunASR...' : 'FunASR';
+        }
+        if (prepare) App.ui.prepareFunASR(current);
+      } else {
+        var selected = ['large-v3', 'medium', 'small', 'tiny'].indexOf(current) >= 0 ? current : 'large-v3';
+        modelSelect.innerHTML =
+          '<option value="large-v3" ' + (selected === 'large-v3' ? 'selected' : '') + '>large-v3</option>' +
+          '<option value="medium" ' + (selected === 'medium' ? 'selected' : '') + '>medium</option>' +
+          '<option value="small" ' + (selected === 'small' ? 'selected' : '') + '>small</option>' +
+          '<option value="tiny" ' + (selected === 'tiny' ? 'selected' : '') + '>tiny</option>';
+        if (status) { status.style.display = 'none'; status.textContent = ''; }
+      }
+    },
+
+    async prepareFunASR(model) {
+      var status = document.getElementById('funasr-status');
+      App.state.funasrPreparing = true;
+      var setStatus = function(text, className) {
+        if (status) { status.textContent = text; status.className = 'device-hint ' + (className || ''); }
+      };
+      try {
+        var local = await App.api.getFunASRStatus(model);
+        if (local.ready) {
+          setStatus('✓ FunASR 本地模型已就绪', 'gpu');
+          return local;
+        }
+        setStatus(local.package_installed ? '正在检查/下载本地模型...' : '正在安装 FunASR 依赖...');
+        var ready = await App.api.prepareFunASR(model);
+        setStatus('✓ FunASR 已就绪', 'gpu');
+        return ready;
+      } catch (ex) {
+        var message = ex && ex.message ? ex.message : String(ex);
+        try { message = JSON.parse(message).detail || message; } catch (_) {}
+        setStatus('✗ FunASR 准备失败: ' + message, 'cpu');
+        toast('FunASR 准备失败: ' + message, 'error');
+        throw ex;
+      } finally {
+        App.state.funasrPreparing = false;
       }
     },
 
@@ -2322,7 +2470,8 @@ const App = {
         </div>
         <div class="option-row-full option-field-wrapper" id="speaker-hf-token-row">
           <label>HF Token（pyannote 模型）<span class="tip-icon" title="HuggingFace API Token">?</span></label>
-          <input data-key="speaker_embedding_hf_token" name="speaker-embedding-token" value="${tokenMasked}" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxx" type="password" autocomplete="new-password"
+          <input data-key="speaker_embedding_hf_token" name="speaker-embedding-token" type="text" class="credential-mask" value="${tokenMasked}" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxx"
+                 autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" data-form-type="other" data-lpignore="true"
                  style="${hasToken?'border-color:var(--accent-green);':''}">
           <div class="option-field-tip">
             <div class="tip-title">🔑 如何获取 HF Token</div>
@@ -2424,7 +2573,7 @@ const App = {
         <div class="option-row-full" style="margin-top:8px;">
           <label>LLM API 密钥（Ollama 本地可留空）</label>
           <div style="display:flex;align-items:center;gap:6px;">
-            <input id="llm-api-key" name="llm-api-key" type="password" autocomplete="new-password" placeholder="sk-..." oninput="App.ui._onKeyChange(this)" style="flex:1;" value="${App.ui._escapeAttr(savedKey)}">
+            <input id="llm-api-key" name="llm-api-key" type="text" class="credential-mask" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" data-form-type="other" data-lpignore="true" placeholder="sk-..." oninput="App.ui._onKeyChange(this)" style="flex:1;" value="${App.ui._escapeAttr(savedKey)}">
             <span class="llm-status ${hasKey?'ok':'pending'}" id="llm-key-status">${hasKey?'✓ '+keyMasked:'未配置'}</span>
           </div>
           <div class="llm-hint">输入密钥后点击"获取模型"自动拉取可用模型列表</div>
@@ -2451,8 +2600,7 @@ const App = {
 
       $('#opts-llm').innerHTML = html;
 
-      // 浏览器出于安全原因会忽略 innerHTML 中 password 字段的 value 属性，
-      // 必须通过 JavaScript 显式设置。同时修正初始状态徽章。
+      // 显式同步密钥值，兼容浏览器自动填充，并修正初始状态徽章。
       const keyInput = $('#llm-api-key');
       if (keyInput) {
         keyInput.value = savedKey;
@@ -2983,6 +3131,235 @@ const App = {
       }
     },
 
+    // Subtitle batch editing
+    initSubtitleBatchControls() {
+      var select = document.getElementById('batch-speaker-select');
+      var newInput = document.getElementById('batch-speaker-new');
+      var applyButton = document.getElementById('batch-speaker-apply');
+      var mergeButton = document.getElementById('batch-merge-menu');
+      var clearButton = document.getElementById('batch-clear-selection');
+      if (!select || !newInput || !applyButton || !mergeButton || !clearButton) return;
+
+      select.addEventListener('change', function() {
+        newInput.style.display = this.value === '__new__' ? '' : 'none';
+        if (this.value !== '__new__') newInput.value = '';
+        App.ui.refreshBatchToolbar();
+      });
+      newInput.addEventListener('input', function() { App.ui.refreshBatchToolbar(); });
+      applyButton.addEventListener('click', function() { App.ui.applyBatchSpeaker(); });
+      mergeButton.addEventListener('click', function() {
+        var menu = document.getElementById('batch-merge-options');
+        if (menu) menu.style.display = menu.style.display === 'none' ? 'inline-flex' : 'none';
+      });
+      document.querySelectorAll('#batch-merge-options [data-separator]').forEach(function(button) {
+        button.addEventListener('click', function() {
+          App.ui.applyBatchMerge(this.dataset.separator);
+        });
+      });
+      clearButton.addEventListener('click', function() { App.ui.clearSubtitleSelection(); });
+    },
+
+    clearBatchError() {
+      var error = document.getElementById('subtitle-batch-error');
+      if (error) { error.textContent = ''; error.style.display = 'none'; }
+    },
+
+    showBatchError(error) {
+      var message = error && error.message ? error.message : String(error || '批量操作失败');
+      try {
+        var payload = JSON.parse(message);
+        message = payload.detail || message;
+      } catch (_) {}
+      var errorEl = document.getElementById('subtitle-batch-error');
+      if (errorEl) { errorEl.textContent = message; errorEl.style.display = ''; }
+      toast(message, 'error');
+    },
+
+    clearSubtitleSelection(shouldRender) {
+      App.state.selectedSubtitleIndexes.clear();
+      App.state.selectionAnchorIndex = null;
+      var menu = document.getElementById('batch-merge-options');
+      if (menu) menu.style.display = 'none';
+      App.ui.clearBatchError();
+      if (shouldRender !== false) App.ui.renderTimeline(App.state.subtitleEvents);
+      else App.ui.refreshBatchToolbar();
+    },
+
+    updateSelectionPresentation() {
+      document.querySelectorAll('#subtitle-tbody tr[data-index]').forEach(function(row) {
+        var index = parseInt(row.dataset.index, 10);
+        var selected = App.state.selectedSubtitleIndexes.has(index);
+        row.classList.toggle('subtitle-selected', selected);
+        var checkbox = row.querySelector('.subtitle-select');
+        if (checkbox) checkbox.checked = selected;
+      });
+      App.ui.refreshBatchToolbar();
+    },
+
+    cancelQueuedRowPlayback() {
+      if (App.state.rowClickTimer !== null) {
+        clearTimeout(App.state.rowClickTimer);
+        App.state.rowClickTimer = null;
+      }
+    },
+
+    queueRowPlayback(event) {
+      App.ui.cancelQueuedRowPlayback();
+      App.state.rowClickTimer = setTimeout(function() {
+        App.state.rowClickTimer = null;
+        var row = document.querySelector('tr[data-index="' + event.index + '"]');
+        App.ui.playSegment(event, row ? row.querySelector('.play-btn') : null);
+      }, 220);
+    },
+
+    stopCurrentPlayback() {
+      if (App.state._audioPlayer) {
+        App.state._audioPlayer.pause();
+        App.state._audioPlayer = null;
+      }
+      document.querySelectorAll('.play-btn.playing').forEach(function(button) {
+        button.classList.remove('playing');
+      });
+    },
+
+    handleSubtitleKeyboard(event) {
+      var target = event.target;
+      var isField = target && target.closest && target.closest('input, textarea, select, [contenteditable="true"]');
+      if (isField) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        if (!App.state.subtitleEvents.length) return;
+        event.preventDefault();
+        App.state.selectedSubtitleIndexes = new Set(App.state.subtitleEvents.map(function(item) { return item.index; }));
+        App.state.selectionAnchorIndex = App.state.subtitleEvents[0].index;
+        App.ui.renderTimeline(App.state.subtitleEvents);
+      } else if (event.key === 'Escape' && App.state.selectedSubtitleIndexes.size > 0) {
+        event.preventDefault();
+        App.ui.clearSubtitleSelection();
+      }
+    },
+
+    handleSubtitleSelection(index, event) {
+      var selected = App.state.selectedSubtitleIndexes;
+      var events = App.state.subtitleEvents;
+      var position = events.findIndex(function(item) { return item.index === index; });
+      if (position < 0) return;
+
+      if (event && event.shiftKey && App.state.selectionAnchorIndex !== null) {
+        var anchor = events.findIndex(function(item) { return item.index === App.state.selectionAnchorIndex; });
+        if (anchor >= 0) {
+          selected.clear();
+          var start = Math.min(anchor, position);
+          var end = Math.max(anchor, position);
+          for (var i = start; i <= end; i++) selected.add(events[i].index);
+        }
+      } else if (event && (event.ctrlKey || event.metaKey)) {
+        if (selected.has(index)) selected.delete(index);
+        else selected.add(index);
+        App.state.selectionAnchorIndex = index;
+      } else {
+        selected.clear();
+        selected.add(index);
+        App.state.selectionAnchorIndex = index;
+      }
+      App.ui.updateSelectionPresentation();
+    },
+
+    selectedSubtitleIndexes() {
+      return Array.from(App.state.selectedSubtitleIndexes).sort(function(a, b) { return a - b; });
+    },
+
+    speakerCandidates() {
+      var candidates = new Map();
+      App.state.subtitleEvents.forEach(function(event) {
+        var label = (event.speaker_label || '').trim();
+        var id = event.speaker_id === null || event.speaker_id === undefined ? null : event.speaker_id;
+        if (!label && id === null) return;
+        var display = label || ('说话人 ' + (id < 26 ? String.fromCharCode(65 + id) : id));
+        var key = id === null ? 'label:' + encodeURIComponent(label) : 'id:' + id;
+        if (!candidates.has(key)) candidates.set(key, {key: key, id: id, label: display});
+      });
+      return Array.from(candidates.values());
+    },
+
+    refreshBatchToolbar() {
+      var toolbar = document.getElementById('subtitle-batch-toolbar');
+      var count = document.getElementById('subtitle-batch-count');
+      var select = document.getElementById('batch-speaker-select');
+      var newInput = document.getElementById('batch-speaker-new');
+      var applyButton = document.getElementById('batch-speaker-apply');
+      var mergeButton = document.getElementById('batch-merge-menu');
+      var mergeMenu = document.getElementById('batch-merge-options');
+      if (!toolbar || !count || !select || !newInput || !applyButton || !mergeButton) return;
+
+      var indexes = App.ui.selectedSubtitleIndexes();
+      toolbar.style.display = indexes.length ? 'flex' : 'none';
+      count.textContent = '已选择 ' + indexes.length + ' 条';
+      mergeButton.disabled = indexes.length < 2;
+      applyButton.disabled = !indexes.length || !select.value ||
+        (select.value === '__new__' && !newInput.value.trim());
+      if (!indexes.length && mergeMenu) mergeMenu.style.display = 'none';
+    },
+
+    renderBatchToolbar() {
+      var select = document.getElementById('batch-speaker-select');
+      if (!select) return;
+      var previous = select.value;
+      var html = '<option value="">选择说话人</option>';
+      App.ui.speakerCandidates().forEach(function(candidate) {
+        html += '<option value="' + App.ui._escapeAttr(candidate.key) + '">' + App.ui._escapeHtml(candidate.label) + '</option>';
+      });
+      html += '<option value="__new__">+ 添加说话人</option>';
+      select.innerHTML = html;
+      if (previous) {
+        Array.from(select.options).some(function(option) {
+          if (option.value === previous) { select.value = previous; return true; }
+          return false;
+        });
+      }
+      var newInput = document.getElementById('batch-speaker-new');
+      if (newInput) newInput.style.display = select.value === '__new__' ? '' : 'none';
+      App.ui.refreshBatchToolbar();
+    },
+
+    async applyBatchSpeaker() {
+      var select = document.getElementById('batch-speaker-select');
+      var newInput = document.getElementById('batch-speaker-new');
+      if (!select || !select.value || !App.state.taskId) return;
+      var payload = {action: 'speaker', indexes: App.ui.selectedSubtitleIndexes()};
+      if (select.value === '__new__') {
+        payload.speaker_label = (newInput.value || '').trim();
+      } else if (select.value.indexOf('id:') === 0) {
+        payload.speaker_id = parseInt(select.value.slice(3), 10);
+        payload.speaker_label = select.options[select.selectedIndex].textContent;
+      } else {
+        payload.speaker_label = decodeURIComponent(select.value.slice(6));
+      }
+      try {
+        var result = await App.api.batchEditSubtitles(App.state.taskId, payload);
+        App.state.subtitleEvents = result.events || [];
+        App.ui.clearSubtitleSelection(false);
+        App.ui.renderTimeline(App.state.subtitleEvents);
+        toast('已批量更新说话人并写入最终字幕', 'success');
+      } catch (ex) {
+        App.ui.showBatchError(ex);
+      }
+    },
+
+    async applyBatchMerge(separator) {
+      if (!App.state.taskId) return;
+      try {
+        var result = await App.api.batchEditSubtitles(App.state.taskId, {
+          action: 'merge', indexes: App.ui.selectedSubtitleIndexes(), separator: separator
+        });
+        App.state.subtitleEvents = result.events || [];
+        App.ui.clearSubtitleSelection(false);
+        App.ui.renderTimeline(App.state.subtitleEvents);
+        toast('字幕已合并并写入最终字幕', 'success');
+      } catch (ex) {
+        App.ui.showBatchError(ex);
+      }
+    },
+
     // Timeline
     renderTimeline(events) {
       const tbody = $('#subtitle-tbody');
@@ -2993,9 +3370,9 @@ const App = {
 
       // 更新表头（增加播放列）
       if (useCompare) {
-        thead.innerHTML = '<th class="col-idx">#</th><th class="col-time">开始</th><th class="col-time">结束</th><th class="col-speaker">说话人</th><th class="col-original">原文 (ASR)</th><th>优化后 (LLM)</th><th>最终版本 (' + finalFmt.toUpperCase() + ')</th><th class="col-play">播放</th>';
+        thead.innerHTML = '<th class="col-select">选</th><th class="col-idx">#</th><th class="col-time">开始</th><th class="col-time">结束</th><th class="col-speaker">说话人</th><th class="col-original">原文 (ASR)</th><th>优化后 (LLM)</th><th>最终版本 (' + finalFmt.toUpperCase() + ')</th><th class="col-play">播放</th>';
       } else {
-        thead.innerHTML = '<th class="col-idx">#</th><th class="col-time">开始</th><th class="col-time">结束</th><th class="col-speaker">说话人</th><th>最终版本 (' + finalFmt.toUpperCase() + ')</th><th class="col-play">播放</th>';
+        thead.innerHTML = '<th class="col-select">选</th><th class="col-idx">#</th><th class="col-time">开始</th><th class="col-time">结束</th><th class="col-speaker">说话人</th><th>最终版本 (' + finalFmt.toUpperCase() + ')</th><th class="col-play">播放</th>';
       }
 
       // 对比视图切换按钮 + 最终版本格式切换
@@ -3065,9 +3442,14 @@ const App = {
         }
 
         const tr = document.createElement('tr');
+        tr.dataset.index = String(e.index);
+        if (App.state.selectedSubtitleIndexes.has(e.index)) tr.classList.add('subtitle-selected');
+        var selectCell = '<td class="col-select"><input type="checkbox" class="subtitle-select" data-index="' + e.index + '" ' +
+          (App.state.selectedSubtitleIndexes.has(e.index) ? 'checked ' : '') +
+          'aria-label="选择字幕 ' + e.index + '"></td>';
         if (useCompare) {
           tr.innerHTML =
-            '<td class="col-idx">' + e.index + '</td>' +
+            selectCell + '<td class="col-idx">' + e.index + '</td>' +
             '<td class="col-time">' + formatTime(e.start) + '</td>' +
             '<td class="col-time">' + formatTime(e.end) + '</td>' +
             '<td class="col-speaker">' + speaker + '</td>' +
@@ -3077,7 +3459,7 @@ const App = {
             '<td class="col-play"><span class="play-btn" data-play="' + e.index + '" title="播放此段音频">▶</span></td>';
         } else {
           tr.innerHTML =
-            '<td class="col-idx">' + e.index + '</td>' +
+            selectCell + '<td class="col-idx">' + e.index + '</td>' +
             '<td class="col-time">' + formatTime(e.start) + '</td>' +
             '<td class="col-time">' + formatTime(e.end) + '</td>' +
             '<td class="col-speaker">' + speaker + '</td>' +
@@ -3089,7 +3471,7 @@ const App = {
         // 单击行任意位置 → 播放；双击文本列 → 编辑对应文本；
         // 双击时间/说话人区域 → 编辑该行最终字幕；播放按钮仅播放不编辑。
         //
-        // 行级 click：立即播放（无延迟）。
+        // 行级 click：先更新选区，再延迟播放；双击时由 dblclick 取消播放。
         // 行级 dblclick：停止播放，对非文本列区域打开最终字幕编辑。
         // 列级 dblclick：停止播放，对该列文本打开编辑。
         // 播放按钮：stopPropagation 阻止事件冒泡到行级。
@@ -3097,8 +3479,8 @@ const App = {
         tr.addEventListener('click', function(ev) {
           var target = ev.target;
           if (target && target.closest && target.closest('.play-btn, input, button, select, textarea')) return;
-          var rowPlayBtn = tr.querySelector('.play-btn');
-          App.ui.playSegment(e, rowPlayBtn);
+          App.ui.handleSubtitleSelection(e.index, ev);
+          App.ui.queueRowPlayback(e);
         });
 
         tr.addEventListener('dblclick', function(ev) {
@@ -3108,11 +3490,8 @@ const App = {
           // 文本列由各自的列级 dblclick 处理
           if (target && target.closest && target.closest('.col-original, .col-optimized, .col-final')) return;
           // 停止当前音频
-          if (App.state._audioPlayer) {
-            App.state._audioPlayer.pause();
-            App.state._audioPlayer = null;
-            document.querySelectorAll('.play-btn.playing').forEach(function(b) { b.classList.remove('playing'); });
-          }
+          App.ui.cancelQueuedRowPlayback();
+          App.ui.stopCurrentPlayback();
           var rowFinalCell = tr.querySelector('.col-final');
           if (rowFinalCell) App.ui.editSubtitle(rowFinalCell, e.index);
         });
@@ -3121,11 +3500,8 @@ const App = {
         if (finalCell) {
           finalCell.addEventListener('dblclick', function() {
             // 停止当前音频
-            if (App.state._audioPlayer) {
-              App.state._audioPlayer.pause();
-              App.state._audioPlayer = null;
-              document.querySelectorAll('.play-btn.playing').forEach(function(b) { b.classList.remove('playing'); });
-            }
+            App.ui.cancelQueuedRowPlayback();
+            App.ui.stopCurrentPlayback();
             App.ui.editSubtitle(finalCell, e.index);
           });
         }
@@ -3135,19 +3511,13 @@ const App = {
           var origCell = tr.querySelector('.col-original');
           var optCell = tr.querySelector('.col-optimized');
           if (origCell) origCell.addEventListener('dblclick', function() {
-            if (App.state._audioPlayer) {
-              App.state._audioPlayer.pause();
-              App.state._audioPlayer = null;
-              document.querySelectorAll('.play-btn.playing').forEach(function(b) { b.classList.remove('playing'); });
-            }
+            App.ui.cancelQueuedRowPlayback();
+            App.ui.stopCurrentPlayback();
             App.ui.editSubtitle(origCell, e.index);
           });
           if (optCell) optCell.addEventListener('dblclick', function() {
-            if (App.state._audioPlayer) {
-              App.state._audioPlayer.pause();
-              App.state._audioPlayer = null;
-              document.querySelectorAll('.play-btn.playing').forEach(function(b) { b.classList.remove('playing'); });
-            }
+            App.ui.cancelQueuedRowPlayback();
+            App.ui.stopCurrentPlayback();
             App.ui.editSubtitle(optCell, e.index);
           });
         }
@@ -3157,6 +3527,7 @@ const App = {
         if (playBtn) {
           playBtn.addEventListener('click', function(ev) {
             ev.stopPropagation();
+            App.ui.cancelQueuedRowPlayback();
             // 防抖：双击时避免重复触发播放
             var now = Date.now();
             var lastPlay = parseInt(this.getAttribute('data-last-play') || '0');
@@ -3169,8 +3540,17 @@ const App = {
           });
         }
 
+        var checkbox = tr.querySelector('.subtitle-select');
+        if (checkbox) {
+          checkbox.addEventListener('click', function(ev) { ev.stopPropagation(); });
+          checkbox.addEventListener('change', function(ev) {
+            App.ui.handleSubtitleSelection(e.index, ev);
+          });
+        }
+
         tbody.appendChild(tr);
       });
+      App.ui.renderBatchToolbar();
     },
 
     switchView(mode) {

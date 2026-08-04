@@ -714,7 +714,7 @@ _build_base_extras() {
     #   GPU + torch   → silero-vad (GPU) + gpu (CTranslate2 CUDA)    [最强]
     #   CPU + torch   → silero-vad (CPU PyTorch, --cpu 模式)         [中等]
     #   无 torch       → webrtcvad (纯 CPU, 轻量, 默认/--no-torch)    [最轻]
-    local extras="faster-whisper"
+    local extras="faster-whisper,funasr"
     if [ "$SKIP_TORCH" = true ]; then
         extras="${extras},webrtcvad"
         info "VAD: WebRTC VAD (纯 CPU, 轻量, --no-torch)" >&2
@@ -743,7 +743,7 @@ case "$INSTALL_MODE" in
         if [ "$HAS_GPU" = true ] && [ "$SKIP_TORCH" = false ]; then
             install_pip_deps "all"
         else
-            install_pip_deps "gpu,llm,local-nlp,uvr,spleeter,openunmix,webrtcvad,faster-whisper,webui,diarization"
+            install_pip_deps "gpu,llm,local-nlp,uvr,spleeter,openunmix,webrtcvad,faster-whisper,funasr,webui,diarization"
         fi
         ;;
     dev)
@@ -753,7 +753,7 @@ case "$INSTALL_MODE" in
     *)
         # 组合模式: 自动补充 GPU 相关 extras
         # 始终包含 faster-whisper (ASR 核心) 作为基础
-        EXTRAS="faster-whisper"
+        EXTRAS="faster-whisper,funasr"
         # GPU 加速: 检测到 GPU 且未显式指定 webrtcvad → 自动启用 silero-vad
         if [ "$HAS_GPU" = true ] && [ "$SKIP_TORCH" = false ]; then
             if [[ "$INSTALL_MODE" != *webrtcvad* ]]; then

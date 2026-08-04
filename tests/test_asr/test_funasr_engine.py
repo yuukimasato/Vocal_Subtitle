@@ -1,6 +1,7 @@
 """测试 FunASR 引擎"""
 
 from vocal_subtitle.asr.funasr_engine import FunASREngine
+from vocal_subtitle.asr.funasr_manager import DEFAULT_FUNASR_MODEL
 
 
 class TestFunASREngine:
@@ -13,6 +14,10 @@ class TestFunASREngine:
     def test_model_name(self):
         engine = FunASREngine()
         assert "paraformer" in engine.model_name.lower()
+
+    def test_generic_model_name_uses_funasr_default(self):
+        engine = FunASREngine(model="large-v3")
+        assert engine._model_id == DEFAULT_FUNASR_MODEL
 
     def test_default_parameters(self):
         engine = FunASREngine()

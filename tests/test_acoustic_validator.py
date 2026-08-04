@@ -7,10 +7,12 @@ from vocal_subtitle.acoustic_validator import (
     AcousticValidationConfig,
     AcousticValidator,
     _find_boundary_in_skeleton,
+    _find_directional_boundary,
     _has_speech_in_range,
     _is_time_in_speech,
     _rms_energy_check,
 )
+from vocal_subtitle.asr.base import WordTimestamp
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 
 
@@ -45,6 +47,24 @@ class TestHelperFunctions:
         is_in, nearest = _find_boundary_in_skeleton(9.0, skeleton)
         assert is_in is False
         assert nearest == 8.0  # 最后一个语音终点
+
+    def test_directional_boundary_uses_previous_end_for_end(self, skeleton):
+        """end 在静音间隙中必须选择前一个语音终点"""
+        is_in, candidate, containing = _find_directional_boundary(
+            4.0, skeleton, "end",
+        )
+        assert is_in is False
+        assert candidate == 3.0
+        assert containing is None
+
+    def test_directional_boundary_uses_next_start_for_start(self, skeleton):
+        """start 在静音间隙中选择后一个语音起点"""
+        is_in, candidate, containing = _find_directional_boundary(
+            4.0, skeleton, "start",
+        )
+        assert is_in is False
+        assert candidate == 5.0
+        assert containing is None
 
     def test_find_boundary_empty_skeleton(self):
         """空骨架"""
@@ -166,6 +186,54 @@ class TestAcousticValidator:
         )
         # start=0.69 离语音起点 0.7 只有 0.01s < 0.03 → 无条件吸附
         assert report["snapped_starts"] == 1
+
+    def test_high_confidence_word_boundary_is_preserved(self, validator):
+        """可靠词级时间戳优先于物理吸附"""
+        skeleton = [(0.0, 1.0), (1.3, 2.0)]
+        event = SubtitleEvent(
+            index=1,
+            start=1.15,
+            end=1.25,
+            text="Reliable",
+            words=[WordTimestamp(
+                word="Reliable", start=1.15, end=1.15, confidence=0.95,
+            )],
+        )
+        result, report = validator._physical_snap_validation(
+            [event], skeleton, audio=None, sample_rate=16000,
+        )
+        assert result[0].start == pytest.approx(1.15)
+        assert result[0].end == pytest.approx(1.25)
+        assert report["skipped_high_confidence"] == 2
+
+    def test_end_shorten_requires_audio_confirmation(self, validator):
+        """结束回缩需要局部静音证据"""
+        sample_rate = 16000
+        audio = np.zeros(sample_rate * 2, dtype=np.float32)
+        t = np.arange(sample_rate, dtype=np.float32) / sample_rate
+        audio[:sample_rate] = np.sin(2 * np.pi * 440 * t) * 0.5
+        audio[int(1.3 * sample_rate):] = (
+            np.sin(2 * np.pi * 440 * t[:int(0.7 * sample_rate)]) * 0.5
+        )
+        event = SubtitleEvent(index=1, start=0.5, end=1.15, text="Shorten")
+        result, report = validator._physical_snap_validation(
+            [event], [(0.0, 1.0), (1.3, 2.0)], audio, sample_rate,
+        )
+        assert result[0].end == pytest.approx(0.99, abs=0.01)
+        assert report["snapped_ends"] == 1
+
+    def test_end_inside_speech_is_flagged_without_extension(self, validator):
+        """连续语音内部的疑似截尾只诊断，不自动延长"""
+        event = SubtitleEvent(index=1, start=0.2, end=0.9, text="Possible tail")
+        result, report = validator._physical_snap_validation(
+            [event], [(0.0, 1.0)], audio=None, sample_rate=16000,
+        )
+        assert result[0].end == pytest.approx(0.9)
+        assert report["snapped_ends"] == 0
+        assert any(
+            item["issue"] == "possible_truncation"
+            for item in report["events_flagged"]
+        )
 
     def test_physical_snap_end_truncation(self, validator, loud_audio):
         """切尾应被修正"""

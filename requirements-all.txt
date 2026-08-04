@@ -45,6 +45,9 @@ GPUtil>=1.4; python_version < '3.12'
 # ---- 核心 ASR 引擎 (CTranslate2 加速) ----
 faster-whisper>=1.0
 
+# ---- FunASR 中文 ASR 引擎 (WebUI 选择时自动准备模型) ----
+funasr>=1.0
+
 # ---- Silero VAD 引擎 (PyTorch) ----
 torch>=2.0
 torchaudio>=2.0

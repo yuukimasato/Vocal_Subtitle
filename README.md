@@ -3,7 +3,8 @@
 从原始音视频文件中自动提取人声并生成精准字幕 (SRT / VTT / ASS)。
 
 > **核心约束**：全链路仅使用 MIT / Apache 2.0 / BSD 等宽松协议的工具，确保可自由商用，零合规风险。
-
+![preview1](https://github.com/yuukimasato/Vocal_Subtitle/blob/main/resources/preview1.png)
+![preview1](https://github.com/yuukimasato/Vocal_Subtitle/blob/main/resources/preview2.png)
 ## 功能特性
 
 - **全链路自动化**：人声分离 → VAD 检测 → 片段合并 → 说话人分离 → ASR 识别 → 时间轴映射 → 字幕输出
