@@ -44,6 +44,6 @@ __all__ = [
     "PipelineConfig",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "vocal-subtitle contributors"
 __license__ = "MIT"

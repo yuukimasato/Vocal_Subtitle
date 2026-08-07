@@ -69,7 +69,7 @@ def _verbose_option(f):
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="vocal-subtitle")
+@click.version_option(version="0.2.0", prog_name="vocal-subtitle")
 def main():
     """人声分离 + 字幕生成全链路工具
 

@@ -44,7 +44,7 @@ banner() {
     echo ""
     echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║${NC}     ${CYAN}Vocal Subtitle — 人声分离 + 字幕生成工具${NC}       ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}              一键安装脚本 v0.3.0                    ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}              一键安装脚本 v0.2.0                    ${GREEN}║${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -794,7 +794,7 @@ fi
 
 # 6b. CLI 可用性验证
 if command -v vocal-subtitle &> /dev/null; then
-    CLI_VER=$(vocal-subtitle --version 2>&1 || echo "0.1.0")
+    CLI_VER=$(vocal-subtitle --version 2>&1 || echo "0.2.0")
     ok "CLI 命令可用: vocal-subtitle ($CLI_VER)"
 else
     warn "CLI 命令不在 PATH 中，确认虚拟环境已激活"

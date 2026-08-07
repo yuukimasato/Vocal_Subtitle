@@ -39,7 +39,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Vocal Subtitle",
         description="人声分离 + 字幕生成全链路工具 — Web GUI",
-        version="0.1.0",
+        version="0.2.0",
     )
 
     # CORS 中间件（允许本地开发）

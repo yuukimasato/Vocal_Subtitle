@@ -60,24 +60,30 @@ def test_quality_manifest_contains_existing_fixture_pairs():
     root = Path(__file__).resolve().parents[1]
     scenes = load_manifest(root / "test/quality_manifest.yaml", root)
 
-    assert len(scenes) == 8
+    assert len(scenes) == 10
     assert {scene["category"] for scene in scenes} == {
         "single_speaker",
         "multi_speaker",
+        "non_speech",
     }
     assert all(scene["audio_path"].is_file() for scene in scenes)
-    assert sum(scene["ground_truth_path"] is not None for scene in scenes) == 6
+    assert sum(scene["ground_truth_path"] is not None for scene in scenes) == 8
     assert all(
         scene["ground_truth_path"] is None
         or scene["ground_truth_path"].is_file()
         for scene in scenes
     )
-    assert all(scene.get("language") in {"zh", "en"} for scene in scenes)
-    assert all(scene.get("speaker_count", 0) >= 1 for scene in scenes)
+    assert all(scene.get("language") in {"zh", "en", "mixed", "none"} for scene in scenes)
+    assert all(scene.get("speaker_count", 0) >= 0 for scene in scenes)
     assert any(
         "overlap_or_interruption" in scene.get("tags", []) for scene in scenes
     )
-    assert {"中文朗读双人", "巧乐兹"} <= {scene["name"] for scene in scenes}
+    assert {
+        "中文朗读双人",
+        "巧乐兹",
+        "合成非语音-纯音与噪声",
+        "合成重复短语-我",
+    } <= {scene["name"] for scene in scenes}
 
 
 def test_quality_manifest_rejects_duplicate_names(tmp_path):

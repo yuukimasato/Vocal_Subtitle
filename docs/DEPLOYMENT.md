@@ -44,7 +44,7 @@ bash install.sh --no-torch
 ```bash
 bash build-deb.sh --check
 bash build-deb.sh
-sudo apt install ./vocal-subtitle_0.1.0_all.deb
+sudo apt install ./vocal-subtitle_0.2.0_all.deb
 ```
 
 安装包会创建 `base + whisperx` Python 环境并启动本机 GUI：
@@ -90,7 +90,7 @@ journalctl -u vocal-subtitle-gui -f
 普通升级会保留虚拟环境、配置和模型缓存：
 
 ```bash
-sudo apt install ./vocal-subtitle_0.1.0_all.deb
+sudo apt install ./vocal-subtitle_0.2.0_all.deb
 ```
 
 普通卸载保留生成数据；完全清理使用：
