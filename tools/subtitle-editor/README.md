@@ -6,7 +6,17 @@
 
 ## 启动
 
-ES Modules 需要 HTTP 服务（不支持 `file://` 直接打开）：
+两种方式：
+
+**方式一：单文件版（双击即用）**
+
+直接用浏览器打开 `subtitle-editor-standalone.html`——全部代码与 JASSUB 的 wasm/worker/字体内嵌在一个文件里，无需任何服务。`file://` 下浏览器的 Worker 限制可能使 ASS 样式预览自动回退为纯文本预览（其余功能不受影响）。
+
+重新生成单文件版：`node build-standalone.mjs`（需 npx 拉取 esbuild，仅构建期使用）。
+
+**方式二：模块版（开发形态）**
+
+ES Modules 需要 HTTP 服务（`file://` 直接打开 `index.html` 会被浏览器安全策略拦截）：
 
 ```bash
 cd tools/subtitle-editor

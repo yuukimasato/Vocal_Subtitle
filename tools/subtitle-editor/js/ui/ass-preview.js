@@ -3,6 +3,14 @@
 import JASSUB from '../../vendor/jassub.esm.js';
 
 const VENDOR_URL = new URL('../../vendor/', import.meta.url).href;
+// 单文件版（build-standalone.mjs）会把 wasm/worker/字体内嵌为 blob URL 注入到这里
+const ASSETS = typeof window !== 'undefined' && window.VstEditorVendorAssets
+  ? window.VstEditorVendorAssets
+  : {
+      jassubWorker: VENDOR_URL + 'jassub-worker.js',
+      jassubWasm: VENDOR_URL + 'jassub-worker.wasm',
+      jassubFont: VENDOR_URL + 'jassub-default.woff2',
+    };
 const REBUILD_DELAY = 600;
 // 初始化兜底：worker 偶发卡死（headless/软件渲染环境），超时且无绘制即回退
 const INIT_TIMEOUT = 15000;
@@ -75,9 +83,9 @@ export function createAssPreview({ store, player, serialize, onNotice }) {
       const created = new JASSUB({
         video,
         subContent: currentContent(),
-        workerUrl: VENDOR_URL + 'jassub-worker.js',
-        wasmUrl: VENDOR_URL + 'jassub-worker.wasm',
-        availableFonts: { 'Liberation Sans': VENDOR_URL + 'jassub-default.woff2' },
+        workerUrl: ASSETS.jassubWorker,
+        wasmUrl: ASSETS.jassubWasm,
+        availableFonts: { 'Liberation Sans': ASSETS.jassubFont },
         defaultFont: 'Liberation Sans',
       });
       if (gen !== generation) {

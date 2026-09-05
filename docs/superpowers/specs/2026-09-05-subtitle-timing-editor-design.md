@@ -40,6 +40,8 @@
 
 零构建：原生 ES Modules + 静态文件，无 npm 依赖、无打包步骤（vendor 产物在开发期一次性生成后入库）。本地预览需经 HTTP（ES Modules 不支持 `file://`），用 `python3 -m http.server` 或任意静态服务器指向本目录。
 
+另有 `build-standalone.mjs` 一次性生成单文件版 `subtitle-editor-standalone.html`（全部 JS/CSS 内联，JASSUB 的 wasm/worker/字体以 base64 转 blob URL 注入），双击即可使用；`file://` 下 Worker 受限时 ASS 样式预览自动回退为纯文本预览。
+
 ```text
 tools/subtitle-editor/
   index.html              # 唯一入口
