@@ -137,7 +137,8 @@ function handlePlain(event, { store, actions, player }) {
       return;
     case 'KeyN': {
       event.preventDefault();
-      actions.insertAtTime(player.currentTime());
+      const cue = actions.insertAtTime(player.currentTime());
+      if (cue) actions.setEditing(cue.id);
       return;
     }
     case 'Delete':

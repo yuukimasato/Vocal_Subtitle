@@ -116,20 +116,19 @@ body {
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-secondary); }
 .btn-ghost:hover:not(:disabled) { color: var(--text-primary); background: var(--surface); }
 
-/* ---------- 工作区布局 ---------- */
+/* ---------- 工作区布局（面板可拖拽调整大小） ---------- */
 .workspace {
   flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 400px;
-  gap: 12px;
+  display: flex;
   padding: 12px;
   min-height: 0;
+  gap: 2px;
 }
 
 .stage {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
   min-width: 0;
   min-height: 0;
 }
@@ -137,11 +136,37 @@ body {
 .video-wrap {
   position: relative;
   flex: 1 1 auto;
-  min-height: 200px;
+  min-height: 120px;
   background: #000;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+}
+
+/* ---------- 拖拽分隔条 ---------- */
+.splitter {
+  flex: none;
+  background: transparent;
+  border-radius: 4px;
+  transition: background 0.15s;
+  touch-action: none;
+}
+
+.splitter:hover, .splitter.dragging {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+.splitter-h {
+  height: 10px;
+  margin: 5px 0;
+  cursor: row-resize;
+}
+
+.splitter-v {
+  width: 10px;
+  margin: 0 5px;
+  cursor: col-resize;
 }
 
 #video-mount { position: absolute; inset: 0; }
@@ -196,7 +221,7 @@ body {
 /* ---------- 波形区 ---------- */
 .wave-wrap {
   position: relative;
-  height: 172px;
+  height: var(--wave-h, 180px);
   flex: none;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -289,6 +314,9 @@ body {
 
 /* ---------- 字幕面板 ---------- */
 .cue-pane {
+  flex: none;
+  width: var(--cue-w, 400px);
+  min-width: 280px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -490,10 +518,12 @@ dialog code { background: var(--bg-tertiary); padding: 1px 5px; border-radius: 4
 @media (max-width: 1100px) {
   body { overflow: auto; }
   .workspace {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
+  .splitter { display: none; } /* 堆叠布局不提供拖拽 */
   .video-wrap { min-height: 260px; }
-  .cue-pane { max-height: 46vh; }
+  .wave-wrap { height: 160px; }
+  .cue-pane { width: auto; max-height: 46vh; }
 }
 
 @media (max-width: 640px) {

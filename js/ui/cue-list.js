@@ -11,7 +11,10 @@ export function createCueList({ store, actions, player, tbodyEl, countEl, toolsE
   // ---------- 工具条 ----------
   const [insertBtn, deleteBtn, splitBtn, mergeBtn] = toolsEl.querySelectorAll('button');
   const followBox = toolsEl.querySelector('input[type="checkbox"]');
-  insertBtn.addEventListener('click', () => actions.insertAtTime(player.currentTime()));
+  insertBtn.addEventListener('click', () => {
+    const cue = actions.insertAtTime(player.currentTime());
+    if (cue) actions.setEditing(cue.id); // 新建后直接进入文本编辑
+  });
   deleteBtn.addEventListener('click', () => {
     const cue = store.selectedCue();
     if (cue) actions.removeCue(cue.id);
@@ -159,6 +162,14 @@ export function createCueList({ store, actions, player, tbodyEl, countEl, toolsE
       actions.setEditing(null);
     };
 
+    // 焦点离开整行才提交：在时间框/文本框之间切换焦点不退出编辑
+    const commitIfFocusLeftRow = () => {
+      setTimeout(() => {
+        if (!editing || editing.committed) return;
+        if (!tr.contains(document.activeElement)) commit();
+      }, 0);
+    };
+
     [startInput, endInput].forEach((input) => {
       input.addEventListener('input', () => input.classList.remove('invalid'));
       input.addEventListener('keydown', (e) => {
@@ -180,16 +191,14 @@ export function createCueList({ store, actions, player, tbodyEl, countEl, toolsE
         commit();
       }
     });
-    textarea.addEventListener('blur', () => commit());
-    startInput.addEventListener('blur', () => commit());
-    endInput.addEventListener('blur', () => commit());
+    [startInput, endInput, textarea].forEach((el) => el.addEventListener('blur', commitIfFocusLeftRow));
     tr.querySelector('.op.ok').addEventListener('click', () => commit());
-    tr.querySelector('.op.cancel').addEventListener('mousedown', () => {
-      if (editing) editing.committed = true; // 阻止 blur 先触发提交
-    });
     tr.querySelector('.op.cancel').addEventListener('click', () => cancel());
 
-    setTimeout(() => startInput.focus(), 0);
+    setTimeout(() => {
+      if (cue.text) startInput.focus();
+      else textarea.focus(); // 新建空句直接进入文本输入
+    }, 0);
     rows.set(cue.id, tr);
     return tr;
   }

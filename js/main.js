@@ -7,11 +7,14 @@ import { createWaveform } from './ui/waveform.js';
 import { createAssPreview } from './ui/ass-preview.js';
 import { createCueList } from './ui/cue-list.js';
 import { createToolbar } from './ui/toolbar.js';
+import { initSplitters } from './ui/splitters.js';
 import { createDraftStore } from './draft.js';
 import { serializeSubtitle } from './format/index.js';
 import { showToast } from './ui/toast.js';
 
 const $ = (selector) => document.querySelector(selector);
+
+initSplitters();
 
 const store = createStore();
 const actions = createActions(store);
