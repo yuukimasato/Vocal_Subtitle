@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>字幕打轴工作台 · Vocal Subtitle</title>
+  <link rel="stylesheet" href="css/editor.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <rect x="2" y="10" width="3" height="6" rx="1" fill="#7c9cff"/>
+        <rect x="7" y="6" width="3" height="12" rx="1" fill="#7c9cff"/>
+        <rect x="12" y="3" width="3" height="18" rx="1" fill="#ad7bff"/>
+        <rect x="17" y="8" width="3" height="8" rx="1" fill="#7c9cff"/>
+      </svg>
+      <span class="brand-name">字幕打轴工作台</span>
+      <span class="brand-sub">Vocal Subtitle</span>
+    </div>
+    <div class="topbar-actions">
+      <button id="btn-open-media" class="btn btn-primary" type="button">打开媒体</button>
+      <button id="btn-open-subtitle" class="btn" type="button">打开字幕</button>
+      <span class="sep"></span>
+      <button id="btn-undo" class="btn" type="button" title="撤销（Ctrl+Z）" disabled>撤销</button>
+      <button id="btn-redo" class="btn" type="button" title="重做（Ctrl+Shift+Z）" disabled>重做</button>
+      <span class="sep"></span>
+      <button class="btn" type="button" data-export="srt">导出 SRT</button>
+      <button class="btn" type="button" data-export="vtt">导出 VTT</button>
+      <button class="btn" type="button" data-export="ass">导出 ASS</button>
+      <span class="sep"></span>
+      <button id="btn-help" class="btn btn-ghost" type="button">快捷键</button>
+      <button id="btn-about" class="btn btn-ghost" type="button">关于</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="stage">
+      <div class="video-wrap">
+        <div id="video-mount"></div>
+        <div id="stage-empty" class="stage-empty">
+          <p class="stage-empty-title">拖入 视频 / 音频 文件开始</p>
+          <p>也支持拖入 SRT / VTT / ASS 字幕文件</p>
+        </div>
+      </div>
+      <div class="wave-wrap">
+        <div id="waveform"></div>
+        <div id="wave-fallback" hidden><canvas></canvas></div>
+        <div id="wave-msg" class="wave-msg"></div>
+      </div>
+      <div id="transport" class="transport"></div>
+    </section>
+
+    <aside class="cue-pane">
+      <div id="cue-tools" class="cue-tools">
+        <button class="btn" type="button" title="在播放头处新建（N）">插入</button>
+        <button class="btn" type="button" title="删除选中（Delete）">删除</button>
+        <button class="btn" type="button" title="在播放头处拆分（Ctrl+D）">拆分</button>
+        <button class="btn" type="button" title="与下一句合并（Ctrl+M）">合并</button>
+        <label class="follow-label"><input type="checkbox" checked> 跟随</label>
+        <span id="cue-count" class="cue-count"></span>
+      </div>
+      <div class="cue-table-wrap">
+        <table id="cue-table">
+          <thead>
+            <tr>
+              <th class="col-num">#</th>
+              <th>开始</th>
+              <th>结束</th>
+              <th>时长</th>
+              <th class="col-text">文本</th>
+              <th class="col-ops"></th>
+            </tr>
+          </thead>
+          <tbody id="cue-tbody"></tbody>
+        </table>
+      </div>
+    </aside>
+  </main>
+
+  <input type="file" id="media-input" hidden accept="video/*,audio/*">
+  <input type="file" id="subtitle-input" hidden accept=".srt,.vtt,.ass,.ssa,text/plain">
+
+  <dialog id="help-dialog">
+    <h2>键盘快捷键</h2>
+    <p class="dialog-hint">时间轴键位在小键盘（NumLock 任意状态均可），无小键盘时主键盘数字排等效。</p>
+    <div class="help-grid">
+      <table>
+        <tbody>
+          <tr><td><kbd>小键盘 5</kbd></td><td>播放当前字幕，到结束为止</td></tr>
+          <tr><td><kbd>小键盘 1</kbd></td><td>试听开始点之前 500ms</td></tr>
+          <tr><td><kbd>小键盘 3</kbd></td><td>试听结束点之后 500ms</td></tr>
+          <tr><td><kbd>小键盘 8</kbd></td><td>停止播放</td></tr>
+          <tr><td><kbd>小键盘 4 / 6</kbd></td><td>开始点前移 / 后移（Shift 微调 10ms）</td></tr>
+          <tr><td><kbd>小键盘 7 / 9</kbd></td><td>缩短 / 加长当前句（Shift 微调 10ms）</td></tr>
+          <tr><td><kbd>小键盘 2 / 0</kbd></td><td>下一句 / 上一句</td></tr>
+          <tr><td><kbd>小键盘 Enter</kbd></td><td>提交编辑并停止试听</td></tr>
+        </tbody>
+      </table>
+      <table>
+        <tbody>
+          <tr><td><kbd>Space</kbd></td><td>播放 / 暂停</td></tr>
+          <tr><td><kbd>← / →</kbd></td><td>快退 / 快进 5s（Shift 1s）</td></tr>
+          <tr><td><kbd>, / .</kbd></td><td>上一帧 / 下一帧</td></tr>
+          <tr><td><kbd>N</kbd></td><td>在播放头处插入字幕</td></tr>
+          <tr><td><kbd>Delete</kbd></td><td>删除选中行</td></tr>
+          <tr><td><kbd>Ctrl+D</kbd> / <kbd>Ctrl+M</kbd></td><td>拆分 / 合并</td></tr>
+          <tr><td><kbd>L</kbd></td><td>循环当前句</td></tr>
+          <tr><td><kbd>F</kbd></td><td>列表跟随播放滚动</td></tr>
+          <tr><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td><td>撤销 / 重做</td></tr>
+          <tr><td><kbd>Ctrl+S</kbd></td><td>按当前格式导出</td></tr>
+          <tr><td><kbd>Ctrl+滚轮</kbd></td><td>缩放波形</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="dialog-hint">双击字幕行可编辑文本与时间；拖拽波形区块边缘改时间，拖中间整体移动。</p>
+    <form method="dialog"><button class="btn btn-primary">关闭</button></form>
+  </dialog>
+
+  <dialog id="about-dialog">
+    <h2>关于</h2>
+    <p>字幕打轴工作台（Vocal Subtitle Timing Editor）——本地运行的网页版字幕打轴工具。</p>
+    <p class="dialog-hint">
+      本工具为独立实现，未使用任何参考编辑器的源代码或美术资源。<br>
+      第三方组件（均保留许可声明，见 <code>vendor/NOTICE.md</code>）：
+    </p>
+    <ul class="about-list">
+      <li>ArtPlayer 5.4.0 —— MIT License © Harvey Zhao</li>
+      <li>wavesurfer.js 7.12.11 —— BSD 3-Clause © katspaugh and contributors</li>
+      <li>JASSUB 2.5.14 —— JS: MIT；WASM 内含 libass 等编译库（宽松许可栈，详见 NOTICE）</li>
+    </ul>
+    <form method="dialog"><button class="btn btn-primary">关闭</button></form>
+  </dialog>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
