@@ -5,7 +5,7 @@ import click
 
 @click.command()
 @click.option("--host", default="127.0.0.1", help="绑定的主机地址")
-@click.option("--port", default=7860, help="监听端口")
+@click.option("--port", default=8613, help="监听端口")
 @click.option(
     "--no-browser",
     is_flag=True,

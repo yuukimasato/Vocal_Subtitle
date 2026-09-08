@@ -82,6 +82,7 @@ memory/
 # Test Fixtures & Benchmark Data (local only, large files)
 # ============================================================
 test/benchmark_results/
+test/golden/
 test/*.wav
 test/*.ass
 test/*.mp4

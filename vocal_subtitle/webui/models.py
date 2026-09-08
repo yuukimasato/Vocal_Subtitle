@@ -63,6 +63,16 @@ class SubtitleBatchEditRequest(BaseModel):
     separator: str = Field(default="newline", description="合并分隔符: newline 或 space")
 
 
+class SubtitleBatchEditRequest(BaseModel):
+    """批量字幕编辑请求"""
+
+    action: str = Field(..., description="批量操作: speaker 或 merge")
+    indexes: List[int] = Field(..., min_length=1, description="字幕序号列表")
+    speaker_id: Optional[int] = Field(default=None, description="说话人编号")
+    speaker_label: Optional[str] = Field(default=None, description="说话人标签")
+    separator: str = Field(default="newline", description="合并分隔符: newline 或 space")
+
+
 # ---------------------------------------------------------------------------
 # 响应模型
 # ---------------------------------------------------------------------------

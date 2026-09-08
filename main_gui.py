@@ -14,7 +14,7 @@ import click
 
 @click.command()
 @click.option("--host", default="127.0.0.1", help="绑定的主机地址")
-@click.option("--port", default=7860, help="监听端口")
+@click.option("--port", default=8613, help="监听端口")
 @click.option("--no-browser", is_flag=True, help="不自动打开浏览器")
 def main(host: str, port: int, no_browser: bool):
     """启动 Web GUI 服务"""
