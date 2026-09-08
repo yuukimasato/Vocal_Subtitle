@@ -16,12 +16,57 @@
 from .base import ASREngine, TranscriptionSegment, WordTimestamp
 from .faster_whisper_engine import FasterWhisperEngine
 from .funasr_engine import FunASREngine
+from .qwen_engine import QwenASREngine
 from .whisper_cpp_engine import WhisperCppEngine
 from .router import ASRRouteDecision, ASRRouter
 from .quality_gate import ASRQualityResult, evaluate_asr_quality
 from .global_path import GlobalASRPath, GlobalASRService
 from .review_path import ASRReviewPath, ASRReviewService
 from .segmented_path import SegmentedASRPath, SegmentedASRService
+from .evidence import (
+    DECISION_POLICY_VERSION,
+    EVIDENCE_SCHEMA_VERSION,
+    RISK_POLICY_VERSION,
+    CandidateEvidence,
+    DecisionEvidenceBundle,
+    EvidenceBundle,
+    EvidenceDecision,
+    EvidenceWord,
+)
+from .evidence_decision import EvidenceDecisionEngine, decisions_to_subtitle_events
+from .evidence_review import EvidenceReviewRuntimePorts, EvidenceReviewService
+from .evidence_cache import EvidenceCacheKeyContext, EvidenceCachePort
+from .risk_scoring import EvidenceRiskScorer, RiskAssessment, RiskScoringConfig
+from .review_scheduler import ReviewScheduler, ReviewSchedulerConfig, ReviewWindow
+from .review_engines import (
+    CallbackForcedAligner,
+    CallbackSED,
+    CallbackSemanticReview,
+    ContextReASRPort,
+    ForcedAlignerPort,
+    QwenASRPort,
+    ReviewUnavailable,
+    SEDPort,
+    SemanticReviewPort,
+    WindowedASRContextReASR,
+    WindowedASREngine,
+    WindowTranscriptionPort,
+    WindowedASRQwen,
+)
+from .optional_adapters import LazyAudioClassifierSED, LazyQwenASR, LazyQwenForcedAligner
+from .secondary_evidence import SecondaryEvidenceCollector, secondary_evidence_to_bundles
+from .engine_pairing import EnginePairDecision, EnginePairRouter
+from .review_telemetry import resource_snapshot, timed_call
+from .boundary_confidence import BoundaryConfidence, BoundaryConfidenceEstimator, BoundaryRedundancyConfig
+from .boundary_reasr import BoundaryReASRResult, SlidingWindow, SlidingWindowConfig, SlidingWindowReASR
+from .boundary_arbitration import ArbitrationConfig, ArbitrationResult, BoundaryArbitrator
+from .hallucination import HallucinationFilterPolicy, HallucinationFilterResult, filter_transcription_segments
+from .whisperx_engine import WhisperXEngine, WhisperXUnavailableError
+from .global_transcriber import GlobalTranscriber, GlobalTranscriberConfig, GlobalTranscriptionResult
+from .local_recovery import LocalRecoveryConfig, LocalRecoveryEngine, LocalRecoveryRequest, LocalRecoveryResult
+from .contracts import ASRFailureRequest, ASRReviewRequest, ASRRuntimePorts
+from .text_normalizer import TextNormalizer
+from .window_execution import CancellationToken, WindowExecutionCoordinator
 
 __all__ = [
     "ASREngine",
@@ -30,6 +75,7 @@ __all__ = [
     "FasterWhisperEngine",
     "WhisperCppEngine",
     "FunASREngine",
+    "QwenASREngine",
     "ASRRouteDecision",
     "ASRRouter",
     "ASRQualityResult",
@@ -40,4 +86,74 @@ __all__ = [
     "GlobalASRService",
     "SegmentedASRPath",
     "SegmentedASRService",
+    "CandidateEvidence",
+    "DecisionEvidenceBundle",
+    "DECISION_POLICY_VERSION",
+    "EVIDENCE_SCHEMA_VERSION",
+    "RISK_POLICY_VERSION",
+    "EvidenceBundle",
+    "EvidenceDecision",
+    "EvidenceWord",
+    "EvidenceDecisionEngine",
+    "decisions_to_subtitle_events",
+    "EvidenceReviewRuntimePorts",
+    "EvidenceReviewService",
+    "EvidenceCacheKeyContext",
+    "EvidenceCachePort",
+    "EvidenceRiskScorer",
+    "RiskAssessment",
+    "RiskScoringConfig",
+    "ReviewScheduler",
+    "ReviewSchedulerConfig",
+    "ReviewWindow",
+    "WindowedASRContextReASR",
+    "WindowedASREngine",
+    "WindowTranscriptionPort",
+    "WindowedASRQwen",
+    "LazyAudioClassifierSED",
+    "LazyQwenASR",
+    "LazyQwenForcedAligner",
+    "SecondaryEvidenceCollector",
+    "secondary_evidence_to_bundles",
+    "EnginePairDecision",
+    "EnginePairRouter",
+    "ContextReASRPort",
+    "CallbackForcedAligner",
+    "CallbackSED",
+    "CallbackSemanticReview",
+    "QwenASRPort",
+    "ForcedAlignerPort",
+    "SEDPort",
+    "SemanticReviewPort",
+    "ReviewUnavailable",
+    "resource_snapshot",
+    "timed_call",
+    "BoundaryConfidence",
+    "BoundaryConfidenceEstimator",
+    "BoundaryRedundancyConfig",
+    "BoundaryReASRResult",
+    "SlidingWindow",
+    "SlidingWindowConfig",
+    "SlidingWindowReASR",
+    "ArbitrationConfig",
+    "ArbitrationResult",
+    "BoundaryArbitrator",
+    "HallucinationFilterPolicy",
+    "HallucinationFilterResult",
+    "filter_transcription_segments",
+    "WhisperXEngine",
+    "WhisperXUnavailableError",
+    "GlobalTranscriber",
+    "GlobalTranscriberConfig",
+    "GlobalTranscriptionResult",
+    "LocalRecoveryConfig",
+    "LocalRecoveryEngine",
+    "LocalRecoveryRequest",
+    "LocalRecoveryResult",
+    "ASRFailureRequest",
+    "ASRReviewRequest",
+    "ASRRuntimePorts",
+    "TextNormalizer",
+    "CancellationToken",
+    "WindowExecutionCoordinator",
 ]

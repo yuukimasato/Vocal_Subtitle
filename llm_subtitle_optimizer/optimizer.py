@@ -10,6 +10,7 @@
 """
 
 import difflib
+import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional, Tuple, Union

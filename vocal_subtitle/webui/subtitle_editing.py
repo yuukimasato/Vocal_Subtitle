@@ -142,6 +142,15 @@ def apply_merge(
         result, indexes, require_multiple=True, require_contiguous=True
     )
     selected = [result[position] for position in positions]
+    physical_bins = {
+        str(event.get("physical_bin_id"))
+        for event in selected
+        if event.get("physical_bin_id")
+    }
+    if len(physical_bins) > 1:
+        raise SubtitleBatchEditError(
+            "不能合并不同声学骨架区间；请逐个区间编辑字幕"
+        )
     merged = deepcopy(selected[0])
     merged["start"] = min(event["start"] for event in selected)
     merged["end"] = max(event["end"] for event in selected)
@@ -181,6 +190,39 @@ def apply_merge(
     result.insert(first_position, merged)
     for index, event in enumerate(result, start=1):
         event["index"] = index
+    return result
+
+
+def apply_timing_edit(
+    events: List[Dict[str, Any]],
+    index: int,
+    *,
+    start: Optional[float] = None,
+    end: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """Update one subtitle event's display timing (start/end in seconds).
+
+    Physical evidence fields (physical_start/physical_end/...) stay frozen;
+    only the display timeline moves, and ``time_source`` records the manual
+    edit provenance.
+    """
+    result = deepcopy(events)
+    position = next((pos for pos, event in enumerate(result) if event.get("index") == index), None)
+    if position is None:
+        raise SubtitleBatchEditError(f"字幕序号不存在: {index}")
+
+    event = result[position]
+    current_start = float(event.get("start") or 0.0)
+    current_end = float(event.get("end") or 0.0)
+
+    new_start = current_start if start is None else float(start)
+    new_end = current_end if end is None else float(end)
+    if not (new_start >= 0 and new_end > new_start):
+        raise SubtitleBatchEditError("时间轴必须满足 0 <= 开始 < 结束")
+
+    event["start"] = new_start
+    event["end"] = new_end
+    event["time_source"] = "manual_edit"
     return result
 
 

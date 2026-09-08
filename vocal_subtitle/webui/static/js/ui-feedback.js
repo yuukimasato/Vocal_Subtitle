@@ -10,10 +10,11 @@ const part = {
       }
       panel.innerHTML = items.map((item, idx) => {
         const date = item.created_at ? item.created_at.slice(0, 16).replace('T', ' ') : '';
-        const statusClass = item.status === 'completed' ? 'ok' : (item.status === 'failed' ? 'err' : '');
-        const statusText = item.status === 'completed' ? '✓' : (item.status === 'failed' ? '✗' : '…');
+        const terminal = item.status === 'completed' || item.status === 'degraded';
+        const statusClass = terminal ? (item.status === 'degraded' ? 'warn' : 'ok') : (item.status === 'failed' ? 'err' : '');
+        const statusText = terminal ? (item.status === 'degraded' ? '!' : '✓') : (item.status === 'failed' ? '✗' : '…');
         const duration = item.total_duration_seconds > 0 ? (item.total_duration_seconds / 60).toFixed(1) + 'min' : '';
-        const isClickable = item.status === 'completed';
+        const isClickable = terminal;
         return '<div class="history-item" data-idx="' + idx + '" style="' + (isClickable ? '' : 'cursor:default;opacity:0.6;') + '">' +
           '<span class="h-status ' + statusClass + '">' + statusText + '</span>' +
           '<span class="h-name" title="' + App.ui.escapeHtml(item.input_file_name) + '">' + App.ui.escapeHtml(item.input_file_name) + '</span>' +
@@ -237,4 +238,3 @@ const part = {
 };
 window.VocalSubtitleUi = Object.assign(window.VocalSubtitleUi || {}, part);
 })();
-

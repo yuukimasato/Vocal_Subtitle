@@ -4,12 +4,12 @@
 # 安装: pip install -r requirements-all.txt
 #
 # 包含: CLI + GPU 加速 + Silero VAD + WebRTC VAD + LLM 优化 +
-#       本地 NLP + UVR 分离 + Spleeter + Open-Unmix +
+#       本地 NLP + UVR 分离 + Open-Unmix +
 #       faster-whisper ASR + FunASR ASR + Web GUI + 说话人分离 +
 #       说话人嵌入 + 开发工具
 #
 # 说明:
-#   - Spleeter 仅在 Python < 3.12 时安装（已于 2022 年停维）
+#   - Spleeter 不包含在此兼容集合中；请在独立 Python 3.9 环境安装
 #   - torch/torchaudio 请根据 GPU 情况选择安装源:
 #       GPU (CUDA 12.6): pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126
 #       GPU (CUDA 12.4): pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
@@ -57,6 +57,12 @@ faster-whisper>=1.0
 # ---- FunASR 中文 ASR 引擎 (WebUI 选择时自动准备模型) ----
 funasr>=1.0
 
+# ---- 多引擎复核模型下载 / SED 运行时 ----
+# Transformers/HF/音频运行时由此文件安装；Qwen3-ASR 需要 Transformers 4.57.6。
+huggingface-hub>=0.24
+transformers==4.57.6
+qwen-asr==0.0.6
+
 # ---- Silero VAD 引擎 (PyTorch) ----
 torch>=2.0
 torchaudio>=2.0
@@ -70,14 +76,18 @@ json-repair>=0.25
 sentence-transformers>=3.0
 
 # ---- UVR 高品质分离 (BS-RoFormer, 默认推荐) ----
-audio-separator>=0.18
-
-# ---- Spleeter 分离引擎 (已停维, 仅 Python < 3.12) ----
-spleeter>=2.3; python_version < '3.12'
+audio-separator>=0.30.2,<0.31
+onnxruntime>=1.17
 
 # ---- Open-Unmix 分离引擎 ----
 openunmix
 soundfile>=0.12
+
+# ---- WhisperX 引擎 (词级时间戳增强, 强制音素对齐) ----
+whisperx>=3.0
+
+# ---- DeepFilterNet 语音增强 (降噪预处理) ----
+deepfilternet>=0.5
 
 # ---- WebRTC VAD 引擎 (轻量备选) ----
 # 注意: Python 3.12 环境若安装 webrtcvad 失败，请先降级 setuptools:
@@ -103,6 +113,7 @@ uvicorn[standard]>=0.27
 python-multipart>=0.0.9
 cryptography>=41.0
 websockets>=12.0
+pydantic>=2.0
 
 # ---- 开发测试 ----
 pytest>=7.0
@@ -111,3 +122,4 @@ pytest-cov>=4.0
 black>=23.0
 ruff>=0.1
 mypy>=1.0
+httpx>=0.24

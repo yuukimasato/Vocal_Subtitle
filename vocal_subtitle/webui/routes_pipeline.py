@@ -46,7 +46,9 @@ def _run_pipeline_in_thread(
 def _legacy_thread_target():
     """Resolve the historical API hook before using the split implementation."""
     api = sys.modules.get("vocal_subtitle.webui.api")
-    return getattr(api, "_run_pipeline_in_thread", _run_pipeline_in_thread)
+    if api is not None:
+        return getattr(api, "_run_pipeline_in_thread", _run_pipeline_in_thread)
+    return _run_pipeline_in_thread
 
 
 @router.post("/run")
@@ -57,6 +59,15 @@ async def run_pipeline(
     skip_separation: bool = Form(default=False),
     overrides: str = Form(default="{}"),
 ):
+    """启动单文件 Pipeline 处理
+
+    接收音频文件上传，在后台线程中运行全链路处理，
+    通过 WebSocket 实时推送进度。
+
+    基于输入文件 SHA256 哈希的会话目录：
+    - 快速查重：os.path.exists(session_dir) → 已处理过
+    - 标准化输出命名：ASR-generated.{srt,vtt,ass} / LLM-optimized.{srt,vtt,ass}
+    """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
     try:
@@ -85,13 +96,20 @@ async def get_task_status(task_id: str):
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
     task = state.task_store[task_id]
     result = task.get("result") or {}
+    stats = result.get("stats") or {}
     return TaskStatus(
         task_id=task["task_id"],
         status=task["status"],
+        run_id=task.get("run_id") or result.get("run_id") or stats.get("run_id"),
+        contract_version=result.get("contract_version"),
         progress=task.get("progress"),
         result=task.get("result"),
         error=task.get("error"),
         quality_status=result.get("quality_status"),
+        error_category=result.get("error_category"),
+        diagnostics_complete=result.get("diagnostics_complete"),
+        artifacts=result.get("artifacts"),
+        diagnostics=result.get("diagnostics"),
     )
 
 
@@ -101,6 +119,7 @@ async def list_tasks():
         {
             "task_id": task["task_id"],
             "status": task["status"],
+            "run_id": task.get("run_id") or (task.get("result") or {}).get("run_id"),
             "error": task.get("error"),
         }
         for task in state.task_store.values()

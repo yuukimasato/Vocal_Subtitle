@@ -1,6 +1,6 @@
 [project]
 name = "vocal-subtitle"
-version = "0.1.0"
+version = "0.2.0"
 description = "人声分离 + 字幕生成全链路工具"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -48,6 +48,7 @@ dev = [
     "black>=23.0",
     "ruff>=0.1",
     "mypy>=1.0",
+    "httpx>=0.24",
 ]
 # GPU 推理加速 (CTranslate2)
 gpu = [
@@ -70,16 +71,21 @@ local-nlp = [
 ]
 # UVR 高品质分离 (BS-RoFormer)
 uvr = [
-    "audio-separator>=0.18",
-]
-# Spleeter 分离引擎 (已停维, 仅 Python < 3.12)
-spleeter = [
-    "spleeter>=2.3; python_version < '3.12'",
+    "audio-separator>=0.30.2,<0.31",
+    "onnxruntime>=1.17",
 ]
 # Open-Unmix 分离引擎
 openunmix = [
     "openunmix",
     "soundfile>=0.12",
+]
+# WhisperX ASR 引擎 (词级时间戳增强, 强制音素对齐)
+whisperx = [
+    "whisperx>=3.0",
+]
+# DeepFilterNet 语音增强 (降噪预处理)
+deepfilternet = [
+    "deepfilternet>=0.5",
 ]
 # WebRTC VAD 引擎 (轻量, 无需 GPU; Python 3.12 需 setuptools<82)
 webrtcvad = [
@@ -93,6 +99,18 @@ faster-whisper = [
 funasr = [
     "funasr>=1.0",
 ]
+# 多引擎复核模型下载和 SED 运行时基础依赖；模型权重仍需显式下载
+review-models = [
+    "huggingface-hub>=0.24",
+    "transformers==4.57.6",
+    "soundfile>=0.12",
+]
+# Qwen3-ASR runtime. Keep the exact upstream Transformers pin: qwen-asr 0.0.6
+# imports APIs that are not compatible with the Transformers 5.x line.
+qwen-runtime = [
+    "qwen-asr==0.0.6",
+    "transformers==4.57.6",
+]
 # Web GUI 图形界面
 webui = [
     "fastapi>=0.110",
@@ -100,6 +118,7 @@ webui = [
     "python-multipart>=0.0.9",
     "cryptography>=41.0",
     "websockets>=12.0",
+    "pydantic>=2.0",
 ]
 # 说话人分离 (含声学特征提取 + 凝聚聚类 + LLM 角色标注)
 # 默认使用 speechbrain ECAPA 模型，若仅需基础聚类可手动排除 speaker-embedding
@@ -114,9 +133,9 @@ speaker-embedding = [
     "speechbrain>=1.0",      # 默认模型 (Apache 2.0, 无需签署协议)
     # "pyannote.audio>=3.0",  # 高精度模型 (需签署协议)
 ]
-# 全量安装 (含所有可选依赖)
+# 全量安装 (含 Python 3.11+ 可解析的可选依赖；Spleeter 单独安装)
 all = [
-    "vocal-subtitle[gpu,silero-vad,llm,local-nlp,uvr,spleeter,openunmix,webrtcvad,faster-whisper,funasr,webui,diarization,speaker-embedding]",
+    "vocal-subtitle[gpu,silero-vad,llm,local-nlp,uvr,openunmix,whisperx,deepfilternet,webrtcvad,faster-whisper,funasr,review-models,qwen-runtime,webui,diarization,speaker-embedding]",
 ]
 
 [project.scripts]

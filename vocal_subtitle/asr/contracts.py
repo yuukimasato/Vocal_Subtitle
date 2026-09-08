@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence
 import numpy as np
 
 from .base import ASREngine
+from .evidence import CandidateEvidence, EvidenceDecision
 
 
 class ProgressPort(Protocol):
@@ -55,6 +56,10 @@ class GlobalASRResult:
     events: List[Any] = field(default_factory=list)
     diagnostics: Dict[str, Any] = field(default_factory=dict)
     transcript: Any = None
+    # New evidence is appended after the legacy positional fields so callers
+    # constructing GlobalASRResult(events, diagnostics, transcript) remain
+    # compatible during the migration.
+    evidence: List[Any] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,40 @@ class SegmentedASRResult:
     events: List[Any] = field(default_factory=list)
     segment_count: int = 0
     context: Any = None
+    diagnostics: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EvidenceReviewRequest:
+    """Input for the independent evidence review service."""
+
+    events: Sequence[Any]
+    audio: Any = None
+    sample_rate: int = 16000
+    physical_timeline: Any = None
+    global_evidence: Sequence[CandidateEvidence] = ()
+    recovery_evidence: Sequence[CandidateEvidence] = ()
+    input_hash: str = ""
+    audio_hash: str = ""
+    physical_timeline_version: str = "physical-timeline-v1"
+    route_version: str = ""
+    engine: str = ""
+    model: str = ""
+    review_policy: str = "risk_only"
+    secondary_engine: str = ""
+    pair_route_version: str = ""
+    review_policy_version: str = "review-policy-v1"
+    risk_policy_version: str = "risk-policy-v1"
+    decision_policy_version: str = "decision-policy-v1"
+    evidence_schema_version: str = "evidence-v1"
+
+
+@dataclass
+class EvidenceReviewResult:
+    """Output of evidence scoring, review and final decision stages."""
+
+    events: List[Any] = field(default_factory=list)
+    decisions: List[EvidenceDecision] = field(default_factory=list)
     diagnostics: Dict[str, Any] = field(default_factory=dict)
 
 

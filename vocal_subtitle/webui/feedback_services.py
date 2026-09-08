@@ -38,6 +38,7 @@ class FeedbackLearningService:
         feedback_profile: str = "user_default",
         run_pipeline_first: bool = True,
         dry_run: bool = False,
+        consent: str = "anonymous",
     ) -> Dict[str, Any]:
         config = ConfigLoader().load_profile(profile)
         feedback_cfg = config.feedback
@@ -124,7 +125,73 @@ class FeedbackLearningService:
             response["message"] = "[dry-run] 未实际更新配置"
         else:
             response["message"] = "无需调整参数"
+
+        # ---- D2 自动入库 ----
+        _ingest_feedback_d2_sample(
+            auto_events=auto_events,
+            manual_events=manual_events,
+            alignment_coverage=diff_report.alignment_coverage,
+            consent=consent,
+            diff_report=diff_report,
+        )
+
         return response
+
+
+def _ingest_feedback_d2_sample(
+    auto_events: list,
+    manual_events: list,
+    alignment_coverage: float,
+    consent: str,
+    diff_report,
+) -> None:
+    """将反馈学习结果自动入库到 D2 候选反馈集。非致命操作。"""
+    try:
+        from ..feedback.sample_manager import FeedbackSampleManager
+
+        def _events_to_srt_text(events) -> str:
+            lines = []
+            for i, evt in enumerate(events, 1):
+                start = getattr(evt, "start", 0)
+                end = getattr(evt, "end", 0)
+                text = getattr(evt, "text", "")
+                lines.append(f"{i}\n{start:.3f} --> {end:.3f}\n{text}\n")
+            return "\n".join(lines)
+
+        auto_text = _events_to_srt_text(auto_events)
+        human_text = _events_to_srt_text(manual_events)
+
+        edit_types = {}
+        if diff_report:
+            if diff_report.text_edits:
+                edit_types["text_correction"] = len(diff_report.text_edits)
+            if diff_report.time_shifts:
+                edit_types["time_adjustment"] = len(diff_report.time_shifts)
+            if diff_report.merge_actions:
+                edit_types["format_preference"] = len(diff_report.merge_actions)
+
+        mgr = FeedbackSampleManager()
+        sample = mgr.ingest(
+            auto_subtitle=auto_text,
+            human_revision=human_text,
+            alignment={
+                "method": "dtw",
+                "coverage_ratio": alignment_coverage,
+                "confidence": getattr(diff_report, "confidence", 0.8) if diff_report else 0.8,
+            },
+            consent_level=consent,
+            language="unknown",
+            scene="",
+            audio_duration=0.0,
+            audio_condition="",
+            speaker_count=0,
+            original_config={},
+            edit_types=edit_types,
+        )
+        if sample:
+            logger.info("D2 sample ingested via WebUI: %s", sample.sample_id)
+    except Exception as e:
+        logger.warning("D2 sample ingestion failed (non-fatal): %s", e)
 
 
 __all__ = ["FeedbackLearningService"]

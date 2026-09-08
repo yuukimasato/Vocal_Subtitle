@@ -117,6 +117,11 @@ class AcousticValidator:
         validated, gap_merged = self._merge_micro_gaps(validated, max_gap=0.05)
         if gap_merged > 0:
             report["gap_merged"] = gap_merged
+            report["merge_trace"] = [
+                item for event in validated
+                for item in (getattr(event, "revision_trace", ()) or ())
+                if item.get("stage") == "acoustic_micro_gap_merge"
+            ]
 
         # Step 3: 生成诊断报告
         if cfg.generate_report:
@@ -418,6 +423,35 @@ class AcousticValidator:
                     (prev.source_word_ids or []) + (event.source_word_ids or [])
                 ))
                 prev.physical_spans = list((prev.physical_spans or []) + (event.physical_spans or []))
+                merge_trace = {
+                    "op": "merge",
+                    "stage": "acoustic_micro_gap_merge",
+                    "reason": "micro_gap_same_speaker_same_physical_owner",
+                    "event_ids": [
+                        f"event:index:{int(getattr(prev, 'index', 0) or 0):06d}",
+                        f"event:index:{int(getattr(event, 'index', 0) or 0):06d}",
+                    ],
+                    "merge_count": 1,
+                    "physical_owner": {
+                        "region_ids": list(dict.fromkeys(
+                            item for item in (
+                                getattr(prev, "physical_region_id", None),
+                                getattr(event, "physical_region_id", None),
+                            ) if item is not None
+                        )),
+                        "bin_ids": list(dict.fromkeys(
+                            item for item in (
+                                getattr(prev, "physical_bin_id", None),
+                                getattr(event, "physical_bin_id", None),
+                            ) if item is not None
+                        )),
+                        "speaker_ids": [prev.speaker_id],
+                    },
+                    "gap_ms": round(gap * 1000.0, 3),
+                }
+                prev.revision_trace = list(getattr(prev, "revision_trace", []) or []) + [merge_trace]
+                # Keep the report local to the validator result; callers that
+                # need this trace receive it through the event revision trace.
                 num_merged += 1
                 logger.debug(
                     "Micro-gap merge: %.0fms gap, same speaker → "
@@ -579,10 +613,14 @@ def _record_boundary_diagnostic(
 ) -> None:
     """Append a compact, auditable endpoint decision."""
     report.setdefault("boundary_diagnostics", []).append({
-        "id": getattr(event, "index", 0),
+        "stage": "acoustic_boundary",
+        "event_id": f"event:index:{int(getattr(event, 'index', 0) or 0):06d}",
         "boundary": boundary_type,
         "action": action,
         "reason": reason,
+        "physical_region_id": getattr(event, "physical_region_id", None),
+        "physical_bin_id": getattr(event, "physical_bin_id", None),
+        "speaker_id": getattr(event, "speaker_id", None),
         "original_time": round(float(original_time), 6),
         "candidate_time": (
             round(float(candidate_time), 6)
@@ -593,8 +631,6 @@ def _record_boundary_diagnostic(
             if distance is not None else None
         ),
     })
-
-
 def _is_time_in_speech(
     t: float, skeleton: List[Tuple[float, float]],
 ) -> bool:
@@ -718,78 +754,6 @@ def _classify_energy_type(
             return "transient_noise"
     except Exception:
         return "unknown"
-
-
-def classify_acoustic_events(
-    skeleton: List[Tuple[float, float]],
-    silero_segments: List,
-    audio: np.ndarray,
-    sample_rate: int,
-) -> List[Dict]:
-    """将声学骨架中的事件分为"人声"和"非人声高能事件"（文档 5.12.3）
-
-    判定逻辑:
-    - ffmpeg 标记为语音 + Silero 也标记为语音 → 人声（可信）
-    - ffmpeg 标记为语音 + Silero 未标记 → 非人声高能事件（跳过吸附）
-    - ffmpeg 标记为静音 + Silero 标记为语音 → 低音量人声（Silero优先）
-
-    Args:
-        skeleton: ffmpeg 声学骨架 [(start, end), ...]
-        silero_segments: Silero VAD 检测结果
-        audio: 音频数组
-        sample_rate: 采样率
-
-    Returns:
-        分类后的事件列表 [{"start", "end", "type", "confidence", ...}, ...]
-    """
-    classified = []
-
-    for sk_start, sk_end in skeleton:
-        # 检查该区间是否被 Silero VAD 确认
-        silero_overlap = _compute_vad_overlap(
-            sk_start, sk_end, silero_segments,
-        )
-
-        if silero_overlap > 0.5:
-            event_type = "human_speech"
-            confidence = "high"
-        elif silero_overlap > 0.1:
-            event_type = "human_speech"
-            confidence = "low"  # 边缘情况，可能是语尾渐弱
-        else:
-            # ffmpeg 检测到能量但 Silero 不认为是人声
-            event_type = "non_human_energy"
-            confidence = "high"
-
-            # 进一步分类：音乐 vs 瞬态噪音
-            energy_subtype = _classify_energy_type(
-                audio, sample_rate, sk_start, sk_end,
-            )
-
-        entry = {
-            "start": sk_start,
-            "end": sk_end,
-            "type": event_type,
-            "confidence": confidence,
-            "silero_overlap_ratio": round(silero_overlap, 2),
-        }
-
-        if event_type == "non_human_energy":
-            entry["energy_subtype"] = energy_subtype
-
-        classified.append(entry)
-
-    non_human_count = sum(1 for c in classified if c["type"] == "non_human_energy")
-    if non_human_count > 0:
-        logger.info(
-            "Acoustic event classification: %d total, %d non-human energy "
-            "(%.0f%%), %d human speech",
-            len(classified),
-            non_human_count,
-            non_human_count / max(len(classified), 1) * 100,
-            sum(1 for c in classified if c["type"] == "human_speech"),
-        )
-    return classified
 
 
 # Route all helper consumers through the isolated policies.  The private names

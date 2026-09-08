@@ -3,6 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from vocal_subtitle.webui import api
 from vocal_subtitle.webui.app import create_app
 
 
@@ -156,6 +157,72 @@ class TestTasksAPI:
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
 
+    def test_degraded_task_is_terminal_and_exposes_status(self, client, monkeypatch):
+        monkeypatch.setattr(
+            api,
+            "_task_store",
+            {
+                "degraded-task": {
+                    "task_id": "degraded-task",
+                    "status": "degraded_completed",
+                    "result": {
+                        "status": "degraded_completed",
+                        "quality_status": "warning",
+                        "diagnostics_complete": True,
+                        "events": [
+                            {"index": 1, "start": 0.0, "end": 1.0, "text": "fallback"}
+                        ],
+                    },
+                    "error": None,
+                }
+            },
+        )
+
+        status = client.get("/api/tasks/degraded-task")
+        assert status.status_code == 200
+        assert status.json()["status"] == "degraded_completed"
+        assert status.json()["diagnostics_complete"] is True
+
+        subtitles = client.get("/api/subtitle/degraded-task")
+        assert subtitles.status_code == 200
+        assert subtitles.json()[0]["text"] == "fallback"
+
+
+class TestQualityReportAPI:
+    def test_history_summary_fallback(self, client, monkeypatch):
+        monkeypatch.setattr(
+            api,
+            "_task_store",
+            {
+                "quality-task": {
+                    "task_id": "quality-task",
+                    "status": "degraded_completed",
+                    "result": {
+                        "subtitle_path": "/tmp/subtitle.srt",
+                        "subtitle_count": 3,
+                        "stats": {
+                            "run_id": "run-quality-task",
+                            "quality_status": "warning",
+                            "production_path": "quality_first",
+                            "stage_timings": {"asr": 1.25},
+                            "fallback_category": "dependency_missing",
+                            "fallback_reason": "optional review engine unavailable",
+                        },
+                    },
+                }
+            },
+        )
+        response = client.get("/api/quality/report/quality-task")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["report_source"] == "history_summary"
+        assert data["report"]["quality"]["status"] == "warning"
+        assert data["report"]["stages"]["asr"]["duration_seconds"] == 1.25
+
+    def test_missing_task_returns_404(self, client):
+        response = client.get("/api/quality/report/missing-quality-task")
+        assert response.status_code == 404
+
 
 class TestSubtitleAPI:
     """字幕操作 API 测试"""
@@ -180,6 +247,11 @@ class TestStaticFiles:
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
         assert "Vocal Subtitle" in resp.text
+        assert 'data-workspace="review"' in resp.text
+        assert 'id="workspace-quality"' in resp.text
+        assert '<button type="button" class="btn-run" id="btn-run"' in resp.text
+        assert 'id="process-error"' in resp.text
+        assert "/js/ui-review.js" in resp.text
         assert 'data-action="check"' in resp.text
         assert "'speaker_embedding_hf_token'," not in resp.text
         assert "'speaker_embedding_hf_token': 'speaker_embedding_token'" not in resp.text

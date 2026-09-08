@@ -15,6 +15,7 @@
     gap > 1.0s   → 段落间隔
 """
 
+import copy
 import difflib
 import logging
 from dataclasses import dataclass, field
@@ -144,6 +145,12 @@ class SubtitleEvent:
     # 修订追溯
     revision_trace: List = field(default_factory=list)
 
+    # 全局坐标契约：宏观块/骨架局部事件的偏移只允许记录一次
+    time_offset_trace: List = field(default_factory=list)
+
+    # Stable evidence contract shared by chunk, skeleton, and review paths.
+    trace_context: dict = field(default_factory=dict)
+
     @property
     def duration(self) -> float:
         return self.end - self.start
@@ -182,6 +189,8 @@ class SubtitleEvent:
             "overlap_group_id": self.overlap_group_id,
             "overlap_tracks": copy.deepcopy(self.overlap_tracks),
             "revision_trace": copy.deepcopy(self.revision_trace),
+            "time_offset_trace": copy.deepcopy(self.time_offset_trace),
+            "trace_context": copy.deepcopy(self.trace_context),
         }
 
     @classmethod
@@ -218,6 +227,8 @@ class SubtitleEvent:
             overlap_group_id=payload.get("overlap_group_id"),
             overlap_tracks=payload.get("overlap_tracks", []),
             revision_trace=payload.get("revision_trace", []),
+            time_offset_trace=payload.get("time_offset_trace", []),
+            trace_context=payload.get("trace_context", {}),
         )
 
     def __repr__(self) -> str:
@@ -227,6 +238,84 @@ class SubtitleEvent:
             f"start={self.start:.3f}, end={self.end:.3f}, "
             f"text='{self.text[:40]}...'{spk})"
         )
+
+
+def offset_subtitle_event(
+    event: SubtitleEvent,
+    offset: float,
+    *,
+    source: str,
+) -> SubtitleEvent:
+    """Move a local event into global coordinates exactly once.
+
+    ``SubtitleEvent.words`` are relative to ``event.start`` and therefore stay
+    unchanged. Physical envelopes and spans are absolute coordinates and must
+    move with the display range. Keeping this operation in one helper avoids
+    the historical partial-offset bug in macro and skeleton paths.
+    """
+    if not isinstance(event, SubtitleEvent):
+        raise TypeError("event must be a SubtitleEvent")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("source must be a non-empty string")
+    try:
+        value = float(offset)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("offset must be finite") from exc
+    if not np.isfinite(value):
+        raise ValueError("offset must be finite")
+    if any(item.get("source") == source for item in event.time_offset_trace):
+        raise ValueError(f"time offset already applied by {source}")
+    if event.time_offset_trace and abs(value) > 1e-12:
+        raise ValueError("event already has a time offset; refusing double offset")
+
+    if abs(value) > 1e-12:
+        event.start += value
+        event.end += value
+        if event.physical_start is not None:
+            event.physical_start += value
+        if event.physical_end is not None:
+            event.physical_end += value
+        if event.physical_bin_start is not None:
+            event.physical_bin_start += value
+        if event.physical_bin_end is not None:
+            event.physical_bin_end += value
+        shifted_spans = []
+        for span in event.physical_spans:
+            if isinstance(span, dict):
+                shifted = dict(span)
+                if shifted.get("start") is not None:
+                    shifted["start"] = float(shifted["start"]) + value
+                if shifted.get("end") is not None:
+                    shifted["end"] = float(shifted["end"]) + value
+                shifted_spans.append(shifted)
+            else:
+                shifted_spans.append(span)
+        event.physical_spans = shifted_spans
+    event.time_offset_trace.append({
+        "stage": "time_offset",
+        "source": source,
+        "offset": value,
+    })
+    event.revision_trace.append({
+        "stage": "time_offset",
+        "source": source,
+        "offset": value,
+    })
+    return event
+
+
+def _relative_event_words(words: list, source_offset: float, event_start: float) -> list:
+    """Copy segment-local word times into the SubtitleEvent contract."""
+    relative = []
+    for word in words or []:
+        copied = copy.copy(word)
+        start = getattr(word, "start", None)
+        end = getattr(word, "end", None)
+        if start is not None and end is not None:
+            copied.start = float(source_offset) + float(start) - float(event_start)
+            copied.end = float(source_offset) + float(end) - float(event_start)
+        relative.append(copied)
+    return relative
 
 
 class TimeMapper:
@@ -329,7 +418,11 @@ class TimeMapper:
                         start=global_start,
                         end=global_end,
                         text=asr_seg.text.strip(),
-                        words=asr_seg.words,
+                        words=_relative_event_words(
+                            asr_seg.words,
+                            source_offset=offset,
+                            event_start=global_start,
+                        ),
                         speaker_id=spk_id,
                     )
                 )
@@ -706,7 +799,11 @@ class TimeMapper:
                     start=segment_offset + asr_seg.start,
                     end=segment_offset + asr_seg.end,
                     text=asr_seg.text.strip(),
-                    words=asr_seg.words,
+                    words=_relative_event_words(
+                        asr_seg.words,
+                        source_offset=segment_offset,
+                        event_start=segment_offset + asr_seg.start,
+                    ),
                 )
             )
         return events

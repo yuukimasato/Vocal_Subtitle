@@ -9,13 +9,14 @@ from vocal_subtitle.config import ConfigLoader, PipelineConfig
 from vocal_subtitle.pipeline import Pipeline, PipelineStats
 
 
-def test_offline_default_prefers_global_path():
+def test_offline_default_prefers_segmented_path_with_global_evidence():
     config = ConfigLoader().load_profile("default")
     pipeline = Pipeline(config)
 
     assert config.asr.global_asr.enabled is True
-    assert config.asr.global_asr.routing == "auto"
-    assert pipeline._resolve_asr_path() == "auto"
+    assert config.asr.global_asr.routing == "segmented"
+    assert config.asr.global_asr.evidence_enabled is True
+    assert pipeline._resolve_asr_path() == "segmented"
 
 
 def test_explicit_segmented_path_is_legacy():
@@ -120,7 +121,7 @@ def test_full_pipeline_cache_requires_compatible_path():
     current_quality = pipeline.config.asr.auto_routing.quality_gate_version
     assert pipeline._is_usable_full_pipeline_cache(
         {"stats": {
-            "asr_path": "global",
+            "asr_path": "global_evidence",
             "requested_engine": "auto",
             "selected_engine": "funasr",
             "asr_route_version": current_route,

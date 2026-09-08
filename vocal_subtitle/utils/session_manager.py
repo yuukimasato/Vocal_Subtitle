@@ -2,6 +2,10 @@
 
 基于输入文件 SHA256 哈希的目录结构，用于快速查重和组织处理产物。
 
+命名约定遵循 NAMING_CONVENTIONS.md：
+  - 任务 ID: {task_type}-{date}-{id_digest}   (offline-20260802-a1b2c3d4)
+  - 运行 ID: run-{task_id}-{timestamp}          (run-offline-20260802-a1b2c3d4-1690972800000)
+
 目录结构:
     cache/uploads/{sha256[:16]}/
       ├── input{ext}               # 原始输入副本
@@ -18,13 +22,16 @@
 查重: os.path.exists(session_dir) → 已处理过
 """
 
+import hashlib
 import json
 import logging
+import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .file_hasher import compute_file_hash
+from .file_hasher import compute_config_hash, compute_file_hash
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +53,106 @@ LLM_FORMAT_KEYS = {"srt": "llm_srt", "vtt": "llm_vtt", "ass": "llm_ass"}
 
 # 所有字幕输出格式
 ALL_SUBTITLE_FORMATS = ("srt", "vtt", "ass")
+
+
+# ------------------------------------------------------------------
+# 配置快照
+# ------------------------------------------------------------------
+
+
+@dataclass
+class ConfigSnapshot:
+    """运行时的配置快照，对应 NAMING_CONVENTIONS.md 第 3 节。
+
+    随运行报告持久化到 cache/reports/{run_id}/config_snapshot.yaml。
+    """
+
+    config_profile: str = "default"
+    config_overrides: dict = field(default_factory=dict)
+    config_version: str = "default-v1"
+    snapshot_digest: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "config_profile": self.config_profile,
+            "config_overrides": self.config_overrides,
+            "config_version": self.config_version,
+            "snapshot_digest": self.snapshot_digest,
+        }
+
+
+def create_task_id(
+    input_path,
+    task_type: str = "offline",
+    date_str: str = "",
+) -> str:
+    """生成符合命名规范的任务 ID。
+
+    格式: {task_type}-{date}-{id_digest}
+    示例: offline-20260802-a1b2c3d4
+
+    Args:
+        input_path: 输入文件路径（用于计算 SHA256）
+        task_type: offline | streaming | batch
+        date_str: 日期 YYYYMMDD，默认今天
+
+    Returns:
+        标准任务 ID 字符串
+    """
+    if not date_str:
+        date_str = datetime.now().strftime("%Y%m%d")
+
+    if isinstance(input_path, (str, Path)):
+        file_hash = compute_file_hash(Path(input_path))
+    elif isinstance(input_path, bytes):
+        file_hash = hashlib.sha256(input_path).hexdigest()
+    else:
+        raise TypeError(f"input_path must be Path, str, or bytes, got {type(input_path)}")
+
+    id_digest = file_hash[:8]
+    return f"{task_type}-{date_str}-{id_digest}"
+
+
+def create_run_id(task_id: str, timestamp_ms: int = 0) -> str:
+    """生成符合命名规范的运行 ID。
+
+    格式: run-{task_id}-{timestamp}
+    示例: run-offline-20260802-a1b2c3d4-1690972800000
+
+    Args:
+        task_id: 父任务 ID
+        timestamp_ms: Unix 毫秒时间戳，默认当前时间
+
+    Returns:
+        标准运行 ID 字符串
+    """
+    if timestamp_ms <= 0:
+        timestamp_ms = int(time.time() * 1000)
+    return f"run-{task_id}-{timestamp_ms}"
+
+
+def create_config_snapshot(
+    config,
+    profile: str = "default",
+    overrides: dict | None = None,
+) -> ConfigSnapshot:
+    """从 PipelineConfig 创建配置快照。
+
+    Args:
+        config: PipelineConfig 对象
+        profile: 场景模板名称
+        overrides: 用户覆盖的参数
+
+    Returns:
+        ConfigSnapshot 实例
+    """
+    snapshot = ConfigSnapshot(
+        config_profile=profile,
+        config_overrides=overrides or {},
+        config_version="default-v1",
+    )
+    snapshot.snapshot_digest = compute_config_hash(config)
+    return snapshot
 
 
 class SessionManager:

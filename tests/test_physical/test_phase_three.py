@@ -4,6 +4,7 @@ import numpy as np
 
 from vocal_subtitle.acoustic_validator import AcousticValidator
 from vocal_subtitle.asr.base import ASREngine, TranscriptionSegment, WordTimestamp
+from vocal_subtitle.asr.evidence import EvidenceDecision, EvidenceWord
 from vocal_subtitle.asr.global_transcriber import (
     GlobalTranscriber,
     GlobalTranscriberConfig,
@@ -14,6 +15,7 @@ from vocal_subtitle.diarization.base import SpeakerTurn
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 from vocal_subtitle.physical.allocator import allocate_words
 from vocal_subtitle.physical.events import build_events
+from vocal_subtitle.physical.decision_projection import DecisionEventProjector
 from vocal_subtitle.physical.ir import (
     GlobalSpeakerTimeline,
     GlobalTranscript,
@@ -35,6 +37,23 @@ def _word(word_id, text, start, end, speaker_id=None):
         source_window_id="window",
         segment_id="segment",
         speaker_id=speaker_id,
+    )
+
+
+def _decision(decision_id, text, start, end):
+    return EvidenceDecision(
+        candidate_ids=(decision_id,),
+        decision="keep",
+        final_text=text,
+        final_words=(EvidenceWord(f"{decision_id}-word", text, start, end, 0.9),),
+        start=start,
+        end=end,
+        time_source="native_word_timestamp",
+        confidence=0.9,
+        risk_score=0.0,
+        risk_level="low",
+        physical_validation={"valid": True},
+        revision_trace=({"stage": "test"},),
     )
 
 
@@ -186,11 +205,11 @@ def test_physical_bin_event_preserves_bin_envelope_without_faking_word_time():
     assert event.time_source == "timing_degraded"
 
 
-def test_micro_bin_fragment_merges_at_contiguous_whole_word_boundary():
+def test_adjacent_physical_bins_remain_separate_subtitle_events():
     timeline = PhysicalTimeline(2.0)
     timeline.add_clip(0.0, 2.0, clip_id="clip-a")
     timeline.add_evidence(0.1, 0.45, "ffmpeg_skeleton", physical_clip_id="clip-a")
-    timeline.add_evidence(0.5, 0.8, "ffmpeg_skeleton", physical_clip_id="clip-a")
+    timeline.add_evidence(0.51, 0.8, "ffmpeg_skeleton", physical_clip_id="clip-a")
     transcript = _transcript(
         [
             _word("w1", "婉儿", 0.2, 0.4, speaker_id=0),
@@ -203,9 +222,44 @@ def test_micro_bin_fragment_merges_at_contiguous_whole_word_boundary():
         subtitle_bins=build_physical_subtitle_bins(timeline),
     )
 
-    assert len(events) == 1
-    assert events[0].text == "婉儿别"
-    assert events[0].source_word_ids == ["w1", "w2"]
+    assert len(events) == 2
+    assert [event.text for event in events] == ["婉儿", "别"]
+    assert [event.source_word_ids for event in events] == [["w1"], ["w2"]]
+    assert all(event.physical_bin_id for event in events)
+    assert events[0].physical_bin_id != events[1].physical_bin_id
+
+
+def test_physical_bin_events_split_when_words_cross_an_internal_gap():
+    timeline = PhysicalTimeline(3.0)
+    timeline.add_clip(0.0, 3.0, clip_id="clip-a")
+    timeline.add_evidence(0.0, 3.0, "ffmpeg_skeleton", physical_clip_id="clip-a")
+    transcript = _transcript([
+        _word("w1", "第一句", 0.2, 0.4),
+        _word("w2", "第二句", 1.2, 1.4),
+    ])
+
+    events = build_events(
+        allocate_words(transcript, timeline),
+        subtitle_bins=build_physical_subtitle_bins(timeline),
+    )
+
+    assert [event.text for event in events] == ["第一句", "第二句"]
+    assert [event.hard_split_before for event in events] == [False, True]
+
+
+def test_physical_projection_reports_no_cross_silence_for_bin_internal_gap():
+    timeline = PhysicalTimeline(3.0)
+    timeline.add_clip(0.0, 3.0, clip_id="clip-a")
+    timeline.add_evidence(0.0, 3.0, "ffmpeg_skeleton", physical_clip_id="clip-a")
+    decisions = [
+        _decision("decision-a", "第一句", 0.2, 0.4),
+        _decision("decision-b", "第二句", 0.9, 1.1),
+    ]
+
+    result = DecisionEventProjector().project_with_diagnostics(decisions, timeline)
+
+    assert [event.text for event in result.events] == ["第一句", "第二句"]
+    assert result.diagnostics["cross_silence_count"] == 0
 
 
 def test_long_physical_bin_splits_at_deep_energy_valley():
@@ -351,6 +405,63 @@ def test_global_transcriber_uses_optional_alignment_hook_and_keeps_ir_valid():
     assert engine.alignment_calls == 1
     assert result.diagnostics["alignment_status"] == "applied"
     assert result.transcript.validate() == []
+
+
+def test_global_transcriber_bounds_oversized_physical_window_and_projects_time():
+    engine = _FakeEngine()
+    transcriber = GlobalTranscriber(
+        engine,
+        GlobalTranscriberConfig(max_window_duration=180.0, window_overlap=0.5),
+    )
+    timeline = PhysicalTimeline.from_duration(250.0)
+
+    result = transcriber.transcribe(
+        np.zeros(250, dtype=np.float32),
+        1,
+        physical_timeline=timeline,
+    )
+
+    assert engine.calls == 2
+    assert result.diagnostics["window_count"] == 2
+    assert result.transcript.validate() == []
+    assert [word.source_window_id for word in result.transcript.words] == [
+        "ctx:clip-000001:l0500:r0500:part0000",
+        "ctx:clip-000001:l0500:r0500:part0001",
+    ]
+    assert result.transcript.words[1].raw_start == 179.9
+
+
+def test_pipeline_long_global_path_reports_bounded_window_diagnostics():
+    config = PipelineConfig()
+    config.asr.global_asr.enabled = True
+    config.asr.global_asr.backend = "faster-whisper"
+    pipeline = Pipeline(config)
+    engine = _FakeEngine()
+    pipeline._get_global_asr_engine = lambda: engine
+    timeline = PhysicalTimeline.from_duration(181.0)
+    shadow = SimpleNamespace(
+        physical_timeline=timeline,
+        global_speaker_timeline=GlobalSpeakerTimeline(
+            duration=181.0,
+            turns=[],
+            exclusive_turns=[],
+            backend="test",
+            status="unknown",
+        ),
+    )
+    stats = PipelineStats(input_path="audio.wav", duration_seconds=181.0)
+
+    _, diagnostics, transcript = pipeline._run_global_transcription_path(
+        np.zeros(181, dtype=np.float32),
+        1,
+        shadow,
+        stats,
+    )
+
+    assert transcript.validate() == []
+    assert diagnostics["mode"] == "bounded_windows"
+    assert diagnostics["windowed_transcription"]["window_count"] == 2
+    assert diagnostics["windowed_transcription"]["deduplicated_word_count"] == 0
 
 
 def test_pipeline_global_entry_builds_subtitle_events_from_shadow_ir():

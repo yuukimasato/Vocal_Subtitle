@@ -9,13 +9,14 @@
 #   bash install.sh --cpu            # 强制 CPU 模式
 #   bash install.sh --llm           # 含 LLM 优化支持
 #   bash install.sh --uvr           # 含 UVR 分离引擎 (默认推荐，BS-RoFormer)
-#   bash install.sh --spleeter      # 含 Spleeter 分离引擎 (旧，仅 Python < 3.12)
+#   bash install.sh --spleeter      # 显示旧版 Spleeter 独立环境安装提示
 #   bash install.sh --webui         # 含 Web GUI
 #   bash install.sh --all           # 全量安装
 #   bash install.sh --dev           # 开发环境
 #   bash install.sh --gui           # CLI + Web GUI 一键部署
 #   bash install.sh --local-nlp     # 本地 NLP 语义合并 (CPU, 无需 GPU)
 #   bash install.sh --download-models  # 安装 + 预下载模型
+#   bash install.sh --production      # 生产链运行时 + WebUI + Qwen runtime
 #   bash install.sh --help          # 查看帮助
 # ============================================================
 
@@ -61,7 +62,7 @@ show_help() {
     echo "  --no-torch      跳过 PyTorch，仅用 WebRTC VAD (最轻量, ~100MB)"
     echo "  --llm           基础 + LLM 字幕优化 (openai, tenacity, json-repair)"
     echo "  --uvr           基础 + UVR 分离引擎 (audio-separator, 默认推荐)"
-    echo "  --spleeter      基础 + Spleeter 分离引擎 (已停维，仅 Python < 3.12)"
+    echo "  --spleeter      显示 Spleeter 独立环境安装提示 (旧版依赖)"
     echo "  --openunmix     基础 + Open-Unmix 分离引擎 (openunmix, soundfile)"
     echo "  --webrtcvad     显式指定 WebRTC VAD (覆盖 GPU 自动选择)"
     echo "  --local-nlp     基础 + 本地 NLP 语义合并 (sentence-transformers, CPU)"
@@ -69,9 +70,11 @@ show_help() {
     echo "  --diarization   基础 + 说话人分离 (librosa, scikit-learn, scipy)"
     echo "  --speaker-embedding  基础 + 说话人声学嵌入 (speechbrain, 提高聚类精度)"
     echo "  --whisperx      基础 + WhisperX 引擎 (词级时间戳增强, 强制音素对齐)"
+    echo "  --deepfilternet 基础 + DeepFilterNet 语音增强 (降噪预处理)"
     echo "  --funasr        显式安装 FunASR (默认已含, 此选项供单独安装)"
     echo "  --gui           一键部署 CLI + Web GUI (同 --webui)"
     echo "  --all           全量安装 (包含以上全部)"
+    echo "  --production    生产链安装 (faster-whisper + FunASR + Qwen + WebUI)"
     echo "  --dev           开发环境 (基础 + 测试 + Lint 工具)"
     echo ""
     echo "GPU 自动适配 (默认):"
@@ -89,6 +92,9 @@ show_help() {
     echo "  --download-models        安装完成后预下载常用模型"
     echo "  --download-asr MODEL      指定 ASR 模型 (large-v3 / medium / small)"
     echo "  --download-separator ENG  指定分离引擎 (uvr / spleeter)"
+    echo "  --download-review-models  下载 Qwen3-ASR / ForcedAligner / SED 模型"
+    echo "  --download-review MODEL   下载指定复核模型 (见 scripts/download_review_models.py --list)"
+    echo "  --review-mirror           复核模型下载使用 hf-mirror.com"
     echo ""
     echo "其他选项:"
     echo "  --no-venv      跳过虚拟环境创建，直接安装到当前 Python"
@@ -103,10 +109,13 @@ show_help() {
     echo "  bash install.sh --cuda 12.4                        # 指定 CUDA 版本"
     echo "  bash install.sh --all                              # 全量安装 (自动检测 GPU)"
     echo "  bash install.sh --all --download-models            # 全量 + 模型预下载"
+    echo "  bash install.sh --all --download-review-models     # 额外下载多引擎复核模型"
+    echo "  bash install.sh --production --cpu --download-review qwen3-asr-1.7b"
     echo "  bash install.sh --gui                              # CLI + 浏览器界面"
     echo "  bash install.sh --dev --venv myenv                 # 开发环境 + 自定义 venv"
     echo "  bash install.sh --no-torch                         # 最轻量 (WebRTC VAD only)"
     echo "  bash install.sh --webui --diarization --whisperx   # Web GUI + 说话人分离 + WhisperX"
+    echo "  bash install.sh --deepfilternet                    # 语音降噪增强"
     exit 0
 }
 
@@ -119,6 +128,12 @@ VENV_NAME="venv"
 DOWNLOAD_MODELS=false
 DOWNLOAD_ASR_MODEL=""
 DOWNLOAD_SEPARATOR_ENG=""
+DOWNLOAD_REVIEW_MODELS=false
+DOWNLOAD_REVIEW_MODEL=""
+DOWNLOAD_STANDARD_MODELS=false
+REVIEW_MIRROR=false
+INSTALL_QWEN_RUNTIME=false
+PRODUCTION_MODE=false
 SKIP_MODEL_DL=false
 GPU_MODE=true   # 默认自动检测 GPU，传 --cpu 可强制跳过
 CPU_EXPLICIT=false  # 区分「自动检测无 GPU」和「--cpu 显式指定」
@@ -172,11 +187,20 @@ while [[ $# -gt 0 ]]; do
         --whisperx)
             INSTALL_MODE="${INSTALL_MODE},whisperx"
             shift ;;
+        --deepfilternet)
+            INSTALL_MODE="${INSTALL_MODE},deepfilternet"
+            shift ;;
         --funasr)
             INSTALL_MODE="${INSTALL_MODE},funasr-explicit"
             shift ;;
         --all)
             INSTALL_MODE="all"
+            INSTALL_QWEN_RUNTIME=true
+            shift ;;
+        --production)
+            INSTALL_MODE="production"
+            INSTALL_QWEN_RUNTIME=true
+            PRODUCTION_MODE=true
             shift ;;
         --dev)
             INSTALL_MODE="dev"
@@ -189,15 +213,30 @@ while [[ $# -gt 0 ]]; do
             shift 2 ;;
         --download-models)
             DOWNLOAD_MODELS=true
+            DOWNLOAD_STANDARD_MODELS=true
             shift ;;
         --download-asr)
             DOWNLOAD_ASR_MODEL="$2"
             DOWNLOAD_MODELS=true
+            DOWNLOAD_STANDARD_MODELS=true
             shift 2 ;;
         --download-separator)
             DOWNLOAD_SEPARATOR_ENG="$2"
             DOWNLOAD_MODELS=true
+            DOWNLOAD_STANDARD_MODELS=true
             shift 2 ;;
+        --download-review-models)
+            DOWNLOAD_REVIEW_MODELS=true
+            DOWNLOAD_MODELS=true
+            shift ;;
+        --download-review)
+            DOWNLOAD_REVIEW_MODEL="$2"
+            DOWNLOAD_REVIEW_MODELS=true
+            DOWNLOAD_MODELS=true
+            shift 2 ;;
+        --review-mirror)
+            REVIEW_MIRROR=true
+            shift ;;
         --no-model-dl)
             SKIP_MODEL_DL=true
             shift ;;
@@ -637,14 +676,35 @@ if [ "$CREATE_VENV" = true ]; then
 
     if [ -d "$VENV_NAME" ]; then
         info "虚拟环境已存在: $VENV_NAME/"
-        if [ "$YES_MODE" = true ]; then
+        VENV_PYTHON="$VENV_NAME/bin/python"
+        VENV_PIP="$VENV_NAME/bin/pip"
+        if [ ! -x "$VENV_PYTHON" ] || ! "$VENV_PYTHON" -c "import sys" &>/dev/null || ! "$VENV_PYTHON" -m pip --version &>/dev/null || [ ! -x "$VENV_PIP" ] || ! "$VENV_PIP" --version &>/dev/null; then
+            warn "检测到虚拟环境入口失效（python/pip 不可用）"
+            if [ "$YES_MODE" = true ]; then
+                BROKEN_VENV_BACKUP="${VENV_NAME}.broken-$(date +%Y%m%d%H%M%S)"
+                mv "$VENV_NAME" "$BROKEN_VENV_BACKUP"
+                warn "旧环境已移动到: $BROKEN_VENV_BACKUP"
+            else
+                read -p "  是否移动旧环境并重新创建? [y/N] " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    BROKEN_VENV_BACKUP="${VENV_NAME}.broken-$(date +%Y%m%d%H%M%S)"
+                    mv "$VENV_NAME" "$BROKEN_VENV_BACKUP"
+                    warn "旧环境已移动到: $BROKEN_VENV_BACKUP"
+                else
+                    error "虚拟环境不可用；请使用 --yes 重建，或手动指定 --venv"
+                    exit 1
+                fi
+            fi
+        elif [ "$YES_MODE" = true ]; then
             info "非交互模式，使用现有虚拟环境"
         else
             read -p "  是否重新创建? [y/N] " -n 1 -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
-                rm -rf "$VENV_NAME"
-                info "已删除旧的虚拟环境"
+                BACKUP_VENV="${VENV_NAME}.backup-$(date +%Y%m%d%H%M%S)"
+                mv "$VENV_NAME" "$BACKUP_VENV"
+                info "旧的虚拟环境已移动到: $BACKUP_VENV"
             else
                 info "使用现有虚拟环境"
             fi
@@ -656,9 +716,13 @@ if [ "$CREATE_VENV" = true ]; then
         ok "虚拟环境已创建: $VENV_NAME/"
     fi
 
+    VENV_PYTHON="$VENV_NAME/bin/python"
     # 激活虚拟环境
     source "$VENV_NAME/bin/activate"
     ok "已激活虚拟环境"
+
+    # 始终通过环境内解释器调用 pip，避免搬迁过的 pip shebang 指向旧路径。
+    pip() { "$VENV_PYTHON" -m pip "$@"; }
 
     # 升级 pip + setuptools + wheel
     info "升级 pip/setuptools/wheel..."
@@ -695,15 +759,15 @@ install_pip_deps() {
 if [ "$HAS_GPU" = true ] && [ "$SKIP_TORCH" = false ]; then
     if [ -n "$TORCH_INDEX_URL" ] && [ "$GPU_TYPE" = "cuda" ]; then
         info "安装 CUDA 版 PyTorch (${TORCH_INDEX_URL})..."
-        _safe_pip_install "CUDA PyTorch" pip install torch torchaudio --index-url "$TORCH_INDEX_URL"
+        _safe_pip_install "CUDA PyTorch" pip install torch torchaudio torchvision --index-url "$TORCH_INDEX_URL"
         ok "CUDA 版 PyTorch 安装完成"
     elif [ "$GPU_TYPE" = "rocm" ] && [ -n "$TORCH_INDEX_URL" ]; then
         info "安装 ROCm 版 PyTorch (${TORCH_INDEX_URL})..."
-        _safe_pip_install "ROCm PyTorch" pip install torch torchaudio --index-url "$TORCH_INDEX_URL"
+        _safe_pip_install "ROCm PyTorch" pip install torch torchaudio torchvision --index-url "$TORCH_INDEX_URL"
         ok "ROCm 版 PyTorch 安装完成"
     elif [ "$GPU_TYPE" = "mps" ]; then
         info "Apple Silicon: 使用标准 PyTorch (MPS 后端已内置)"
-        _safe_pip_install "MPS PyTorch" pip install torch torchaudio
+        _safe_pip_install "MPS PyTorch" pip install torch torchaudio torchvision
         ok "PyTorch (MPS) 安装完成"
     fi
 elif [ "$SKIP_TORCH" = true ]; then
@@ -711,7 +775,9 @@ elif [ "$SKIP_TORCH" = true ]; then
 elif [ "$CPU_EXPLICIT" = true ]; then
     # --cpu 显式: 安装 CPU 版 PyTorch + Silero VAD
     info "安装 CPU 版 PyTorch (--cpu 模式)..."
-    _safe_pip_install "CPU PyTorch" pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+    # Keep the CPU torch trio aligned. UVR currently pulls torchvision and a
+    # floating version can otherwise fail at import with torchvision::nms.
+    _safe_pip_install "CPU PyTorch" pip install torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cpu
     ok "CPU 版 PyTorch 安装完成"
 else
     # 自动检测无 GPU: 跳过 PyTorch (使用 webrtcvad, 最轻量)
@@ -727,7 +793,12 @@ _build_base_extras() {
     #   GPU + torch   → silero-vad (GPU) + gpu (CTranslate2 CUDA)    [最强]
     #   CPU + torch   → silero-vad (CPU PyTorch, --cpu 模式)         [中等]
     #   无 torch       → webrtcvad (纯 CPU, 轻量, 默认/--no-torch)    [最轻]
-    local extras="faster-whisper,funasr"
+    # The default config uses UVR. Keep the installer and config in sync so a
+    # normal installation cannot start with a missing audio-separator module.
+    local extras="faster-whisper,funasr,uvr"
+    if [ "$DOWNLOAD_REVIEW_MODELS" = true ] || [ "$PRODUCTION_MODE" = true ]; then
+        extras="${extras},review-models,qwen-runtime"
+    fi
     if [ "$SKIP_TORCH" = true ]; then
         extras="${extras},webrtcvad"
         info "VAD: WebRTC VAD (纯 CPU, 轻量, --no-torch)" >&2
@@ -756,8 +827,12 @@ case "$INSTALL_MODE" in
         if [ "$HAS_GPU" = true ] && [ "$SKIP_TORCH" = false ]; then
             install_pip_deps "all"
         else
-            install_pip_deps "gpu,llm,local-nlp,uvr,spleeter,openunmix,webrtcvad,faster-whisper,funasr,webui,diarization"
+            install_pip_deps "gpu,llm,local-nlp,uvr,openunmix,whisperx,deepfilternet,webrtcvad,faster-whisper,funasr,review-models,qwen-runtime,webui,diarization,speaker-embedding"
         fi
+        ;;
+    production)
+        BASE_EXTRAS=$(_build_base_extras)
+        install_pip_deps "${BASE_EXTRAS},webui"
         ;;
     dev)
         BASE_EXTRAS=$(_build_base_extras)
@@ -766,18 +841,32 @@ case "$INSTALL_MODE" in
     *)
         # 组合模式: 自动补充 GPU 相关 extras
         # 始终包含 faster-whisper (ASR 核心) 和 funasr 作为基础
-        EXTRAS="faster-whisper,funasr"
-        # GPU 加速: 检测到 GPU 且未显式指定 webrtcvad → 自动启用 silero-vad
-        if [ "$HAS_GPU" = true ] && [ "$SKIP_TORCH" = false ]; then
-            if [[ "$INSTALL_MODE" != *webrtcvad* ]]; then
-                EXTRAS="${EXTRAS},silero-vad,gpu"
-                info "GPU 模式: 自动启用 Silero VAD + CTranslate2 加速"
-            fi
+        # UVR is the default separation engine, so it is part of every normal
+        # install mode. --no-torch only changes the VAD/PyTorch strategy.
+        EXTRAS="faster-whisper,funasr,uvr"
+        if [ "$DOWNLOAD_REVIEW_MODELS" = true ] || [ "$PRODUCTION_MODE" = true ]; then
+            EXTRAS="${EXTRAS},review-models,qwen-runtime"
+        fi
+        # Keep VAD selection consistent with the base/production branches.
+        if [ "$SKIP_TORCH" = true ]; then
+            EXTRAS="${EXTRAS},webrtcvad"
+            info "VAD: WebRTC VAD (纯 CPU, 轻量, --no-torch)"
+        elif [ "$HAS_GPU" = true ] && [[ "$INSTALL_MODE" != *webrtcvad* ]]; then
+            EXTRAS="${EXTRAS},silero-vad,gpu"
+            info "GPU 模式: 自动启用 Silero VAD + CTranslate2 加速"
+        elif [ "$CPU_EXPLICIT" = true ]; then
+            EXTRAS="${EXTRAS},silero-vad"
+            info "VAD: Silero VAD (CPU, --cpu 模式)"
+        else
+            EXTRAS="${EXTRAS},webrtcvad"
+            info "VAD: WebRTC VAD (纯 CPU, 轻量, 无 GPU)"
         fi
         [[ "$INSTALL_MODE" == *gpu* ]] && EXTRAS="${EXTRAS},gpu"
         [[ "$INSTALL_MODE" == *llm* ]] && EXTRAS="${EXTRAS},llm"
-        [[ "$INSTALL_MODE" == *uvr* ]] && EXTRAS="${EXTRAS},uvr"
-        [[ "$INSTALL_MODE" == *spleeter* ]] && EXTRAS="${EXTRAS},spleeter"
+        if [[ "$INSTALL_MODE" == *spleeter* ]]; then
+            warn "Spleeter 已从主依赖矩阵隔离；请单独创建环境并执行:"
+            warn "python -m venv venv-spleeter && venv-spleeter/bin/pip install -r requirements-spleeter-legacy.txt"
+        fi
         [[ "$INSTALL_MODE" == *openunmix* ]] && EXTRAS="${EXTRAS},openunmix"
         [[ "$INSTALL_MODE" == *webrtcvad* ]] && EXTRAS="${EXTRAS},webrtcvad"
         [[ "$INSTALL_MODE" == *local-nlp* ]] && EXTRAS="${EXTRAS},local-nlp"
@@ -785,6 +874,7 @@ case "$INSTALL_MODE" in
         [[ "$INSTALL_MODE" == *diarization* ]] && EXTRAS="${EXTRAS},diarization"
         [[ "$INSTALL_MODE" == *speaker-embedding* ]] && EXTRAS="${EXTRAS},speaker-embedding"
         [[ "$INSTALL_MODE" == *whisperx* ]] && EXTRAS="${EXTRAS},whisperx"
+        [[ "$INSTALL_MODE" == *deepfilternet* ]] && EXTRAS="${EXTRAS},deepfilternet"
         install_pip_deps "$EXTRAS"
         ;;
 esac
@@ -809,7 +899,7 @@ fi
 
 # 6b. CLI 可用性验证
 if command -v vocal-subtitle &> /dev/null; then
-    CLI_VER=$(vocal-subtitle --version 2>&1 || echo "0.1.0")
+    CLI_VER=$(vocal-subtitle --version 2>&1 || echo "0.2.0")
     ok "CLI 命令可用: vocal-subtitle ($CLI_VER)"
 else
     warn "CLI 命令不在 PATH 中，确认虚拟环境已激活"
@@ -848,11 +938,10 @@ for mod, pkg in modules:
         errors.append(pkg)
         print(f'  ✗ {pkg} — 未安装 ({e})')
 
-# Optional modules
+# Optional modules (the default UVR runtime is checked separately below)
 optional = [
     ('faster_whisper', 'faster-whisper', 'ASR 引擎'),
     ('spleeter', 'spleeter', '分离引擎'),
-    ('audio_separator', 'audio-separator', 'UVR 分离引擎'),
     ('openunmix', 'openunmix', 'Open-Unmix 分离引擎'),
     ('soundfile', 'soundfile', 'Open-Unmix 音频 I/O'),
     ('openai', 'openai', 'LLM 客户端'),
@@ -868,19 +957,47 @@ optional = [
     ('speechbrain', 'speechbrain', '说话人嵌入'),
     ('whisperx', 'whisperx', 'WhisperX 引擎'),
     ('funasr', 'funasr', 'FunASR 引擎'),
+    ('qwen_asr', 'qwen-asr', 'Qwen ASR runtime'),
 ]
 for mod, pkg, desc in optional:
     try:
         __import__(mod)
         print(f'  ✓ {pkg} ({desc})')
-    except ImportError:
-        print(f'  - {pkg} ({desc}) — 可选，未安装')
+    except Exception as e:
+        print(f'  - {pkg} ({desc}) — 可选，不可用 ({type(e).__name__}: {e})')
 
 if errors:
     print(f'\n错误: {len(errors)} 个核心模块缺失')
     sys.exit(1)
 print('\n所有核心模块验证通过 ✓')
 " || VERIFY_OK=false
+
+# The default pipeline uses UVR. Treat its runtime as mandatory so an
+# incomplete installation fails here instead of on the first user task.
+if python3 -c "import audio_separator" 2>/dev/null; then
+    ok "UVR 分离引擎可用: audio-separator"
+else
+    error "缺少默认 UVR 分离引擎: audio-separator"
+    error "请重新运行安装，或执行: pip install -e \".[uvr]\""
+    VERIFY_OK=false
+fi
+
+# 生产链预检：Qwen runtime 和默认本地权重都必须可用。
+if [ "$PRODUCTION_MODE" = true ]; then
+    if python3 -c "import qwen_asr" 2>/dev/null; then
+        ok "Qwen ASR runtime 可用"
+    else
+        error "生产模式缺少 qwen-asr runtime"
+        VERIFY_OK=false
+    fi
+    if python3 -c "from vocal_subtitle.asr.qwen_engine import qwen_model_path_ready; raise SystemExit(0 if qwen_model_path_ready(None) else 1)" 2>/dev/null; then
+        ok "Qwen ASR 默认模型快照可用"
+    else
+        error "生产模式缺少 Qwen ASR 模型: ${VOCAL_SUBTITLE_REVIEW_MODEL_DIR:-$HOME/.cache/vocal-subtitle/review-models}/qwen3-asr-1.7b"
+        error "请使用 --download-review qwen3-asr-1.7b 完成部署"
+        VERIFY_OK=false
+    fi
+fi
 
 # 6e. GPU 可用性验证
 if [ "$HAS_GPU" = true ]; then
@@ -914,7 +1031,7 @@ fi
 # 显示关键依赖版本
 echo ""
 info "已安装的关键依赖:"
-pip list 2>/dev/null | grep -iE "numpy|torch|faster-whisper|ctranslate2|pydub|pysubs2|click|spleeter|audio-separator|openunmix|soundfile|openai|sentence-transformers|diskcache|structlog|GPUtil|tqdm|PyYAML|fastapi|uvicorn|librosa|scikit-learn|scipy|webrtcvad|websockets" | while read -r line; do
+pip list 2>/dev/null | grep -iE "numpy|torch|faster-whisper|ctranslate2|pydub|pysubs2|click|spleeter|audio-separator|openunmix|soundfile|openai|sentence-transformers|diskcache|structlog|GPUtil|tqdm|PyYAML|fastapi|uvicorn|librosa|scikit-learn|scipy|webrtcvad|websockets|pydantic|whisperx|deepfilternet" | while read -r line; do
     echo "  - $line"
 done || true
 
@@ -1025,42 +1142,69 @@ except Exception as e:
         " 2>&1 || warn "Silero VAD 模型下载失败"
     }
 
-    if [ -n "$DOWNLOAD_ASR_MODEL" ]; then
-        download_faster_whisper_model "$DOWNLOAD_ASR_MODEL"
-    elif [ "$DOWNLOAD_MODELS" = true ]; then
-        if python3 -c "import faster_whisper" 2>/dev/null; then
-            download_faster_whisper_model "large-v3"
+    if [ "$DOWNLOAD_STANDARD_MODELS" = true ]; then
+        if [ -n "$DOWNLOAD_ASR_MODEL" ]; then
+            download_faster_whisper_model "$DOWNLOAD_ASR_MODEL"
+        elif [ "$DOWNLOAD_MODELS" = true ]; then
+            if python3 -c "import faster_whisper" 2>/dev/null; then
+                download_faster_whisper_model "large-v3"
+            fi
+            if python3 -c "import audio_separator" 2>/dev/null; then
+                download_uvr_model
+            fi
+            if python3 -c "import spleeter" 2>/dev/null; then
+                download_spleeter_model
+            fi
+            if python3 -c "import torch" 2>/dev/null; then
+                download_silero_vad_model
+            fi
         fi
-        if python3 -c "import audio_separator" 2>/dev/null; then
-            download_uvr_model
-        fi
-        if python3 -c "import spleeter" 2>/dev/null; then
-            download_spleeter_model
-        fi
-        if python3 -c "import torch" 2>/dev/null; then
-            download_silero_vad_model
+
+        # 单独指定分离引擎模型下载 (--download-separator uvr|spleeter)
+        if [ -n "$DOWNLOAD_SEPARATOR_ENG" ]; then
+            case "$DOWNLOAD_SEPARATOR_ENG" in
+                uvr)
+                    download_uvr_model
+                    ;;
+                spleeter)
+                    download_spleeter_model
+                    ;;
+                *)
+                    warn "未知分离引擎: $DOWNLOAD_SEPARATOR_ENG (支持: uvr, spleeter)"
+                    ;;
+            esac
         fi
     fi
 
-    # 单独指定分离引擎模型下载 (--download-separator uvr|spleeter)
-    if [ -n "$DOWNLOAD_SEPARATOR_ENG" ]; then
-        case "$DOWNLOAD_SEPARATOR_ENG" in
-            uvr)
-                download_uvr_model
-                ;;
-            spleeter)
-                download_spleeter_model
-                ;;
-            *)
-                warn "未知分离引擎: $DOWNLOAD_SEPARATOR_ENG (支持: uvr, spleeter)"
-                ;;
-        esac
+    # 多引擎复核模型默认不下载，避免普通安装拉取数 GB 权重。
+    if [ "$DOWNLOAD_REVIEW_MODELS" = true ]; then
+        local_review_script="$PROJECT_DIR/scripts/download_review_models.py"
+        review_download_args=()
+        if [ "$REVIEW_MIRROR" = true ]; then
+            review_download_args+=(--mirror)
+        fi
+        if [ ! -f "$local_review_script" ]; then
+            warn "复核模型下载脚本不存在: $local_review_script"
+        elif [ -n "$DOWNLOAD_REVIEW_MODEL" ]; then
+            python3 "$local_review_script" --model "$DOWNLOAD_REVIEW_MODEL" \
+                "${review_download_args[@]}" \
+                || warn "复核模型下载失败: $DOWNLOAD_REVIEW_MODEL"
+        else
+            python3 "$local_review_script" --all \
+                "${review_download_args[@]}" \
+                || warn "复核模型下载失败，请检查网络或使用 --download-review MODEL 重试"
+        fi
     fi
 
     info "模型缓存目录: $MODEL_CACHE_DIR"
     ls -lh "$MODEL_CACHE_DIR" 2>/dev/null || info "(目录为空，模型将在首次使用时自动下载)"
 else
     info "模型将在首次运行时自动下载到 ~/.cache/"
+fi
+
+if [ "$VERIFY_OK" != true ]; then
+    error "安装预检未通过，当前环境不能作为生产部署环境"
+    exit 1
 fi
 
 # ------------------------------------------------------------------

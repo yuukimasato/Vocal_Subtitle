@@ -51,6 +51,7 @@ class SubtitleOptimizer(_BaseOptimizer):
 from vocal_subtitle.asr.base import LanguageDetection, TranscriptionSegment, WordTimestamp
 from vocal_subtitle.asr.boundary_reasr import SlidingWindow, SlidingWindowReASR
 from vocal_subtitle.asr.faster_whisper_engine import FasterWhisperEngine
+from vocal_subtitle.asr.router import ASRRouteDecision
 from vocal_subtitle.asr.text_normalizer import TextNormalizer
 from vocal_subtitle.config import ConfigLoader
 from vocal_subtitle.pipeline import Pipeline
@@ -173,6 +174,44 @@ def test_single_language_detection_is_prepared_from_complete_audio_once():
 
     assert engine.detect_calls == [len(complete_audio)]
     assert engine.calls == ["zh", "zh"]
+
+
+def test_task_language_rejects_low_confidence_detection():
+    config = ConfigLoader().load_profile("default")
+    config.asr.engine = "faster-whisper"
+    pipeline = Pipeline(config)
+    engine = _FakeASR()
+    engine.detect_language_info = lambda *_args: LanguageDetection("ru", 0.28, "fake")
+    pipeline._asr_engine = engine
+
+    assert pipeline._prepare_task_language(np.zeros(4 * 16000), 16000) is None
+    assert getattr(pipeline, "_resolved_language", None) is None
+
+
+def test_routed_uncertain_language_does_not_lock_from_short_skeleton_chunk():
+    config = ConfigLoader().load_profile("default")
+    config.cache.enabled = False
+    pipeline = Pipeline(config)
+    engine = _FakeASR()
+    pipeline._asr_engine = engine
+    pipeline._progress = _Progress()
+    pipeline._asr_route_decision = ASRRouteDecision(
+        requested_engine="auto",
+        selected_engine="faster-whisper",
+        selected_model="fake-model",
+        detected_language="other",
+        language_probability=0.28,
+        decision_reason="non_chinese_or_uncertain_probe",
+    )
+
+    pipeline._run_asr(
+        np.zeros(1440, dtype=np.float32),
+        16000,
+        [SpeechSegment(0.0, 0.09)],
+    )
+
+    assert engine.detect_calls == []
+    assert engine.calls == [None]
 
 
 def test_mixed_language_mode_accepts_high_confidence_switch():

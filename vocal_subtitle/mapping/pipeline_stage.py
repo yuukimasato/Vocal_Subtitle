@@ -79,6 +79,7 @@ class PipelineMappingMixin:
         result = finalize_subtitle_events(
             events,
             config=FinalizeConfig(
+                min_duration=getattr(sub_cfg, "min_duration", 0.8),
                 max_duration=getattr(sub_cfg, "max_duration", 5.0),
                 max_chars_cjk=getattr(sub_cfg, "max_chars_cjk", 20),
                 max_chars_latin=getattr(sub_cfg, "max_chars_latin", 42),

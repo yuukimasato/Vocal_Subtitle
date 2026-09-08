@@ -116,6 +116,28 @@ class TestCanMerge:
         assert ok is False
         assert "physical bin" in reason.lower()
 
+    def test_merge_rebases_word_timestamps_and_keeps_provenance(self):
+        from vocal_subtitle.asr.base import WordTimestamp
+
+        left = _make_event(
+            1, 0.0, 0.5, "hello",
+            words=[WordTimestamp("hello", 0.0, 0.5)],
+            source_word_ids=["left-word"],
+        )
+        right = _make_event(
+            2, 0.5, 1.0, "world",
+            words=[WordTimestamp("world", 0.0, 0.5)],
+            source_word_ids=["right-word"],
+        )
+
+        merged = merge_event_group([left, right], text="hello world")
+
+        assert [(word.start, word.end) for word in merged.words] == [
+            (0.0, 0.5),
+            (0.5, 1.0),
+        ]
+        assert merged.source_word_ids == ["left-word", "right-word"]
+
     def test_different_confirmed_speakers_prevent_merge(self):
         left = _make_event(1, 0.0, 0.5, "hello", speaker_id=1, speaker_status="confirmed")
         right = _make_event(2, 0.52, 1.0, "world", speaker_id=2, speaker_status="confirmed")

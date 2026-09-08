@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from .time_mapper import SubtitleEvent
+from .event_ops import can_merge_events, merge_event_group
 
 logger = logging.getLogger(__name__)
 
@@ -130,23 +131,24 @@ class SubtitleBuilder:
             prev = merged[-1]
             gap = event.start - prev.end
 
-            # 如果前一条太短且间隙小，合并
-            if prev.duration < rule.min_duration and gap < 0.3:
-                # ★ 不同说话人 → 不合并
-                if _same_speaker(prev, event):
-                    prev.end = event.end
-                    prev.text = prev.text + " " + event.text
-                    if event.words:
-                        prev.words.extend(event.words)
-                    continue
-
-            # 如果当前太短，尝试与前一条合并
-            if event.duration < rule.min_duration and gap < 0.3:
-                if _same_speaker(prev, event):
-                    prev.end = event.end
-                    prev.text = prev.text + " " + event.text
-                    if event.words:
-                        prev.words.extend(event.words)
+            should_merge = (
+                (prev.duration < rule.min_duration or event.duration < rule.min_duration)
+                and gap < 0.3
+                and _same_speaker(prev, event)
+            )
+            if should_merge:
+                allowed, _reason = can_merge_events(
+                    [prev, event],
+                    max_gap=0.3,
+                    max_combined_duration=rule.max_duration,
+                )
+                if allowed:
+                    merged[-1] = merge_event_group(
+                        [prev, event],
+                        text=prev.text + " " + event.text,
+                        reason="short_event_duration",
+                        new_index=prev.index,
+                    )
                     continue
 
             merged.append(event)

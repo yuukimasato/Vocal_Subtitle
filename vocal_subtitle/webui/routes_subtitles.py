@@ -14,11 +14,41 @@ from ..config import ConfigLoader, SubtitleBuildConfig
 from ..mapping.time_mapper import SubtitleEvent
 from ..utils.session_manager import OUTPUT_NAMES
 from .models import SubtitleBatchEditRequest, SubtitleEditRequest, SubtitleEventResponse
-from .subtitle_editing import SubtitleBatchEditError, apply_batch_edit
+from .subtitle_editing import SubtitleBatchEditError, apply_batch_edit, apply_timing_edit
 from .runtime_state import state
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_TERMINAL_TASK_STATUSES = {"completed", "degraded_completed"}
+_INPUT_AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".m4a", ".ogg", ".aac", ".webm"}
+
+
+def _find_input_file(session_dir_str: str) -> Optional[str]:
+    """Find the uploaded input audio in a session directory.
+
+    The helper is shared by download and streaming routes.  Session metadata
+    is user-controlled only through the upload workflow, but keeping the
+    lookup bounded to one directory avoids accidentally scanning the cache.
+    """
+    if not session_dir_str:
+        return None
+    task_dir = Path(session_dir_str)
+    if not task_dir.is_dir():
+        return None
+    try:
+        candidates = sorted(task_dir.iterdir(), key=lambda item: item.name)
+    except OSError:
+        return None
+    for candidate in candidates:
+        if (
+            candidate.is_file()
+            and candidate.name.startswith("input")
+            and candidate.suffix.lower() in _INPUT_AUDIO_SUFFIXES
+        ):
+            return str(candidate)
+    return None
+
 
 @router.get("/subtitle/{task_id}", response_model=List[SubtitleEventResponse])
 async def get_subtitles(task_id: str):
@@ -27,7 +57,7 @@ async def get_subtitles(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
-    if task["status"] != "completed":
+    if task["status"] not in _TERMINAL_TASK_STATUSES:
         raise HTTPException(status_code=400, detail="Task not completed yet")
 
     result = task.get("result", {})
@@ -58,14 +88,14 @@ def _load_completed_subtitle_task(task_id: str) -> tuple[Dict[str, Any], Dict[st
                 raise HTTPException(status_code=404, detail=f"Task not found: {task_id}") from exc
             task = {
                 "task_id": task_id,
-                "status": "completed",
+                "status": result.get("status", "completed"),
                 "result": result,
             }
             state.task_store[task_id] = task
         else:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
-    if task.get("status") != "completed":
+    if task.get("status") not in _TERMINAL_TASK_STATUSES:
         raise HTTPException(status_code=400, detail="Task not completed yet")
     result = task.get("result", {})
     if not isinstance(result, dict) or not isinstance(result.get("events"), list):
@@ -75,12 +105,12 @@ def _load_completed_subtitle_task(task_id: str) -> tuple[Dict[str, Any], Dict[st
 
 def _persist_subtitle_result(task_id: str, task: Dict[str, Any], result: Dict[str, Any]) -> None:
     """Persist the final event list used by the UI and every subtitle export."""
-    task["status"] = "completed"
+    task["status"] = result.get("status", "completed")
     task["result"] = result
     state.task_store[task_id] = task
     state.task_history.update(
         task_id,
-        status="completed",
+        status=task["status"],
         result_json=json.dumps(result, default=str),
     )
 
@@ -185,20 +215,50 @@ async def update_subtitles_batch(task_id: str, body: SubtitleBatchEditRequest):
 
 @router.put("/subtitle/{task_id}/{index}")
 async def update_subtitle(task_id: str, index: int, body: SubtitleEditRequest):
-    """编辑单条字幕文本，并自动保存到磁盘文件"""
+    """编辑单条字幕（文本和/或时间轴），并自动保存到磁盘文件"""
     task, result = _load_completed_subtitle_task(task_id)
     events = result.get("events", [])
 
-    for e in events:
-        if e["index"] == index:
-            e["text"] = body.text
-            e["original_text"] = None  # 手动编辑后清除原始文本标记
-            _persist_subtitle_result(task_id, task, result)
-            # 自动保存到磁盘
-            _rewrite_subtitle_files(result)
-            return {"status": "ok", "index": index, "text": body.text}
+    if body.text is None and body.start is None and body.end is None:
+        raise HTTPException(status_code=400, detail="至少提供 text、start 或 end 之一")
 
-    raise HTTPException(status_code=404, detail=f"Subtitle {index} not found")
+    updated_events = events
+    if body.start is not None or body.end is not None:
+        try:
+            updated_events = apply_timing_edit(
+                events, index, start=body.start, end=body.end
+            )
+        except SubtitleBatchEditError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        result["events"] = updated_events
+
+    updated_event = None
+    for e in updated_events:
+        if e["index"] == index:
+            updated_event = e
+            break
+    if updated_event is None:
+        raise HTTPException(status_code=404, detail=f"Subtitle {index} not found")
+
+    if body.text is not None:
+        updated_event["text"] = body.text
+        updated_event["original_text"] = None  # 手动编辑后清除原始文本标记
+
+    _persist_subtitle_result(task_id, task, result)
+    # 自动保存到磁盘
+    rewrite_errors = _rewrite_subtitle_files(result)
+    if rewrite_errors:
+        raise HTTPException(
+            status_code=500,
+            detail="字幕事件已更新，但文件写回失败: " + "; ".join(rewrite_errors),
+        )
+    return {
+        "status": "ok",
+        "index": index,
+        "text": updated_event.get("text"),
+        "start": updated_event.get("start"),
+        "end": updated_event.get("end"),
+    }
 
 
 @router.get("/subtitle/{task_id}/export")
@@ -211,7 +271,7 @@ async def export_subtitle(
 
     # 先尝试内存中的任务
     task = state.task_store.get(task_id)
-    if task and task.get("status") == "completed":
+    if task and task.get("status") in _TERMINAL_TASK_STATUSES:
         result = task.get("result", {})
         raw_events = result.get("events", [])
 
@@ -287,7 +347,7 @@ async def export_subtitle(
 @router.get("/tasks/{task_id}/audio")
 async def download_separated_audio(
     task_id: str,
-    type: str = Query(default="vocals", description="vocals 或 accompaniment"),
+    type: str = Query(default="vocals", description="vocals、accompaniment 或 input"),
 ):
     """下载人声分离产出的音频文件
 
@@ -295,15 +355,22 @@ async def download_separated_audio(
         task_id: 任务 ID
         type: 音频类型 — 'vocals'（人声）或 'accompaniment'（背景声/伴奏）
     """
-    if type not in ("vocals", "accompaniment"):
-        raise HTTPException(status_code=400, detail="type must be 'vocals' or 'accompaniment'")
+    if type not in ("vocals", "accompaniment", "input"):
+        raise HTTPException(status_code=400, detail="type must be 'vocals', 'accompaniment' or 'input'")
 
     # 先查内存中的任务
     task = state.task_store.get(task_id)
     file_path = None
 
     if task and task.get("result"):
-        file_path = task["result"].get(f"{type}_path")
+        if type == "input":
+            session_dir = task.get("session_dir", "")
+            if session_dir:
+                file_path = _find_input_file(session_dir)
+            if not file_path:
+                file_path = _find_input_file(str(state.upload_dir / task_id))
+        else:
+            file_path = task["result"].get(f"{type}_path")
 
     # 内存中找不到，查持久化历史
     if not file_path:
@@ -311,7 +378,13 @@ async def download_separated_audio(
         if hist_task and hist_task.get("result_json"):
             try:
                 r = json.loads(hist_task["result_json"])
-                file_path = r.get(f"{type}_path")
+                if type == "input":
+                    session_dir = str(Path(r.get("subtitle_path", "")).parent) if r.get("subtitle_path") else ""
+                    file_path = _find_input_file(session_dir)
+                    if not file_path:
+                        file_path = _find_input_file(str(state.upload_dir / task_id))
+                else:
+                    file_path = r.get(f"{type}_path")
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -330,7 +403,7 @@ async def download_separated_audio(
         )
 
     # 确定下载文件名
-    type_label = "人声" if type == "vocals" else "背景声"
+    type_label = {"vocals": "人声", "accompaniment": "背景声", "input": "原始音频"}[type]
     original_name = task.get("input_file_name", "audio") if task else "audio"
     download_name = f"{Path(original_name).stem}_{type_label}.wav"
 
@@ -362,15 +435,6 @@ async def stream_audio(
         type: 音频类型 — 'vocals'（人声）, 'accompaniment'（背景声）, 或 'input'（原始文件）
     """
     file_path = None
-
-    # 辅助函数：在会话目录中查找 input 文件
-    def _find_input_file(session_dir_str: str) -> Optional[str]:
-        task_dir = Path(session_dir_str)
-        if task_dir.exists():
-            for f in task_dir.iterdir():
-                if f.name.startswith("input") and f.suffix in (".wav", ".mp3", ".flac", ".m4a", ".ogg"):
-                    return str(f)
-        return None
 
     # 先查内存中的任务
     task = state.task_store.get(task_id)

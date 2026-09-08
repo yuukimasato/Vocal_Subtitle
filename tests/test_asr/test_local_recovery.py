@@ -101,6 +101,11 @@ def test_config_rejects_negative_min_confidence():
         LocalRecoveryConfig(min_confidence=-0.1)
 
 
+def test_config_rejects_negative_request_tolerance():
+    with pytest.raises(ValueError):
+        LocalRecoveryConfig(request_tolerance=-0.1)
+
+
 # ── LocalRecoveryRequest ─────────────────────────────────────────────
 
 def test_request_requires_at_least_one_reason():
@@ -380,6 +385,37 @@ def test_engine_rejects_overlapping_candidates_without_physical_evidence():
     )
     # Word is outside request range — should be rejected
     assert len(results[0].candidates) == 0
+
+
+def test_engine_accepts_candidate_just_outside_short_recovery_range():
+    """A short uncovered bin may end just before the ASR word boundary."""
+    engine_stub = _StubASR(responses=[
+        [
+            TranscriptionSegment(
+                text="edge",
+                # The ASR timestamps are local to context [0.5, 1.7], so
+                # local [0.8, 1.0] maps to global [1.3, 1.5].
+                start=0.80,
+                end=1.00,
+                words=[WordTimestamp("edge", 0.80, 1.00, confidence=0.9)],
+            )
+        ]
+    ])
+    engine = LocalRecoveryEngine(
+        asr_engine=engine_stub,
+        config=LocalRecoveryConfig(request_tolerance=0.15),
+    )
+    audio = np.zeros(48000, dtype=np.float32)
+
+    results = engine.process_requests(
+        [LocalRecoveryRequest(start=1.0, end=1.2, reasons=["uncovered"])],
+        audio,
+        sample_rate=16000,
+    )
+
+    assert results[0].success
+    assert results[0].candidates[0].text == "edge"
+    assert results[0].diagnostics["request_tolerance"] == 0.15
 
 
 def test_recovery_global_word_conversion():

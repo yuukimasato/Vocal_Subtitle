@@ -225,7 +225,7 @@ const App = {
       App.state.taskId = data.task_id;
 
       // 缓存命中：直接获取结果，无需等待 WebSocket
-      if (data.status === 'completed' && data.from_cache) {
+      if ((data.status === 'completed' || data.status === 'degraded') && data.from_cache) {
         toast('✅ 缓存命中！检测到相同文件的历史处理结果，直接加载', 'success');
         const taskData = await App.api.getTaskStatus(data.task_id);
         if (taskData.result) {
@@ -329,7 +329,7 @@ const App = {
 	  },
 
 	  handleHistoryClick(item) {
-	    if (item.status !== 'completed') {
+	    if (item.status !== 'completed' && item.status !== 'degraded') {
 	      toast('该任务未完成，无法查看结果', 'info');
 	      return;
 	    }
@@ -364,10 +364,14 @@ const App = {
 	        $('#results-content').style.display = 'block';
 	        App.ui.renderDiagnosticReport({ stats: summary.stats });
 	      }
-	      if (detail.events && detail.events.length > 0) {
-	        App.state.subtitleEvents = detail.events;
-	        App.ui.renderTimeline(detail.events);
-	      }
+      if (detail.events && detail.events.length > 0) {
+        App.state.subtitleEvents = detail.events;
+        App.ui.renderTimeline(detail.events);
+        if (window.WaveformUI) {
+          WaveformUI.setEvents(detail.events);
+          WaveformUI.setTask(App.state.taskId, summary, detail.events);
+        }
+      }
 	      // 使用详情中的完整 result_summary（含 vocals_path / accompaniment_path）更新导出栏
 	      App.ui.updateAudioExportBar(detail.result_summary || {});
 	      App.ui.updateExportBar(detail.result_summary || {});
@@ -655,9 +659,28 @@ const App = {
     }
   },
 
+  // ---- 波形打轴：时间轴保存 ----
+  async saveWaveformTiming(index, start, end) {
+    if (!App.state.taskId) throw new Error('当前没有已加载的任务');
+    await App.api.updateSubtitleTiming(App.state.taskId, index, start, end);
+    var event = App.state.subtitleEvents.find(function(e) { return Number(e.index) === Number(index); });
+    if (event) {
+      event.start = start;
+      event.end = end;
+      if (App.ui.updateTimelineRowTimes) App.ui.updateTimelineRowTimes(event);
+    }
+  },
+
   // ---- Init ----
   init() {
-    document.addEventListener('DOMContentLoaded', () => App.ui.init());
+    document.addEventListener('DOMContentLoaded', () => {
+      App.ui.init();
+      if (window.WaveformUI) {
+        WaveformUI.onTimingChange = function(index, start, end) {
+          return App.saveWaveformTiming(index, start, end);
+        };
+      }
+    });
   }
 };
 

@@ -3,6 +3,7 @@ from copy import deepcopy
 from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
 from vocal_subtitle.asr.hallucination import (
     HallucinationFilterPolicy,
+    collapse_repeated_cjk_tokens,
     filter_transcription_segments,
 )
 
@@ -108,3 +109,11 @@ def test_disabled_filter_keeps_all_results():
 
     assert result.segments == segments
     assert result.counts == {"disabled": 1}
+
+
+def test_cjk_repetition_collapse_is_limited_to_one_segment_run():
+    assert collapse_repeated_cjk_tokens("我 我 我 我") == "我"
+    assert collapse_repeated_cjk_tokens("我 我 我 是.") == "我."
+    assert collapse_repeated_cjk_tokens("我 我 我 是什么") == "我 是什么"
+    assert collapse_repeated_cjk_tokens("我 我") == "我 我"
+    assert collapse_repeated_cjk_tokens("我 我,我") == "我 我,我"

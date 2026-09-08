@@ -17,7 +17,7 @@ class TestCLI:
         """--version 选项"""
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.output
+        assert "0.2.0" in result.output
 
     def test_profiles(self, runner):
         """profiles 命令"""
@@ -60,10 +60,19 @@ class TestCLI:
         result = runner.invoke(main, ["download-models", "--all"])
         assert result.exit_code == 0
 
-    def test_download_models_with_asr(self, runner):
+    def test_download_models_with_asr(self, runner, monkeypatch):
         """download-models --asr-model"""
+        monkeypatch.setattr(
+            "vocal_subtitle.asr.model_download.ensure_faster_whisper_model",
+            lambda model: {
+                "status": "ready",
+                "model_ref": f"Systran/faster-whisper-{model}",
+                "cache_dir": "/tmp/hf-cache",
+            },
+        )
         result = runner.invoke(main, ["download-models", "--asr-model", "large-v3"])
         assert result.exit_code == 0
+        assert "faster-whisper" in result.output
 
     def test_run_missing_file(self, runner):
         """run 命令 — 文件不存在"""

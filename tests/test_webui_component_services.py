@@ -51,3 +51,17 @@ def test_legacy_api_facade_exports_split_route_functions():
     assert all(callable(getattr(api, name)) for name in LEGACY_API_NAMES)
     assert api.SubtitleEventResponse is not None
     assert api._run_pipeline_in_thread is not None
+
+
+def test_funasr_compat_adapters_do_not_recurse_through_api_exports(monkeypatch):
+    monkeypatch.setattr(
+        "vocal_subtitle.asr.funasr_manager.ensure_funasr_ready",
+        lambda model: {"ready": True, "model": model},
+    )
+    monkeypatch.setattr(
+        "vocal_subtitle.asr.funasr_manager.funasr_status",
+        lambda model: {"ready": True, "model": model},
+    )
+
+    assert api.ensure_funasr_ready("tiny")["model"] == "tiny"
+    assert api.funasr_status("tiny")["model"] == "tiny"

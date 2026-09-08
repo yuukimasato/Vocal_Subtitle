@@ -58,7 +58,7 @@ connect(taskId) {
         attempts += 1;
         try {
           const status = await App.api.getTaskStatus(taskId);
-          if (status.status === 'completed' && status.result) {
+          if ((status.status === 'completed' || status.status === 'degraded') && status.result) {
             App.ws.stopTaskPolling();
             App.ui.pipelineComplete(status.result);
           } else if (status.status === 'failed') {
@@ -104,4 +104,3 @@ connect(taskId) {
     }
 };
 })();
-

@@ -25,6 +25,8 @@ class GlobalTranscriberConfig:
     alignment: bool = True
     left_context: float = 0.5
     right_context: float = 0.5
+    max_window_duration: float = 180.0
+    window_overlap: float = 0.5
 
 
 @dataclass
@@ -72,10 +74,13 @@ class GlobalTranscriber:
                     right_context=0.0,
                 )
             ]
+        selected_windows = self._bound_windows(selected_windows)
 
         candidates: list[GlobalTranscript] = []
         diagnostics: dict[str, Any] = {
+            "audio_duration": round(duration, 6),
             "window_count": len(selected_windows),
+            "windows": [],
             "failed_windows": [],
             "alignment_status": "disabled"
             if not self.config.alignment
@@ -125,13 +130,72 @@ class GlobalTranscriber:
                     )
                 candidates.append(transcript)
                 diagnostics["raw_word_count"] += len(transcript.words)
-            except Exception as exc:
-                diagnostics["failed_windows"].append(
-                    {"window_id": window.id, "error": str(exc)}
+                diagnostics["windows"].append(
+                    {
+                        "window_id": window.id,
+                        "start": window.start,
+                        "end": window.end,
+                        "duration": round(window.end - window.start, 6),
+                        "physical_clip_id": window.physical_clip_id,
+                        "status": "ok" if transcript.status == "ok" else transcript.status,
+                        "word_count": len(transcript.words),
+                        "source": window.metadata.get("bounded_from", window.id),
+                    }
                 )
+            except Exception as exc:
+                failure = {
+                    "window_id": window.id,
+                    "start": window.start,
+                    "end": window.end,
+                    "physical_clip_id": window.physical_clip_id,
+                    "error": str(exc),
+                }
+                diagnostics["failed_windows"].append(failure)
+                diagnostics["windows"].append({**failure, "status": "failed"})
 
         transcript = self._combine(candidates, duration, diagnostics)
         return GlobalTranscriptionResult(transcript=transcript, diagnostics=diagnostics)
+
+    def _bound_windows(self, windows: Sequence[ContextWindow]) -> list[ContextWindow]:
+        """Split oversized context windows while preserving bounded overlap."""
+        maximum = float(self.config.max_window_duration)
+        overlap = float(self.config.window_overlap)
+        if maximum <= 0:
+            raise ValueError("max_window_duration must be greater than zero")
+        if overlap < 0 or overlap >= maximum:
+            raise ValueError("window_overlap must be in [0, max_window_duration)")
+
+        bounded: list[ContextWindow] = []
+        for window in windows:
+            if window.end - window.start <= maximum:
+                bounded.append(window)
+                continue
+            step = maximum - overlap
+            cursor = window.start
+            part = 0
+            while cursor < window.end:
+                end = min(window.end, cursor + maximum)
+                bounded.append(
+                    ContextWindow(
+                        id=f"{window.id}:part{part:04d}",
+                        start=cursor,
+                        end=end,
+                        physical_clip_id=window.physical_clip_id,
+                        left_context=window.left_context if part else 0.0,
+                        right_context=window.right_context if end >= window.end else 0.0,
+                        metadata={
+                            **window.metadata,
+                            "bounded_from": window.id,
+                            "bounded_part": part,
+                            "bounded_window_duration": maximum,
+                        },
+                    )
+                )
+                part += 1
+                if end >= window.end:
+                    break
+                cursor += step
+        return bounded
 
     def combine_transcripts(
         self,

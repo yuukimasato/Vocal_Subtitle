@@ -9,6 +9,7 @@ import yaml
 
 from .models import (
     ASRAutoRoutingConfig,
+    ASREnginePairConfig,
     ASRConfig,
     AcousticValidationConfig,
     BoundaryRedundancyConfig,
@@ -16,6 +17,7 @@ from .models import (
     CacheConfig,
     DegradationConfig,
     DiarizationConfig,
+    EvidenceReviewConfig,
     FFmpegVADConfig,
     FeedbackConfig,
     FusionConfig,
@@ -178,10 +180,13 @@ class ConfigLoader:
         auto_routing_raw = asr_raw.get("auto_routing", {})
         global_asr = GlobalASRConfig(
             enabled=global_asr_raw.get("enabled", True),
-            routing=global_asr_raw.get("routing", "auto"),
+            routing=global_asr_raw.get("routing", "segmented"),
+            evidence_enabled=global_asr_raw.get("evidence_enabled", True),
             backend=global_asr_raw.get("backend", "faster-whisper"),
             left_context=global_asr_raw.get("left_context", 0.5),
             right_context=global_asr_raw.get("right_context", 0.5),
+            max_window_duration=global_asr_raw.get("max_window_duration", 180.0),
+            window_overlap=global_asr_raw.get("window_overlap", 0.5),
             min_word_confidence=global_asr_raw.get("min_word_confidence", 0.0),
             hallucination_filter=global_asr_raw.get("hallucination_filter", True),
             language_switch_threshold=global_asr_raw.get("language_switch_threshold", 0.7),
@@ -219,10 +224,22 @@ class ConfigLoader:
             ),
             max_overlap_ratio=auto_routing_raw.get("max_overlap_ratio", 0.35),
         )
+        engine_pair_raw = asr_raw.get("engine_pair", {})
+        engine_pair = ASREnginePairConfig(
+            enabled=engine_pair_raw.get("enabled", True),
+            primary=engine_pair_raw.get("primary", "auto"),
+            secondary=engine_pair_raw.get("secondary", "auto"),
+            policy=engine_pair_raw.get("policy", "risk_only"),
+            same_family_policy=engine_pair_raw.get("same_family_policy", "reject"),
+            fallback_secondary=engine_pair_raw.get("fallback_secondary", True),
+            max_workers=engine_pair_raw.get("max_workers", 2),
+            route_version=engine_pair_raw.get("route_version", "asr-pair-v1"),
+        )
         asr = ASRConfig(
             engine=asr_raw.get("engine", "auto"),
             model=asr_raw.get("model", "large-v3"),
-            device=asr_raw.get("device", "cuda"),
+            qwen_model_path=asr_raw.get("qwen_model_path"),
+            device=asr_raw.get("device", "auto"),
             compute_type=asr_raw.get("compute_type", "float16"),
             language=asr_raw.get("language"),
             whisper_cpp_bin=asr_raw.get("whisper_cpp_bin"),
@@ -236,10 +253,51 @@ class ConfigLoader:
             language_mode=asr_raw.get("language_mode", "single"),
             global_asr=global_asr,
             auto_routing=auto_routing,
+            engine_pair=engine_pair,
         )
-        if asr.engine not in {"auto", "faster-whisper", "funasr", "whisper-cpp"}:
+        review_raw = pipeline_raw.get("evidence_review", raw.get("evidence_review", {}))
+        evidence_review = EvidenceReviewConfig(
+            enabled=review_raw.get("enabled", True),
+            shadow_mode=review_raw.get("shadow_mode", True),
+            authoritative_mode=review_raw.get("authoritative_mode", False),
+            context_reasr_enabled=review_raw.get("context_reasr_enabled", False),
+            qwen_enabled=review_raw.get("qwen_enabled", False),
+            forced_aligner_enabled=review_raw.get("forced_aligner_enabled", False),
+            sed_enabled=review_raw.get("sed_enabled", False),
+            semantic_review_enabled=review_raw.get("semantic_review_enabled", False),
+            unresolved_keeps_candidate=review_raw.get("unresolved_keeps_candidate", True),
+            require_multi_source_drop=review_raw.get("require_multi_source_drop", True),
+            fallback_to_segmented=review_raw.get("fallback_to_segmented", True),
+            local_recovery_enabled=review_raw.get("local_recovery_enabled", True),
+            local_recovery_max_attempts=review_raw.get("local_recovery_max_attempts", 3),
+            local_recovery_min_confidence=review_raw.get("local_recovery_min_confidence", 0.5),
+            local_recovery_context_seconds=review_raw.get("local_recovery_context_seconds", 0.5),
+            local_recovery_request_tolerance=review_raw.get("local_recovery_request_tolerance", 0.15),
+            qwen_model_path=review_raw.get("qwen_model_path"),
+            forced_aligner_model_path=review_raw.get("forced_aligner_model_path"),
+            sed_model_path=review_raw.get("sed_model_path"),
+            review_device=review_raw.get("review_device", "auto"),
+            allow_remote_model_download=review_raw.get("allow_remote_model_download", False),
+            left_context=review_raw.get("left_context", 0.8),
+            right_context=review_raw.get("right_context", 0.8),
+            max_group_duration=review_raw.get("max_group_duration", 12.0),
+            max_window_duration=review_raw.get("max_window_duration", 15.0),
+            medium_threshold=review_raw.get("medium_threshold", 0.25),
+            high_threshold=review_raw.get("high_threshold", 0.50),
+            critical_threshold=review_raw.get("critical_threshold", 0.75),
+            max_workers=review_raw.get("max_workers", 2),
+            window_timeout_seconds=review_raw.get("window_timeout_seconds", 60.0),
+            review_policy_version=review_raw.get("review_policy_version", "review-policy-v1"),
+            cover_policy=review_raw.get("cover_policy", review_raw.get("review_policy", "")),
+            engine_policy=review_raw.get("engine_policy", review_raw.get("review_policy", "")),
+            risk_policy_version=review_raw.get("risk_policy_version", "risk-policy-v1"),
+            decision_policy_version=review_raw.get("decision_policy_version", "decision-policy-v1"),
+            evidence_schema_version=review_raw.get("evidence_schema_version", "evidence-v1"),
+            golden_quality_gate_version=review_raw.get("golden_quality_gate_version", "golden-quality-v1"),
+        )
+        if asr.engine not in {"auto", "faster-whisper", "funasr", "qwen", "whisper-cpp"}:
             raise ValueError(
-                "Unknown asr.engine '%s'; expected auto, faster-whisper, funasr or whisper-cpp"
+                "Unknown asr.engine '%s'; expected auto, faster-whisper, funasr, qwen or whisper-cpp"
                 % asr.engine
             )
         if not 0.0 <= float(asr.auto_routing.zh_min_probability) <= 1.0:
@@ -529,6 +587,7 @@ class ConfigLoader:
             merging=merging,
             diarization=diarization,
             asr=asr,
+            evidence_review=evidence_review,
             speaker_role=speaker_role,
             speaker_embedding=speaker_embedding,
             subtitle=subtitle,

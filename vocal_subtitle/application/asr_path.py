@@ -4,13 +4,29 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from dataclasses import replace
+from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from ..asr.base import ASREngine
 from ..asr.contracts import ASRRuntimePorts, GlobalASRRequest
+from ..asr.evidence import candidate_from_subtitle_event
+from ..asr.evidence_review import EvidenceReviewRuntimePorts
+from ..asr.optional_adapters import (
+    LazyAudioClassifierSED,
+    LazyQwenASR,
+    LazyQwenForcedAligner,
+)
+from ..asr.review_engines import WindowedASRContextReASR, WindowedASREngine
+from .offline_production import (
+    OfflineProductionCoordinator,
+    OfflineProductionRequest,
+)
+from ..asr.global_transcriber import GlobalTranscriber, GlobalTranscriberConfig
 from ..asr.global_path import GlobalASRService
+from ..asr.engine_pairing import EnginePairRouter
 from ..asr.review_path import ASRFailureRequest, ASRReviewRequest, ASRReviewService
 from ..asr.router import ASRRouter
 from ..pipeline_context import NoiseProfile, PipelineContext
@@ -21,6 +37,274 @@ logger = logging.getLogger(__name__)
 
 
 class PipelineASRPathMixin:
+    @staticmethod
+    def _optional_asr_confidence(value):
+        """Keep absent backend confidence absent in the evidence contract."""
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _apply_evidence_review(
+        self,
+        events,
+        *,
+        audio=None,
+        sample_rate: int = 16000,
+        physical_timeline=None,
+        stats=None,
+    ):
+        """Run the componentized evidence path over segmented candidates."""
+        config = getattr(self.config, "evidence_review", None)
+        if physical_timeline is not None:
+            self._ensure_global_evidence(
+                audio=audio,
+                sample_rate=sample_rate,
+                physical_timeline=physical_timeline,
+                stats=stats,
+            )
+        review_engine = None
+        if config is not None and config.context_reasr_enabled and audio is not None:
+            review_engine = WindowedASRContextReASR(self._get_asr_engine)
+        qwen_engine = None
+        secondary_engine = None
+        secondary_name = None
+        forced_aligner = None
+        sed_engine = None
+        qwen_model_path = (
+            getattr(config, "qwen_model_path", None)
+            if config is not None
+            else None
+        ) or getattr(getattr(self.config, "asr", None), "qwen_model_path", None)
+        if config is not None and getattr(config, "qwen_enabled", False):
+            qwen_engine = LazyQwenASR(
+                qwen_model_path or "",
+                device=getattr(config, "review_device", "auto"),
+                allow_remote=getattr(config, "allow_remote_model_download", False),
+            )
+        if config is not None and getattr(config, "forced_aligner_enabled", False):
+            forced_aligner = LazyQwenForcedAligner(
+                getattr(config, "forced_aligner_model_path", None) or "",
+                device=getattr(config, "review_device", "auto"),
+                allow_remote=getattr(config, "allow_remote_model_download", False),
+            )
+        if config is not None and getattr(config, "sed_enabled", False):
+            sed_engine = LazyAudioClassifierSED(
+                getattr(config, "sed_model_path", None) or "",
+                device=getattr(config, "review_device", "auto"),
+                allow_remote=getattr(config, "allow_remote_model_download", False),
+            )
+        cache_config = getattr(self.config, "cache", None)
+        cache = None
+        cache_ttl = None
+        if cache_config is not None and getattr(cache_config, "enabled", False):
+            cache = self._get_cache()
+            cache_ttl = getattr(cache_config, "ttl_transcription", None)
+        route = getattr(self, "_asr_route_decision", None)
+        engine_name = getattr(route, "selected_engine", None) or getattr(
+            getattr(self.config, "asr", None), "engine", ""
+        )
+        model_name = getattr(getattr(self.config, "asr", None), "model", "")
+        route_version = getattr(
+            getattr(getattr(self.config, "asr", None), "auto_routing", None),
+            "route_version",
+            "",
+        )
+        pair_decision = None
+        tail_repair = None
+        if physical_timeline is not None and stats is not None:
+            duration = float(
+                getattr(stats, "duration_seconds", 0.0)
+                or getattr(physical_timeline, "duration", 0.0)
+                or 0.0
+            )
+            tail_repair = self._repair_tail_evidence(
+                physical_timeline,
+                duration,
+            )
+        pair_config = getattr(getattr(self.config, "asr", None), "engine_pair", None)
+        if pair_config is not None and getattr(pair_config, "enabled", True):
+            pair_decision = EnginePairRouter(
+                getattr(pair_config, "route_version", "asr-pair-v1")
+            ).route(
+                language=self._resolved_language_or_config(),
+                primary=getattr(pair_config, "primary", "auto"),
+                secondary=getattr(pair_config, "secondary", "auto"),
+                policy=getattr(pair_config, "policy", "risk_only"),
+                selected_primary=engine_name,
+                same_family_policy=getattr(pair_config, "same_family_policy", "reject"),
+            )
+            secondary_name = pair_decision.secondary
+            # ``secondary=auto`` records Qwen as the preferred heterogeneous
+            # pair, but must not load it while the optional review capability
+            # is disabled. An explicit ``secondary=qwen`` remains an opt-in
+            # path for CLI/WebUI callers.
+            qwen_pair_enabled = bool(
+                config is not None
+                and (
+                    getattr(config, "qwen_enabled", False)
+                    or getattr(pair_config, "secondary", "auto") == "qwen"
+                )
+            )
+            if secondary_name == "qwen" and qwen_pair_enabled:
+                secondary_engine = LazyQwenASR(
+                    qwen_model_path or "",
+                    device=getattr(config, "review_device", "auto"),
+                    allow_remote=getattr(config, "allow_remote_model_download", False),
+                ) if config is not None else None
+            elif secondary_name in {"faster-whisper", "whisper-cpp", "funasr"}:
+                secondary_engine = WindowedASREngine(
+                    lambda name=secondary_name: self._get_asr_engine_for(name),
+                    name=secondary_name,
+                    source="context_reasr",
+                    family=getattr(pair_decision, "secondary_family", "whisper") or "whisper",
+                    model_name=model_name,
+                )
+        result = OfflineProductionCoordinator().run(
+            OfflineProductionRequest(
+                events=events,
+                audio=audio,
+                sample_rate=sample_rate,
+                physical_timeline=physical_timeline,
+                global_evidence=tuple(getattr(self, "_global_evidence", ()) or ()),
+                recovery_engine=self._get_asr_engine(),
+                recovery_language=self._resolved_language_or_config(),
+                input_hash=getattr(self, "_file_hash", ""),
+                physical_timeline_version="physical-timeline-v1",
+                route_version=route_version,
+                engine=engine_name,
+                model=model_name,
+                pair_decision=pair_decision,
+                secondary_engine=secondary_name or "",
+                pair_route_version=getattr(pair_decision, "route_version", "") if pair_decision else "",
+            ),
+            EvidenceReviewRuntimePorts(
+                config=config,
+                context_reasr=review_engine,
+                qwen=qwen_engine,
+                secondary=secondary_engine,
+                secondary_name=secondary_name,
+                forced_aligner=forced_aligner,
+                sed=sed_engine,
+                language=self._resolved_language_or_config(),
+                cache=cache,
+                cache_ttl=cache_ttl,
+            ),
+        )
+        if stats is not None:
+            stats.production_path = result.diagnostics.get("production_path", "")
+            stats.review_status = result.diagnostics.get("review_status", "")
+            stats.decision_count = int(result.diagnostics.get("decision_count", 0) or 0)
+            runtime_status = result.diagnostics.get("status", "completed")
+            if runtime_status not in {"completed", "degraded", "failed"}:
+                runtime_status = "degraded" if result.diagnostics.get("degraded") else "completed"
+            stats.status = runtime_status
+            stats.error_category = result.diagnostics.get("error_category", "")
+            stats.diagnostics_complete = all(
+                key in result.diagnostics
+                for key in ("production_path", "review_status", "decision_count", "physical_projection")
+            )
+            if result.diagnostics.get("fallback_reason"):
+                stats.fallback_reason = result.diagnostics["fallback_reason"]
+        if tail_repair is not None:
+            result.diagnostics["tail_evidence_repair"] = tail_repair
+        if route is not None:
+            result.diagnostics["route"] = route.to_dict()
+        return result.events, result.diagnostics
+
+    def _ensure_global_evidence(
+        self,
+        *,
+        audio,
+        sample_rate: int,
+        physical_timeline=None,
+        stats=None,
+    ) -> dict:
+        """Run global ASR once as evidence without changing primary events."""
+        if getattr(self, "_global_evidence_attempted", False):
+            return dict(getattr(self, "_global_evidence_diagnostics", {}) or {})
+
+        self._global_evidence_attempted = True
+        global_config = getattr(getattr(self.config, "asr", None), "global_asr", None)
+        if global_config is None or not getattr(global_config, "enabled", False):
+            diagnostics = {"status": "disabled", "role": "evidence"}
+            self._global_evidence_diagnostics = diagnostics
+            return diagnostics
+        if not getattr(global_config, "evidence_enabled", True):
+            diagnostics = {
+                "status": "disabled",
+                "reason": "evidence_disabled",
+                "role": "evidence",
+            }
+            self._global_evidence_diagnostics = diagnostics
+            return diagnostics
+        if audio is None or stats is None:
+            diagnostics = {
+                "status": "unavailable",
+                "reason": "audio_or_stats_missing",
+                "role": "evidence",
+            }
+            self._global_evidence_diagnostics = diagnostics
+            return diagnostics
+
+        stats.global_attempted = True
+        shadow = SimpleNamespace(
+            physical_timeline=physical_timeline,
+            global_speaker_timeline=None,
+        )
+        try:
+            _events, diagnostics, _transcript = self._run_global_transcription_path(
+                audio=audio,
+                sample_rate=sample_rate,
+                shadow=shadow,
+                stats=stats,
+            )
+            diagnostics = {
+                **dict(diagnostics or {}),
+                "status": "ok" if self._global_evidence else "empty",
+                "role": "evidence",
+                "candidate_count": len(self._global_evidence),
+            }
+        except Exception as exc:
+            diagnostics = {
+                "status": "unavailable",
+                "role": "evidence",
+                "reason": self._safe_failure_reason(exc),
+                "failure_category": self._classify_global_failure(exc),
+                "candidate_count": 0,
+            }
+            self._global_evidence = ()
+            logger.warning("Global evidence unavailable: %s", diagnostics["reason"])
+        self._global_evidence_diagnostics = diagnostics
+        stats.global_diagnostics = {
+            **dict(getattr(stats, "global_diagnostics", {}) or {}),
+            "evidence": diagnostics,
+        }
+        return diagnostics
+
+    def _run_offline_production_review(
+        self,
+        events,
+        *,
+        audio=None,
+        sample_rate: int = 16000,
+        physical_timeline=None,
+        stats=None,
+    ):
+        """Apply the shared offline review component and persist diagnostics."""
+        reviewed_events, diagnostics = self._apply_evidence_review(
+            events,
+            audio=audio,
+            sample_rate=sample_rate,
+            physical_timeline=physical_timeline,
+            stats=stats,
+        )
+        if stats is not None:
+            stats.quality_diagnostics["evidence_review"] = diagnostics
+        return reviewed_events
+
     @staticmethod
     def _classify_global_failure(exc: Exception) -> str:
         """Compatibility hook for global ASR failure classification."""
@@ -46,6 +330,35 @@ class PipelineASRPathMixin:
         decision = ASRRouter(self.config, factory).decide(
             audio, sample_rate, speech_intervals
         )
+        pair_config = getattr(getattr(self.config, "asr", None), "engine_pair", None)
+        if pair_config is not None and getattr(pair_config, "enabled", True):
+            pair = EnginePairRouter(
+                getattr(pair_config, "route_version", "asr-pair-v1")
+            ).route(
+                language=decision.language,
+                primary=getattr(pair_config, "primary", "auto"),
+                secondary=getattr(pair_config, "secondary", "auto"),
+                policy=getattr(pair_config, "policy", "risk_only"),
+                selected_primary=decision.selected_engine,
+                same_family_policy=getattr(pair_config, "same_family_policy", "reject"),
+            )
+            selected_model = decision.selected_model
+            if pair.primary == "qwen":
+                selected_model = (
+                    getattr(self.config.asr, "qwen_model_path", None)
+                    or "qwen3-asr"
+                )
+            decision = replace(
+                decision,
+                selected_engine=pair.primary,
+                selected_model=selected_model,
+                decision_reason=f"{decision.decision_reason};pair={pair.decision_reason}",
+                fallback_engine=(
+                    getattr(self.config.asr.auto_routing, "fallback_engine", None)
+                    if pair.primary == "funasr"
+                    else None
+                ),
+            )
         self._asr_route_decision = decision
         self._resolved_language = decision.language
         self._asr_engine = self._get_asr_engine_for(decision.selected_engine)
@@ -85,6 +398,7 @@ class PipelineASRPathMixin:
         noise_profile=None,
     ):
         """Compatibility adapter for the explicit global ASR service."""
+        self._global_review_timeline = getattr(shadow, "physical_timeline", None)
         request = GlobalASRRequest(
             audio=audio,
             sample_rate=sample_rate,
@@ -113,6 +427,13 @@ class PipelineASRPathMixin:
             ),
         )
         result = GlobalASRService().run(request, ports)
+        # Global output is retained as evidence. The default segmented route
+        # can use it for risk scoring or bounded replacement, but never as a
+        # raw final-event bypass.
+        self._global_evidence = tuple(
+            result.evidence
+            or [candidate_from_subtitle_event(event, source="global") for event in result.events]
+        )
         return result.events, result.diagnostics, result.transcript
 
     def _run_global_transcription_path_legacy(
@@ -135,16 +456,10 @@ class PipelineASRPathMixin:
         """
         from ..physical.ir import GlobalTranscript, GlobalTranscriptSegment, GlobalWord
         from ..physical.subtitle_bins import build_physical_subtitle_bins
-        from ..physical.allocator import (
-            AllocationResult,
-            PhysicalSpan,
-            WordAllocation,
-            allocate_words,
-        )
+        from ..physical.allocator import AllocationResult, allocate_words
         from ..physical.coverage import audit_physical_coverage
         from ..physical.events import build_events
         from ..physical.word_alignment import align_words_to_physical
-        from ..mapping.time_mapper import SubtitleEvent as SE
 
         engine = self._get_global_asr_engine()
         engine.load_model()
@@ -160,61 +475,126 @@ class PipelineASRPathMixin:
             if language:
                 self._resolved_language = language
 
-        # Transcribe the full audio
-        segments = engine.transcribe(audio, sample_rate, language=language)
-        if not isinstance(segments, list):
-            segments = [segments]
-
-        # Build GlobalTranscript
-        words = []
-        transcript_segments = []
-        word_idx = 0
-        for seg in segments:
-            seg_words = getattr(seg, "words", []) or []
-            seg_word_ids = []
-            for w in seg_words:
-                word_id = f"word-{word_idx:06d}"
-                word = GlobalWord(
-                    id=word_id, text=str(getattr(w, "word", "")),
-                    raw_start=float(getattr(w, "start", seg.start)),
-                    raw_end=float(getattr(w, "end", seg.end)),
-                    confidence=float(getattr(w, "confidence", 0.9)),
-                    source_window_id="global",
-                    segment_id=f"seg-{len(transcript_segments):03d}",
-                )
-                words.append(word)
-                seg_word_ids.append(word_id)
-                word_idx += 1
-            if not seg_words:
-                word_id = f"word-{word_idx:06d}"
-                word = GlobalWord(
-                    id=word_id, text=str(getattr(seg, "text", "")).strip(),
-                    raw_start=float(getattr(seg, "start", 0.0)),
-                    raw_end=float(getattr(seg, "end", 1.0)),
-                    confidence=0.9, source_window_id="global",
-                    segment_id=f"seg-{len(transcript_segments):03d}",
-                )
-                words.append(word)
-                seg_word_ids.append(word_id)
-                word_idx += 1
-            transcript_segments.append(GlobalTranscriptSegment(
-                id=f"seg-{len(transcript_segments):03d}",
-                text=str(getattr(seg, "text", "")).strip(),
-                raw_start=float(getattr(seg, "start", 0.0)),
-                raw_end=float(getattr(seg, "end", 1.0)),
-                word_ids=seg_word_ids,
-            ))
-
-        global_transcript = GlobalTranscript(
-            audio_duration=float(stats.duration_seconds),
-            words=words, segments=transcript_segments,
-            backend=engine.name,
-            status="ok" if words else "degraded",
-        )
-
         timeline = getattr(shadow, "physical_timeline", None)
+        windowed_diagnostics = {}
+        global_config = getattr(self.config.asr, "global_asr", None)
+        max_window_duration = float(
+            getattr(
+                global_config,
+                "max_window_duration",
+                self.GLOBAL_ASR_MAX_DURATION_SECONDS,
+            )
+        )
+        if stats.duration_seconds > max_window_duration:
+            transcriber = GlobalTranscriber(
+                engine,
+                GlobalTranscriberConfig(
+                    left_context=float(getattr(global_config, "left_context", 0.5)),
+                    right_context=float(getattr(global_config, "right_context", 0.5)),
+                    max_window_duration=max_window_duration,
+                    window_overlap=float(getattr(global_config, "window_overlap", 0.5)),
+                ),
+            )
+            windowed = transcriber.transcribe(
+                audio,
+                sample_rate,
+                physical_timeline=timeline,
+                language=language,
+            )
+            global_transcript = windowed.transcript
+            windowed_diagnostics = {
+                "mode": "bounded_windows",
+                "windowed_transcription": windowed.diagnostics,
+            }
+            words = list(global_transcript.words)
+            transcript_segments = list(global_transcript.segments)
+            word_idx = len(words)
+        else:
+            # Keep the existing short-audio path stable while long audio uses
+            # the independent windowing component above.
+            segments = engine.transcribe(audio, sample_rate, language=language)
+            if not isinstance(segments, list):
+                segments = [segments]
+
+            words = []
+            transcript_segments = []
+            word_idx = 0
+            for seg in segments:
+                seg_words = getattr(seg, "words", []) or []
+                seg_word_ids = []
+                segment_start = float(getattr(seg, "start", 0.0))
+                segment_end = float(getattr(seg, "end", 1.0))
+                word_ranges = []
+                for w in seg_words:
+                    word_id = f"word-{word_idx:06d}"
+                    word_start = getattr(w, "start", None)
+                    word_end = getattr(w, "end", None)
+                    native_word_time = word_start is not None and word_end is not None
+                    if native_word_time:
+                        word_start = float(word_start)
+                        word_end = float(word_end)
+                        if word_end <= word_start:
+                            continue
+                        word_ranges.append((word_start, word_end))
+                    word = GlobalWord(
+                        id=word_id, text=str(getattr(w, "word", "")),
+                        raw_start=float(word_start if word_start is not None else seg.start),
+                        raw_end=float(word_end if word_end is not None else seg.end),
+                        confidence=self._optional_asr_confidence(getattr(w, "confidence", None)),
+                        source_window_id="global",
+                        segment_id=f"seg-{len(transcript_segments):03d}",
+                        metadata={
+                            "time_source": (
+                                "native_word_timestamp"
+                                if native_word_time
+                                else "segment_boundary"
+                            )
+                        },
+                    )
+                    words.append(word)
+                    seg_word_ids.append(word_id)
+                    word_idx += 1
+                if not seg_words:
+                    word_id = f"word-{word_idx:06d}"
+                    word = GlobalWord(
+                        id=word_id, text=str(getattr(seg, "text", "")).strip(),
+                        raw_start=float(getattr(seg, "start", 0.0)),
+                        raw_end=float(getattr(seg, "end", 1.0)),
+                        confidence=None, source_window_id="global",
+                        segment_id=f"seg-{len(transcript_segments):03d}",
+                        metadata={"time_source": "segment_boundary"},
+                    )
+                    words.append(word)
+                    seg_word_ids.append(word_id)
+                    word_idx += 1
+                elif word_ranges:
+                    # Some native backends emit a word end just beyond the
+                    # segment end. Keep that valid acoustic evidence and
+                    # repair the IR container instead of dropping the whole
+                    # global transcript during validation.
+                    segment_start = min(segment_start, min(item[0] for item in word_ranges))
+                    segment_end = max(segment_end, max(item[1] for item in word_ranges))
+                transcript_segments.append(GlobalTranscriptSegment(
+                    id=f"seg-{len(transcript_segments):03d}",
+                    text=str(getattr(seg, "text", "")).strip(),
+                    raw_start=segment_start,
+                    raw_end=segment_end,
+                    word_ids=seg_word_ids,
+                ))
+
+            global_transcript = GlobalTranscript(
+                audio_duration=float(stats.duration_seconds),
+                words=words, segments=transcript_segments,
+                backend=engine.name,
+                status="ok" if words else "degraded",
+            )
+
         if timeline is None:
-            return [], {"recovery": {"status": "no_timeline"}, "physical_coverage": {"complete": False}}, global_transcript
+            return [], {
+                **windowed_diagnostics,
+                "recovery": {"status": "no_timeline"},
+                "physical_coverage": {"complete": False},
+            }, global_transcript
 
         tail_repair = self._repair_tail_evidence(timeline, stats.duration_seconds)
 
@@ -299,83 +679,16 @@ class PipelineASRPathMixin:
             **self._quality_gate_kwargs(),
         )
         diag = {
+            **windowed_diagnostics,
             "physical_coverage": coverage.to_dict(),
             "quality_gate": quality.to_dict(),
             "tail_evidence_repair": tail_repair,
-            "recovery": {"status": "recovered" if coverage.complete else "incomplete"},
+            "recovery": {
+                "status": "not_needed" if coverage.complete else "deferred_to_evidence_review"
+            },
         }
 
-        # Tail recovery
-        if not coverage.complete and coverage.recovery_ranges:
-            try:
-                recovered_allocations = []
-                for rec_range in coverage.recovery_ranges:
-                    ss = int(rec_range.start * sample_rate)
-                    es = int(min(rec_range.end, stats.duration_seconds) * sample_rate)
-                    if es <= ss:
-                        continue
-                    seg_audio = audio[ss:es]
-                    recovery_segs = engine.transcribe(
-                        seg_audio, sample_rate, language=language
-                    )
-                    for rseg in recovery_segs:
-                        rwlist = getattr(rseg, "words", []) or []
-                        for rw in rwlist:
-                            wid = f"word-rec-{word_idx:06d}"
-                            # Clamp recovery word times to the audio duration
-                            r_start = min(rec_range.start + float(getattr(rw, "start", 0.0)), stats.duration_seconds)
-                            r_end = min(rec_range.start + float(getattr(rw, "end", 0.1)), stats.duration_seconds)
-                            rword = GlobalWord(id=wid, text=str(getattr(rw, "word", "")),
-                                               raw_start=r_start,
-                                               raw_end=max(r_start + 0.01, r_end),
-                                               confidence=float(getattr(rw, "confidence", 0.9)),
-                                               source_window_id="recovery", segment_id="recovery")
-                            words.append(rword)
-                            word_idx += 1
-                            clip_id = rec_range.physical_clip_id or "clip-000001"
-                            rec_span = PhysicalSpan(
-                                clip_id=clip_id,
-                                start=r_start,
-                                end=max(r_start + 0.01, r_end),
-                            )
-                            events.append(SE(
-                                len(events) + 1,
-                                rword.raw_start,
-                                rword.raw_end,
-                                rword.text,
-                                physical_start=rword.raw_start,
-                                physical_end=rword.raw_end,
-                                physical_spans=[rec_span.to_dict()],
-                                source_word_ids=[rword.id],
-                                speaker_source="recovery",
-                                alignment_warning="timing_degraded:local_recovery",
-                                time_source="timing_degraded",
-                                revision_trace=[{
-                                    "stage": "local_recovery",
-                                    "status": "timing_degraded",
-                                    "reason": "recovered_word_not_boundary_aligned",
-                                }],
-                            ))
-                            recovered_allocations.append(WordAllocation(
-                                word=rword,
-                                physical_spans=(rec_span,),
-                                warnings=("timing_degraded",),
-                                alignment_status="degraded",
-                                accepted=True,
-                            ))
-
-                coverage2 = audit_physical_coverage(bins, list(allocation_result.allocations) + recovered_allocations)
-                diag["physical_coverage"] = coverage2.to_dict()
-                if coverage2.complete:
-                    diag["recovery"]["status"] = "recovered"
-                    global_transcript = GlobalTranscript(audio_duration=stats.duration_seconds, words=words, segments=transcript_segments, backend=engine.name, status="ok")
-                else:
-                    diag["recovery"]["status"] = "incomplete"
-                    global_transcript = GlobalTranscript(audio_duration=stats.duration_seconds, words=words, segments=transcript_segments, backend=engine.name, status="degraded")
-            except Exception as exc:
-                diag["recovery"] = {"status": "failed", "error": str(exc)}
-                global_transcript = GlobalTranscript(audio_duration=stats.duration_seconds, words=words, segments=transcript_segments, backend=engine.name, status="degraded")
-        elif not coverage.complete:
+        if not coverage.complete:
             global_transcript = GlobalTranscript(audio_duration=stats.duration_seconds, words=words, segments=transcript_segments, backend=engine.name, status="degraded")
 
         quality = evaluate_asr_quality(
@@ -490,8 +803,8 @@ class PipelineASRPathMixin:
     def _resolve_asr_path(self) -> str:
         """Determine the requested offline ASR route.
 
-        ``auto`` is kept as a distinct route so the caller can record whether
-        global ASR actually succeeded or whether it fell back to segmented.
+        ``global`` is retained as an explicit compatibility route. The
+        default and ``auto`` routes use segmented ASR as the primary source.
         """
         if self.config.mode == "streaming":
             return "segmented"
@@ -500,11 +813,11 @@ class PipelineASRPathMixin:
         if explicit:
             return str(explicit)
         if self._requested_asr_path:
-            return self._requested_asr_path
+            return "global" if self._requested_asr_path == "global" else "segmented"
         if self.config.asr.global_asr.enabled:
             routing = self.config.asr.global_asr.routing
-            if routing in ("global", "auto"):
-                return routing
+            if routing == "global":
+                return "global"
         return "segmented"
 
     @staticmethod
@@ -527,7 +840,7 @@ class PipelineASRPathMixin:
             ):
                 return False
         if requested_path in ("global", "auto"):
-            return cached_path == "global"
+            return cached_path in ("global", "global_evidence")
         # Old cache entries did not carry asr_path; retain compatibility for
         # explicitly requested segmented/legacy runs.
-        return cached_path in ("", "legacy", "legacy_degraded")
+        return cached_path in ("", "segmented", "legacy", "legacy_degraded")

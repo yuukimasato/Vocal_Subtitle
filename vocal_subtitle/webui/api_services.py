@@ -111,6 +111,9 @@ def config_summary(config: PipelineConfig) -> Dict[str, Any]:
         "vad_engine": config.vad.engine,
         "asr_engine": config.asr.engine,
         "asr_model": config.asr.model,
+        "asr_primary_engine": config.asr.engine_pair.primary,
+        "asr_secondary_engine": config.asr.engine_pair.secondary,
+        "asr_engine_pair_policy": config.asr.engine_pair.policy,
         "language": config.asr.language,
         "device": config.asr.device,
         "asr_route_version": config.asr.auto_routing.route_version,
@@ -133,6 +136,9 @@ def config_to_overrides(config: PipelineConfig) -> Dict[str, Any]:
         "merge_padding": config.merging.padding,
         "asr_engine": config.asr.engine,
         "asr_model": config.asr.model,
+        "primary_engine": config.asr.engine_pair.primary,
+        "secondary_engine": config.asr.engine_pair.secondary,
+        "engine_pair_policy": config.asr.engine_pair.policy,
         "asr_device": config.asr.device,
         "asr_compute_type": config.asr.compute_type,
         "language": config.asr.language or "",
@@ -186,7 +192,13 @@ def config_to_overrides(config: PipelineConfig) -> Dict[str, Any]:
 
 def _legacy_api_attr(name: str, fallback):
     api = sys.modules.get("vocal_subtitle.webui.api")
-    return getattr(api, name, fallback)
+    candidate = getattr(api, name, None)
+    # ``webui.api`` re-exports these adapters for legacy callers. Do not
+    # resolve the re-export back to the adapter itself, or FunASR requests
+    # recurse instead of reaching the manager implementation.
+    if candidate is None or candidate is globals().get(name):
+        return fallback
+    return candidate
 
 
 def funasr_status(model: str = ""):

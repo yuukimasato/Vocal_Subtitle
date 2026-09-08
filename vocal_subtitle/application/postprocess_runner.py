@@ -67,6 +67,8 @@ class PipelinePostprocessMixin:
                         str(evt.speaker_id)
                         if evt.speaker_id is not None else "unknown"
                     ),
+                    "physical_bin_id": getattr(evt, "physical_bin_id", None),
+                    "physical_spans": list(getattr(evt, "physical_spans", []) or []),
                     "gap_to_next_sec": round(gap, 3) if gap is not None else None,
                     "gap_is_silent": gap_is_silent,
                 })
@@ -212,17 +214,36 @@ class PipelinePostprocessMixin:
 
         # ---- 2. LLM 语义合并（方案五） ----
         # 必须在声学校验之前：合并改变事件边界
+        physical_bin_ids = {
+            getattr(event, "physical_bin_id", None)
+            for event in events
+            if getattr(event, "physical_bin_id", None) is not None
+        }
+        skeleton_constrained = bool(
+            (ffmpeg_unified_result or {}).get("skeleton")
+        )
         if (
             self.config.merge_decision.llm_tier != "rule_only"
             and len(events) > 1
+            and not skeleton_constrained
         ):
             events = self._run_llm_merge(events, audio, sample_rate, stats)
+        elif len(events) > 1 and (skeleton_constrained or physical_bin_ids):
+            stats.quality_diagnostics["semantic_merge"] = {
+                "status": "skipped",
+                "reason": (
+                    "acoustic_skeleton_boundary"
+                    if skeleton_constrained
+                    else "physical_bin_boundary"
+                ),
+                "bin_count": len(physical_bin_ids),
+            }
 
         # ---- 3. 声学标尺校验（方案七） ----
         # 对最终边界做物理骨架吸附和诊断（最终关卡）
         if self.config.acoustic_validation.enabled:
             try:
-                from ..acoustic_validator import AcousticValidator
+                from ..acoustic import AcousticValidator
                 self._progress.start_stage(
                     "acoustic", description="声学校验", total_items=1,
                 )
@@ -258,4 +279,3 @@ class PipelinePostprocessMixin:
             logger.warning("Final dedup in post_process failed: %s", e)
 
         return events
-

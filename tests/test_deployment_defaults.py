@@ -21,7 +21,8 @@ def test_default_profile_uses_lightweight_runtime():
     assert config.asr.device == "auto"
     assert config.asr.compute_type == "float16"
     assert config.asr.global_asr.enabled is True
-    assert config.asr.global_asr.routing == "auto"
+    assert config.asr.global_asr.routing == "segmented"
+    assert config.asr.global_asr.evidence_enabled is True
     assert config.diarization.enabled is True
     assert config.diarization.backend == "auto"
     assert config.diarization.fusion_mode == "auto"
@@ -119,6 +120,7 @@ def test_all_builtin_profiles_expose_global_and_feedback_settings():
     for profile in ("podcast", "education", "variety_show", "music_live"):
         config = loader.load_profile(profile)
         assert config.asr.global_asr.enabled is True
-        assert config.asr.global_asr.routing == "auto"
+        assert config.asr.global_asr.routing == "segmented"
+        assert config.asr.global_asr.evidence_enabled is True
         assert config.boundary_redundancy.enabled is True
         assert config.feedback.active_profile == "user_default"

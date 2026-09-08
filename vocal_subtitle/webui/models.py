@@ -39,10 +39,18 @@ class FunASRPrepareRequest(BaseModel):
 
 
 class SubtitleEditRequest(BaseModel):
-    """字幕编辑请求"""
+    """字幕编辑请求（文本、时间轴或两者）"""
 
     index: int = Field(..., description="字幕序号")
-    text: str = Field(..., description="修改后的文本")
+    text: Optional[str] = Field(
+        default=None, description="修改后的文本（仅改时间轴时可省略）"
+    )
+    start: Optional[float] = Field(
+        default=None, ge=0, description="新的开始时间（秒），可省略"
+    )
+    end: Optional[float] = Field(
+        default=None, ge=0, description="新的结束时间（秒），可省略"
+    )
 
 
 class SubtitleBatchEditRequest(BaseModel):
@@ -72,11 +80,17 @@ class TaskStatus(BaseModel):
     """任务状态"""
 
     task_id: str
-    status: str  # pending | running | completed | failed
+    status: str  # pending | running | completed | degraded | failed
+    run_id: Optional[str] = None
+    contract_version: Optional[str] = None
     progress: Optional[Dict[str, Any]] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     quality_status: Optional[str] = None
+    error_category: Optional[str] = None
+    diagnostics_complete: Optional[bool] = None
+    artifacts: Optional[Dict[str, Any]] = None
+    diagnostics: Optional[Dict[str, Any]] = None
 
 
 class SubtitleEventResponse(BaseModel):
@@ -92,6 +106,7 @@ class SubtitleEventResponse(BaseModel):
     # 物理时间轴与溯源字段（前端可选渲染，保持旧响应兼容）
     physical_start: Optional[float] = None
     physical_end: Optional[float] = None
+    physical_spans: Optional[List[Dict[str, Any]]] = None
     source_word_ids: Optional[List[str]] = None
     speaker_status: Optional[str] = None
     speaker_source: Optional[str] = None
@@ -99,6 +114,11 @@ class SubtitleEventResponse(BaseModel):
     speaker_model: Optional[str] = None
     speaker_repair_reason: Optional[str] = None
     alignment_warning: Optional[str] = None
+    physical_bin_id: Optional[str] = None
+    physical_bin_start: Optional[float] = None
+    physical_bin_end: Optional[float] = None
+    time_source: Optional[str] = None
+    revision_trace: Optional[List[Dict[str, Any]]] = None
     genuine_overlap: Optional[bool] = None
     overlap_group_id: Optional[str] = None
 
@@ -361,3 +381,42 @@ class ImpactPredictionInfo(BaseModel):
     total_line_count_change_pct: Optional[float] = None
     confidence_low: float = 0.0
     confidence_high: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# 反馈审核队列模型 (FEEDBACK_LOOP.md §7)
+# ---------------------------------------------------------------------------
+
+
+class ReviewDecisionRequest(BaseModel):
+    """审核决策请求"""
+
+    result: str = Field(..., description="accepted | rejected | disputed")
+    notes: str = Field(default="")
+
+
+class ReviewQueueItem(BaseModel):
+    """审核队列项目"""
+
+    sample_id: str = ""
+    diff_summary: Dict[str, int] = Field(default_factory=dict)
+    confidence: float = 0.0
+    submitted_at: str = ""
+    language: str = ""
+    scene: str = ""
+
+
+class ReviewQueueResponse(BaseModel):
+    """审核队列响应"""
+
+    samples: List[ReviewQueueItem] = Field(default_factory=list)
+    total: int = 0
+    status: str = "pending"
+
+
+class ReviewResultResponse(BaseModel):
+    """审核结果响应"""
+
+    status: str = "ok"
+    sample_id: str = ""
+    result: str = ""

@@ -82,6 +82,15 @@ def test_uncertain_or_probe_failure_selects_faster_whisper():
     assert decision.decision_reason == "language_probe_failed"
 
 
+def test_low_confidence_non_chinese_probe_keeps_language_unlocked():
+    router, _ = _router([LanguageDetection("ru", 0.28, "tiny")])
+
+    decision = router.decide(np.zeros(1000, dtype=np.float32), 1000)
+
+    assert decision.detected_language == "other"
+    assert decision.language is None
+
+
 @pytest.mark.parametrize("engine", ["faster-whisper", "whisper-cpp"])
 def test_explicit_engine_is_never_overridden(engine):
     config = PipelineConfig()

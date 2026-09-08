@@ -40,6 +40,7 @@ const part = {
       }
 
       App.ui.initSubtitleBatchControls();
+      if (typeof App.ui.initWaveformBridge === 'function') App.ui.initWaveformBridge();
       document.addEventListener('keydown', function(event) {
         App.ui.handleSubtitleKeyboard(event);
       });
@@ -92,9 +93,18 @@ const part = {
 
     setFile(file) {
       App.state.selectedFile = file;
+      App.ui.clearPipelineError();
       const zone = $('#upload-zone');
       zone.classList.add('has-file');
       $('#upload-filename').textContent = '✓ ' + file.name + ' (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)';
+
+      const railFile = document.getElementById('process-rail-file');
+      const railStatus = document.getElementById('process-rail-status');
+      if (railFile) railFile.textContent = file.name;
+      if (railStatus) {
+        railStatus.textContent = '待处理';
+        railStatus.dataset.status = 'ready';
+      }
 
       // Enable run button
       const btn = $('#btn-run');
@@ -195,8 +205,25 @@ const part = {
         <div class="option-row"><label>引擎</label><select data-key="asr_engine">
           <option value="auto" ${asrEngine==='auto'?'selected':''}>自动（中文优先）</option>
           <option value="faster-whisper" ${config.asr_engine==='faster-whisper'?'selected':''}>faster-whisper</option>
-          <option value="whisper-cpp" ${config.asr_engine==='whisper-cpp'?'selected':''}>whisper.cpp</option>
-          <option value="funasr" ${config.asr_engine==='funasr'?'selected':''}>FunASR (中文优化)</option>
+         <option value="whisper-cpp" ${config.asr_engine==='whisper-cpp'?'selected':''}>whisper.cpp</option>
+         <option value="funasr" ${config.asr_engine==='funasr'?'selected':''}>FunASR (中文优化)</option>
+          <option value="qwen" ${config.asr_engine==='qwen'?'selected':''}>Qwen3-ASR</option>
+        </select></div>
+        <div class="option-row"><label>主引擎</label><select data-key="primary_engine">
+          <option value="auto" ${config.primary_engine==='auto'?'selected':''}>自动按语言</option>
+          <option value="funasr" ${config.primary_engine==='funasr'?'selected':''}>FunASR</option>
+          <option value="qwen" ${config.primary_engine==='qwen'?'selected':''}>Qwen3-ASR</option>
+          <option value="faster-whisper" ${config.primary_engine==='faster-whisper'?'selected':''}>Whisper</option>
+        </select></div>
+        <div class="option-row"><label>副引擎</label><select data-key="secondary_engine">
+          <option value="auto" ${config.secondary_engine==='auto'?'selected':''}>自动按语言</option>
+          <option value="qwen" ${config.secondary_engine==='qwen'?'selected':''}>Qwen3-ASR</option>
+          <option value="funasr" ${config.secondary_engine==='funasr'?'selected':''}>FunASR</option>
+          <option value="faster-whisper" ${config.secondary_engine==='faster-whisper'?'selected':''}>Whisper</option>
+        </select></div>
+        <div class="option-row"><label>复核策略</label><select data-key="engine_pair_policy">
+          <option value="risk_only" ${config.engine_pair_policy==='risk_only'?'selected':''}>risk_only</option>
+          <option value="full_quality" ${config.engine_pair_policy==='full_quality'?'selected':''}>full_quality</option>
         </select></div>
         <div class="option-row"><label>模型</label><select data-key="asr_model">${asrModelOptions}</select><span class="device-hint" id="funasr-status" style="display:none;"></span></div>
         <div class="option-row"><label>设备</label><select data-key="device" onchange="App.ui.onDeviceChange()">
@@ -912,4 +939,3 @@ const part = {
 };
 window.VocalSubtitleUi = Object.assign(window.VocalSubtitleUi || {}, part);
 })();
-

@@ -24,11 +24,16 @@ async _fetch(url, opts) {
       });
     },
     async getSubtitles(taskId) { return this._fetch('/api/subtitle/' + taskId); },
-    async updateSubtitle(taskId, index, text) {
+    // payload: {text?, start?, end?}；传字符串时视为纯文本更新（旧用法兼容）
+    async updateSubtitle(taskId, index, payload) {
+      if (typeof payload === 'string') payload = {text: payload};
       return this._fetch('/api/subtitle/' + taskId + '/' + index, {
         method: 'PUT', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({index: index, text: text})
+        body: JSON.stringify(Object.assign({index: index}, payload))
       });
+    },
+    async updateSubtitleTiming(taskId, index, start, end) {
+      return this.updateSubtitle(taskId, index, {start: start, end: end});
     },
     async batchEditSubtitles(taskId, payload) {
       return this._fetch('/api/subtitle/' + taskId + '/batch', {
@@ -43,6 +48,22 @@ async _fetch(url, opts) {
 	      if (offset) params.set('offset', offset);
 	      const qs = params.toString();
 	      return this._fetch('/api/history' + (qs ? '?' + qs : ''));
+	    },
+	    async getHistoryFiltered(limit, offset, status) {
+	      const params = new URLSearchParams();
+	      if (limit) params.set('limit', limit);
+	      if (offset) params.set('offset', offset);
+	      if (status) params.set('status', status);
+	      const qs = params.toString();
+	      return this._fetch('/api/history' + (qs ? '?' + qs : ''));
+	    },
+	    async getHistoryDetail(taskId) { return this._fetch('/api/history/' + encodeURIComponent(taskId)); },
+	    async getQualityReport(taskId) {
+	      return this._fetch('/api/quality/report/' + encodeURIComponent(taskId));
+	    },
+	    async getReviewQueue(status) {
+	      const qs = status ? '?status=' + encodeURIComponent(status) : '';
+	      return this._fetch('/api/feedback/review-queue' + qs);
 	    },
 	    async deleteHistory(taskId) { return this._fetch('/api/history/' + taskId, { method: 'DELETE' }); },
 	    async clearAllHistory() { return this._fetch('/api/history', { method: 'DELETE' }); },
@@ -126,4 +147,3 @@ async _fetch(url, opts) {
     },
 };
 })();
-

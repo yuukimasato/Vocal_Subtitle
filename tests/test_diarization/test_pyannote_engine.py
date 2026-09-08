@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from vocal_subtitle.diarization.pyannote_engine import PyannoteDiarizationEngine
 
 
@@ -70,7 +72,7 @@ def test_load_model_uses_local_snapshot_before_huggingface(monkeypatch, tmp_path
     config_path = snapshot / "config.yaml"
     config_path.write_text("pipeline: {}\n", encoding="utf-8")
 
-    import pyannote.audio
+    pyannote_audio = pytest.importorskip("pyannote.audio")
 
     calls = []
 
@@ -79,7 +81,7 @@ def test_load_model_uses_local_snapshot_before_huggingface(monkeypatch, tmp_path
         return object()
 
     monkeypatch.setattr(
-        pyannote.audio.Pipeline,
+        pyannote_audio.Pipeline,
         "from_pretrained",
         staticmethod(fake_from_pretrained),
     )
@@ -95,6 +97,7 @@ def test_load_model_uses_local_snapshot_before_huggingface(monkeypatch, tmp_path
 
 
 def test_diarization_does_not_send_default_speaker_bounds(monkeypatch):
+    pytest.importorskip("torch")
     captured = {}
 
     class FakePipeline:

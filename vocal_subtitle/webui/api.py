@@ -74,6 +74,7 @@ from .routes_feedback_learning import (
     router as feedback_learning_router,
 )
 from .routes_history import router as history_router
+from .routes_quality import router as quality_router
 from .routes_llm import (
     fetch_llm_models,
     list_llm_providers,
@@ -150,8 +151,15 @@ router.include_router(feedback_learning_router)
 router.include_router(feedback_router)
 router.include_router(models_router)
 router.include_router(history_router)
+router.include_router(quality_router)
 router.include_router(pipeline_router)
 router.include_router(subtitles_router)
+
+
+@router.get("/health")
+async def health_check():
+    """健康检查端点"""
+    return {"status": "ok", "version": "0.2.0"}
 
 # Compatibility exports used by integrations and historical tests.
 _rewrite_subtitle_files = subtitles_routes._rewrite_subtitle_files
@@ -256,4 +264,5 @@ __all__ = [
     "update_subtitle",
     "update_subtitles_batch",
     "ensure_funasr_ready",
+    "health_check",
 ]

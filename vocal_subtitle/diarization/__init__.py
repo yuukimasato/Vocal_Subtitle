@@ -21,6 +21,11 @@ from .speaker_embedding import (
     SpeakerEmbeddingEngine,
     create_embedding_engine,
 )
+from .speaker_change import SpeakerChangeConfig, SpeakerChangeResult, detect_speaker_change_from_features
+from .canonicalizer import SpeakerTurn, canonicalize_diarization_result
+from .turn_reconciler import AtomicSpeechSpan, reconcile_regions, merge_same_speaker_spans
+from .model_registry import download_model, is_model_cached, list_model_status, model_status
+from .pyannote_engine import PyannoteDiarizationEngine
 
 __all__ = [
     "ClusteredSegment",
@@ -34,4 +39,17 @@ __all__ = [
     "SpeakerRole",
     "create_embedding_engine",
     "run_speaker_fusion",
+    "SpeakerChangeConfig",
+    "SpeakerChangeResult",
+    "detect_speaker_change_from_features",
+    "SpeakerTurn",
+    "canonicalize_diarization_result",
+    "AtomicSpeechSpan",
+    "reconcile_regions",
+    "merge_same_speaker_spans",
+    "download_model",
+    "is_model_cached",
+    "list_model_status",
+    "model_status",
+    "PyannoteDiarizationEngine",
 ]

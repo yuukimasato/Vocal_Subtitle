@@ -9,6 +9,7 @@
 #   bash scripts/install_deps.sh --gpu    # 包含 GPU 支持
 #   bash scripts/install_deps.sh --all    # 全量安装
 #   bash scripts/install_deps.sh --webui  # CLI + Web GUI
+#   bash scripts/install_deps.sh --production # 生产链 + Qwen runtime + WebUI
 # ============================================================
 
 set -euo pipefail
@@ -95,7 +96,7 @@ INSTALL_MODE="${1:---base}"
 case "$INSTALL_MODE" in
     --gpu)
         echo "  → 安装模式: 基础 + GPU 支持"
-        pip install -e ".[gpu,spleeter,faster-whisper]"
+        pip install -e ".[gpu,faster-whisper,funasr]"
         ;;
     --all)
         echo "  → 安装模式: 全量安装"
@@ -104,6 +105,11 @@ case "$INSTALL_MODE" in
     --webui|--gui)
         echo "  → 安装模式: CLI + Web GUI"
         pip install -e ".[faster-whisper,webui]"
+        ;;
+    --production)
+        echo "  → 安装模式: 生产链 (faster-whisper + FunASR + Qwen + WebUI)"
+        pip install torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cpu
+        pip install -e ".[faster-whisper,funasr,review-models,qwen-runtime,webui,webrtcvad,uvr]"
         ;;
     *)
         echo "  → 安装模式: 基础安装"
@@ -120,6 +126,7 @@ echo ""
 echo "验证安装:"
 echo "  vocal-subtitle --help"
 echo "  vocal-subtitle info"
+echo "  python -c \"import qwen_asr; from vocal_subtitle.asr.qwen_engine import qwen_model_path_ready; print('Qwen runtime:', qwen_asr.__name__, 'model ready:', qwen_model_path_ready(None))\""
 echo ""
 echo "快速开始:"
 echo "  vocal-subtitle run input.mp3 -o output.srt"

@@ -65,7 +65,10 @@ class GlobalSubtitleEvent:
                 word=word.text,
                 start=word.raw_start - self.start,
                 end=word.raw_end - self.start,
-                confidence=word.confidence if word.confidence is not None else 1.0,
+                # Preserve missing confidence for the evidence adapter. The
+                # global event is a compatibility observation, not a calibrated
+                # subtitle confidence source.
+                confidence=word.confidence,
                 speaker_id=word.speaker_id,
             )
             for word in self.words
@@ -138,154 +141,113 @@ def _build_bin_events(
     max_word_gap: float,
     max_evidence_gap: float,
 ) -> list[GlobalSubtitleEvent]:
-    """Fill physical bins while retaining whole-word and evidence boundaries."""
-    bin_by_id = {item.id: item for item in subtitle_bins}
-    groups: list[tuple[list[WordAllocation], PhysicalSubtitleBin | None]] = []
-    current: list[WordAllocation] = []
-    current_bin: PhysicalSubtitleBin | None = None
-    for item in allocation.accepted:
-        assigned = assign_word_to_bin(item.word, subtitle_bins)
-        if current and not _can_append(
-            current[-1], item, max_word_gap, max_evidence_gap
-        ):
-            groups.append((current, current_bin))
-            current = []
-        if not current:
-            current_bin = assigned
-        elif (
-            assigned is not None
-            and current_bin is not None
-            and assigned.id != current_bin.id
-        ):
-            groups.append((current, current_bin))
-            current = []
-            current_bin = assigned
-        current.append(item)
-    if current:
-        groups.append((current, current_bin))
+    """Aggregate accepted words by physical bin before building events.
 
-    bin_group_counts: dict[str, int] = {}
-    for _, bin_item in groups:
-        if bin_item is not None:
-            bin_group_counts[bin_item.id] = bin_group_counts.get(bin_item.id, 0) + 1
+    Evidence decisions are an internal review unit, not a subtitle unit. A
+    single acoustic bin can therefore contain words from several decisions;
+    grouping by decision here would leak those internal boundaries as
+    word-level subtitles. Only hard physical or speaker boundaries may split
+    a bin.
+    """
+    ordered_bins = sorted(subtitle_bins, key=lambda item: (item.start, item.end, item.id))
+    grouped: dict[str, tuple[PhysicalSubtitleBin, list[WordAllocation]]] = {}
+    for item in allocation.accepted:
+        assigned = assign_word_to_bin(item.word, ordered_bins)
+        if assigned is None:
+            # With a physical-bin projection, an accepted word without a bin
+            # has no safe subtitle container and must not bypass the skeleton.
+            continue
+        if assigned.id not in grouped:
+            grouped[assigned.id] = (assigned, [])
+        grouped[assigned.id][1].append(item)
 
     events: list[GlobalSubtitleEvent] = []
-    for items, bin_item in groups:
-        use_bin_bounds = bool(
-            bin_item is not None and bin_group_counts.get(bin_item.id) == 1
-        )
-        events.append(
-            _make_event(
-                len(events) + 1,
-                items,
-                subtitle_bin=bin_item if use_bin_bounds else None,
+    for bin_item, items in sorted(
+        grouped.values(), key=lambda value: (value[0].start, value[0].end, value[0].id)
+    ):
+        items = _deduplicate_bin_items(items)
+        for group in _split_bin_hard_boundaries(items):
+            events.append(
+                _make_event(
+                    len(events) + 1,
+                    group,
+                    subtitle_bin=bin_item,
+                )
             )
-        )
-    return _merge_micro_bin_events(events)
+    return events
 
 
-def _merge_micro_bin_events(
-    events: Sequence[GlobalSubtitleEvent],
-    *,
-    max_bin_gap: float = 0.15,
-    max_word_gap: float = 0.05,
-    max_short_text_chars: int = 2,
-) -> list[GlobalSubtitleEvent]:
-    """Join a short whole-word fragment split by adjacent physical bins.
-
-    Physical evidence can leave a tiny trailing bin around a syllable or an
-    initial address.  Keeping that as a one-character subtitle is worse than
-    carrying the complete adjacent word stream, but broad bin merging would
-    erase real speaker and sentence boundaries.  This narrow rule therefore
-    requires a short side, contiguous word timestamps, one physical clip, and
-    no hard or punctuation boundary.
-    """
-    if not events:
-        return []
-    merged: list[GlobalSubtitleEvent] = [events[0]]
-    for current in events[1:]:
-        previous = merged[-1]
-        previous_word = previous.words[-1] if previous.words else None
-        current_word = current.words[0] if current.words else None
-        short_side = min(
-            _display_char_count(previous.text),
-            _display_char_count(current.text),
-        ) <= max_short_text_chars
-        same_clip = _single_clip(previous) is not None and _single_clip(previous) == _single_clip(current)
-        bin_gap = (
-            current.physical_bin_start - previous.physical_bin_end
-            if current.physical_bin_start is not None
-            and previous.physical_bin_end is not None
-            else float("inf")
-        )
-        word_gap = (
-            current_word.raw_start - previous_word.raw_end
-            if previous_word is not None and current_word is not None
-            else float("inf")
-        )
-        can_merge = bool(
-            short_side
-            and same_clip
-            and previous.speaker_id == current.speaker_id
-            and not _has_hard_warning(previous)
-            and not _has_hard_warning(current)
-            and not _ends_punctuation(previous_word)
-            and bin_gap >= 0.0
-            and bin_gap <= max_bin_gap
-            and word_gap >= -0.01
-            and word_gap <= max_word_gap
-        )
-        if not can_merge:
-            merged.append(current)
-            continue
-        previous.words.extend(current.words)
-        previous.text = _join_words([word.text for word in previous.words])
-        previous.end = current.end
-        previous.source_word_ids.extend(current.source_word_ids)
-        previous.physical_spans = _merge_spans(
-            [*previous.physical_spans, *current.physical_spans]
-        )
-        previous.physical_bin_id = "+".join(
-            item
-            for item in (previous.physical_bin_id, current.physical_bin_id)
-            if item
-        ) or None
-        previous.physical_bin_end = current.physical_bin_end
-        previous.alignment_warning = ";".join(
-            dict.fromkeys(
-                item
-                for item in (previous.alignment_warning, current.alignment_warning)
-                if item
-                for item in str(item).split(";")
-            )
-        ) or None
-    for index, event in enumerate(merged, start=1):
-        event.index = index
-        event.logical_sentence_id = index
-    return merged
-
-
-def _single_clip(event: GlobalSubtitleEvent) -> str | None:
-    clip_ids = {span.clip_id for span in event.physical_spans}
-    return next(iter(clip_ids)) if len(clip_ids) == 1 else None
-
-
-def _display_char_count(text: str) -> int:
-    return len(str(text).replace(" ", ""))
-
-
-def _ends_punctuation(word: Any | None) -> bool:
-    if word is None:
-        return False
-    return str(getattr(word, "text", "")).strip().endswith((".", "!", "?", "。", "！", "？"))
-
-
-def _has_hard_warning(event: GlobalSubtitleEvent) -> bool:
-    warning = str(event.alignment_warning or "")
-    return any(
-        item in warning.split(";")
-        for item in ("speaker_conflict", "discontinuous_physical_boundary")
+def _deduplicate_bin_items(items: Sequence[WordAllocation]) -> list[WordAllocation]:
+    """Remove repeated evidence observations of the same spoken word."""
+    ordered = sorted(
+        items, key=lambda item: (item.word.raw_start, item.word.raw_end, item.word.id)
     )
+    result: list[WordAllocation] = []
+    seen_source_ids: set[str] = set()
+    for item in ordered:
+        source_id = str(item.word.metadata.get("source_word_id", item.word.id))
+        if source_id in seen_source_ids:
+            continue
+        text = _normalize_word_text(item.word.text)
+        duplicate = False
+        for previous in result:
+            if text != _normalize_word_text(previous.word.text):
+                continue
+            overlap = min(item.word.raw_end, previous.word.raw_end) - max(
+                item.word.raw_start, previous.word.raw_start
+            )
+            shorter = min(
+                item.word.raw_end - item.word.raw_start,
+                previous.word.raw_end - previous.word.raw_start,
+            )
+            if shorter > 0 and overlap / shorter >= 0.7:
+                duplicate = True
+                break
+        if duplicate:
+            continue
+        seen_source_ids.add(source_id)
+        result.append(item)
+    return result
+
+
+def _split_bin_hard_boundaries(
+    items: Sequence[WordAllocation],
+) -> list[list[WordAllocation]]:
+    """Split at ownership changes and every material physical gap.
+
+    A subtitle event is allowed to contain adjacent words, but it must not
+    claim a physically silent interval.  The bin itself may be broad enough
+    to contain several words, so the event boundary must use the allocated
+    physical spans rather than the bin envelope.
+    """
+    groups: list[list[WordAllocation]] = []
+    for item in sorted(
+        items, key=lambda value: (value.word.raw_start, value.word.raw_end, value.word.id)
+    ):
+        if not groups or _has_bin_hard_boundary(groups[-1][-1], item):
+            groups.append([])
+        groups[-1].append(item)
+    return groups
+
+
+def _has_bin_hard_boundary(previous: WordAllocation, current: WordAllocation) -> bool:
+    if previous.speaker_id != current.speaker_id:
+        return True
+    if previous.speaker_source == "mixed" or current.speaker_source == "mixed":
+        return True
+    previous_clips = {span.clip_id for span in previous.physical_spans}
+    current_clips = {span.clip_id for span in current.physical_spans}
+    if previous_clips and current_clips and not previous_clips.intersection(current_clips):
+        return True
+    previous_end = max(span.end for span in previous.physical_spans)
+    current_start = min(span.start for span in current.physical_spans)
+    # Preserve natural inter-word pauses inside a subtitle.  A larger gap is
+    # the hard physical boundary used by the evidence-gap contract.
+    return current_start - previous_end > 0.35
+
+
+def _normalize_word_text(value: Any) -> str:
+    return "".join(str(value or "").split()).casefold()
 
 
 def _can_append(
@@ -294,6 +256,11 @@ def _can_append(
     max_word_gap: float,
     max_evidence_gap: float,
 ) -> bool:
+    previous_decision = previous.word.metadata.get("decision_id")
+    current_decision = current.word.metadata.get("decision_id")
+    if previous_decision or current_decision:
+        if previous_decision != current_decision:
+            return False
     if previous.speaker_id != current.speaker_id:
         return False
     if previous.speaker_source == "mixed" or current.speaker_source == "mixed":
@@ -347,6 +314,11 @@ def _make_event(
     subtitle_bin: PhysicalSubtitleBin | None = None,
 ) -> GlobalSubtitleEvent:
     words = [item.word for item in items]
+    allowed_evidence_ids = (
+        set(subtitle_bin.evidence_ids)
+        if subtitle_bin is not None
+        else None
+    )
     evidence_spans = [
         PhysicalSpan(
             span.physical_clip_id or item.physical_spans[0].clip_id,
@@ -356,6 +328,7 @@ def _make_event(
         )
         for item in items
         for span in item.evidence_spans
+        if allowed_evidence_ids is None or span.id in allowed_evidence_ids
         if span.physical_clip_id
         and max(item.word.raw_start, span.start)
         < min(item.word.raw_end, span.end)
@@ -366,6 +339,29 @@ def _make_event(
         or [span for item in items for span in item.physical_spans]
     )
     warnings = [warning for item in items for warning in item.warnings]
+    decision_trace: list[dict[str, Any]] = []
+    seen_decisions: set[str] = set()
+    for word in words:
+        metadata = word.metadata or {}
+        decision_id = metadata.get("decision_id")
+        if not decision_id or decision_id in seen_decisions:
+            continue
+        seen_decisions.add(decision_id)
+        decision_trace.append({
+            "stage": "evidence_decision",
+            "decision_id": decision_id,
+            "decision": metadata.get("decision"),
+            "candidate_ids": list(metadata.get("candidate_ids", ())),
+            "risk_level": metadata.get("risk_level"),
+            "risk_score": metadata.get("risk_score"),
+            "evidence_codes": list(metadata.get("evidence_codes", ())),
+        })
+        if metadata.get("timestamp_clamped"):
+            warnings.append("timestamp_clamped")
+        if metadata.get("time_source") == "segment_boundary":
+            warnings.append("missing_word_timestamps")
+        if metadata.get("decision") == "unresolved":
+            warnings.append("unresolved evidence conflict")
     speaker_status = (
         "known"
         if items[0].speaker_id is not None
@@ -390,6 +386,14 @@ def _make_event(
     degraded = len(decisions) != 2 or any(not item.accepted for item in decisions)
     if degraded:
         warnings.append("timing_degraded")
+    boundary_trace = [
+        {
+            "stage": "boundary_arbitration",
+            "boundary": decision.boundary_type,
+            "decision": decision.to_dict(),
+        }
+        for decision in decisions
+    ]
     return GlobalSubtitleEvent(
         index=index,
         start=start,
@@ -400,7 +404,10 @@ def _make_event(
         speaker_status=speaker_status,
         speaker_source=items[0].speaker_source or "unknown",
         physical_spans=spans,
-        source_word_ids=[word.id for word in words],
+        source_word_ids=[
+            str(word.metadata.get("source_word_id", word.id))
+            for word in words
+        ],
         logical_sentence_id=index,
         alignment_warning=";".join(dict.fromkeys(warnings)) or None,
         hard_split_before=index > 1,
@@ -408,14 +415,7 @@ def _make_event(
         physical_bin_start=subtitle_bin.start if subtitle_bin is not None else None,
         physical_bin_end=subtitle_bin.end if subtitle_bin is not None else None,
         time_source="boundary_decision" if not degraded else "timing_degraded",
-        revision_trace=[
-            {
-                "stage": "boundary_arbitration",
-                "boundary": decision.boundary_type,
-                "decision": decision.to_dict(),
-            }
-            for decision in decisions
-        ],
+        revision_trace=[*decision_trace, *boundary_trace],
     )
 
 

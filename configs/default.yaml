@@ -197,8 +197,9 @@ pipeline:
 
   # Stage 4: ASR 识别
   asr:
-    engine: "auto"                             # auto | faster-whisper | whisper-cpp | funasr
+    engine: "auto"                             # auto | faster-whisper | whisper-cpp | funasr | qwen
     model: "large-v3"
+    qwen_model_path: null                       # null = ~/.cache/vocal-subtitle/review-models/qwen3-asr-1.7b
     device: "auto"
     compute_type: "float16"
     # language: "zh"                           # 语言锁定，null = 自动检测
@@ -214,10 +215,13 @@ pipeline:
     # 全局转录（完整音频为窗口）
     global_asr:
       enabled: true
-      routing: "auto"                          # auto | global | segmented
+      routing: "segmented"                     # segmented | global (compatibility)
+      evidence_enabled: true                   # global ASR as evidence after segmented primary
       backend: "faster-whisper"
       left_context: 0.5
       right_context: 0.5
+      max_window_duration: 180.0
+      window_overlap: 0.5
       min_word_confidence: 0.0
       hallucination_filter: true
       language_switch_threshold: 0.7
@@ -241,6 +245,53 @@ pipeline:
       long_audio_seconds: 60.0
       long_audio_min_text_chars: 12
       max_overlap_ratio: 0.35
+    engine_pair:
+      enabled: true
+      primary: "auto"
+      secondary: "auto"
+      policy: "risk_only"
+      same_family_policy: "reject"
+      fallback_secondary: true
+      max_workers: 2
+      route_version: "asr-pair-v1"
+
+  # 全局 ASR 证据复核（production 默认；可显式切回 shadow）
+  evidence_review:
+    enabled: true
+    authoritative_mode: false
+    shadow_mode: true
+    context_reasr_enabled: false
+    qwen_enabled: false
+    forced_aligner_enabled: false
+    sed_enabled: false
+    semantic_review_enabled: false
+    unresolved_keeps_candidate: true
+    require_multi_source_drop: true
+    fallback_to_segmented: true
+    local_recovery_enabled: true
+    local_recovery_max_attempts: 3
+    local_recovery_min_confidence: 0.5
+    local_recovery_context_seconds: 0.5
+    local_recovery_request_tolerance: 0.15
+    qwen_model_path: null
+    forced_aligner_model_path: null
+    sed_model_path: null
+    review_device: "auto"
+    allow_remote_model_download: false
+    left_context: 0.8
+    right_context: 0.8
+    max_group_duration: 12.0
+    max_window_duration: 15.0
+    medium_threshold: 0.25
+    high_threshold: 0.50
+    critical_threshold: 0.75
+    max_workers: 2
+    window_timeout_seconds: 60.0
+    review_policy_version: "review-policy-v1"
+    risk_policy_version: "risk-policy-v1"
+    decision_policy_version: "decision-policy-v1"
+    evidence_schema_version: "evidence-v1"
+    golden_quality_gate_version: "golden-quality-v1"
 
   # Stage 4.5: LLM 说话人角色标注（可选）
   speaker_role:
@@ -298,13 +349,6 @@ cache:
   directory: "./cache"
   ttl_separation: 86400       # 24 小时
   ttl_transcription: 604800   # 7 天
-
-  # 降级模式控制
-  degradation:
-    mode: "full"                   # "full" | "degraded" | "minimal"
-    per_module_timeout: 60         # 每个模块最大执行秒数
-    ffmpeg_timeout: 30
-    llm_api_timeout: 15
 
 # 日志
 logging:

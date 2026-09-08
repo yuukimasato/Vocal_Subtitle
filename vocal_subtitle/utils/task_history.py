@@ -1,9 +1,12 @@
 """任务历史管理器
 
 基于 SQLite 的持久化任务历史记录，支持：
-- 任务生命周期跟踪 (pending → running → completed/failed)
+- 完整任务状态机 (TASK_STATE_MACHINE.md v1)
+  pending → preflight → running → completed | degraded_completed | failed | cancelled
+- 错误分类 (TASK_STATE_MACHINE.md §错误分类)
 - 基于文件哈希 + 配置哈希的缓存查找
 - 分页查询和历史清理
+- run_id 关联
 """
 
 import json
@@ -19,6 +22,90 @@ logger = logging.getLogger(__name__)
 # 数据库放置在项目缓存目录下
 DEFAULT_DB_DIR = Path(__file__).parent.parent.parent / "cache"
 DEFAULT_DB_PATH = DEFAULT_DB_DIR / "task_history.db"
+
+# ------------------------------------------------------------------
+# 任务状态枚举 (TASK_STATE_MACHINE.md)
+# ------------------------------------------------------------------
+
+VALID_TASK_STATUSES = frozenset({
+    "pending",
+    "preflight",
+    "running",
+    "completed",
+    "degraded_completed",
+    "failed",
+    "cancelled",
+})
+
+TERMINAL_STATUSES = frozenset({
+    "completed",
+    "degraded_completed",
+    "failed",
+    "cancelled",
+})
+
+# 允许的状态转换 (TASK_STATE_MACHINE.md §转换规则)
+ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+    "pending":             frozenset({"preflight", "cancelled"}),
+    "preflight":           frozenset({"running", "failed", "cancelled"}),
+    "running":             frozenset({"completed", "degraded_completed", "failed", "cancelled"}),
+    "completed":           frozenset(),
+    "degraded_completed":  frozenset(),
+    "failed":              frozenset(),
+    "cancelled":           frozenset(),
+}
+
+# ------------------------------------------------------------------
+# 错误分类 (TASK_STATE_MACHINE.md §错误分类)
+# ------------------------------------------------------------------
+
+
+class ErrorCategory:
+    """任务失败的错误分类枚举"""
+
+    INPUT_MISSING = "input_missing"
+    FORMAT_UNSUPPORTED = "format_unsupported"
+    MODEL_MISSING = "model_missing"
+    DEPENDENCY_MISSING = "dependency_missing"
+    RESOURCE_EXHAUSTED = "resource_exhausted"
+    ENGINE_TIMEOUT = "engine_timeout"
+    RECOVERABLE_DEGRADATION = "recoverable_degradation"
+    UNRECOVERABLE_FAILURE = "unrecoverable_failure"
+
+    _USER_MESSAGES = {
+        INPUT_MISSING: "找不到输入文件：{path}",
+        FORMAT_UNSUPPORTED: "不支持的音频格式：{format}，支持 MP3/WAV/M4A/FLAC",
+        MODEL_MISSING: "缺少模型：{model}，运行 `vocal-subtitle download-models`",
+        DEPENDENCY_MISSING: "缺少系统依赖：{dep}，运行 `bash install.sh`",
+        RESOURCE_EXHAUSTED: "资源不足，尝试使用更小的模型或 --cpu",
+        ENGINE_TIMEOUT: "{engine} 执行超时（{timeout}s），已降级",
+        RECOVERABLE_DEGRADATION: "部分可选功能不可用，继续生成基础字幕",
+        UNRECOVERABLE_FAILURE: "处理失败：{reason}",
+    }
+
+    @classmethod
+    def user_message(cls, category: str, **kwargs) -> str:
+        template = cls._USER_MESSAGES.get(category, "处理失败：{reason}")
+        return template.format(**kwargs) if kwargs else template
+
+
+# ------------------------------------------------------------------
+# 预检清单 (TASK_STATE_MACHINE.md §预检清单)
+# ------------------------------------------------------------------
+
+
+class PreflightChecklist:
+    """预检阶段检查项"""
+
+    checks: list[dict] = [
+        {"key": "input_exists", "label": "输入文件存在且可读", "critical": True},
+        {"key": "format_supported", "label": "音频格式支持", "critical": True},
+        {"key": "separation_available", "label": "分离引擎可用", "critical": False},
+        {"key": "vad_available", "label": "VAD 引擎可用", "critical": True},
+        {"key": "asr_available", "label": "至少一个 ASR 引擎可用", "critical": True},
+        {"key": "disk_space", "label": "磁盘空间充足", "critical": True},
+        {"key": "output_writable", "label": "输出目录可写", "critical": True},
+    ]
 
 
 class TaskHistoryManager:
@@ -53,13 +140,14 @@ class TaskHistoryManager:
         return conn
 
     def _init_db(self) -> None:
-        """初始化数据库表结构"""
+        """初始化数据库表结构（含 schema 迁移）"""
         with self._lock:
             conn = self._get_conn()
             try:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS task_history (
                         id              TEXT PRIMARY KEY,
+                        run_id          TEXT NOT NULL DEFAULT '',
                         input_file_name TEXT NOT NULL,
                         input_file_hash TEXT NOT NULL DEFAULT '',
                         input_file_size INTEGER NOT NULL DEFAULT 0,
@@ -67,6 +155,7 @@ class TaskHistoryManager:
                         config_json     TEXT NOT NULL DEFAULT '{}',
                         config_hash     TEXT NOT NULL DEFAULT '',
                         status          TEXT NOT NULL DEFAULT 'pending',
+                        error_category  TEXT NOT NULL DEFAULT '',
                         progress_json   TEXT NOT NULL DEFAULT '{}',
                         result_json     TEXT,
                         error           TEXT,
@@ -75,6 +164,9 @@ class TaskHistoryManager:
                         completed_at    TEXT
                     )
                 """)
+                # Schema 迁移：添加旧表缺失的列
+                self._migrate_add_column(conn, "task_history", "run_id", "TEXT NOT NULL DEFAULT ''")
+                self._migrate_add_column(conn, "task_history", "error_category", "TEXT NOT NULL DEFAULT ''")
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_history_status
                         ON task_history(status)
@@ -87,9 +179,21 @@ class TaskHistoryManager:
                     CREATE INDEX IF NOT EXISTS idx_history_hash
                         ON task_history(input_file_hash, config_hash)
                 """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_history_run_id
+                        ON task_history(run_id)
+                """)
                 conn.commit()
             finally:
                 conn.close()
+
+    @staticmethod
+    def _migrate_add_column(conn, table: str, column: str, column_def: str) -> None:
+        """安全添加列（如果不存在）"""
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
 
     # ------------------------------------------------------------------
     # CRUD
@@ -103,8 +207,10 @@ class TaskHistoryManager:
         file_size: int,
         profile: str,
         config,
+        *,
+        run_id: str = "",
     ) -> None:
-        """创建新任务记录
+        """创建新任务记录（状态初始为 pending）
 
         Args:
             task_id: 任务唯一 ID
@@ -113,6 +219,7 @@ class TaskHistoryManager:
             file_size: 文件大小 (bytes)
             profile: 使用的场景模板名称
             config: PipelineConfig 对象
+            run_id: 运行 ID（可选，运行开始时关联）
         """
         from dataclasses import asdict
 
@@ -129,13 +236,13 @@ class TaskHistoryManager:
                 conn.execute(
                     """
                     INSERT INTO task_history
-                        (id, input_file_name, input_file_hash, input_file_size,
+                        (id, run_id, input_file_name, input_file_hash, input_file_size,
                          profile, config_json, config_hash, status,
                          created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                     """,
                     (
-                        task_id, file_name, file_hash, file_size,
+                        task_id, run_id, file_name, file_hash, file_size,
                         profile, config_json, config_hash, now,
                     ),
                 )
@@ -143,10 +250,10 @@ class TaskHistoryManager:
             finally:
                 conn.close()
 
-        logger.debug("Task history created: %s", task_id)
+        logger.debug("Task history created: %s (run: %s)", task_id, run_id or "N/A")
 
     def update(self, task_id: str, **fields) -> None:
-        """更新任务字段
+        """更新任务字段（状态变更时验证转换合法性）
 
         Args:
             task_id: 任务 ID
@@ -156,12 +263,34 @@ class TaskHistoryManager:
             return
 
         allowed = {
-            "status", "progress_json", "result_json", "error",
-            "total_duration_seconds", "completed_at", "input_file_hash",
+            "status", "run_id", "progress_json", "result_json", "error",
+            "error_category", "total_duration_seconds", "completed_at",
+            "input_file_hash",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             return
+
+        # 状态转换验证
+        if "status" in updates:
+            new_status = updates["status"]
+            if new_status not in VALID_TASK_STATUSES:
+                raise ValueError(
+                    f"Invalid status: {new_status!r}. Valid: {sorted(VALID_TASK_STATUSES)}"
+                )
+            current = self.get(task_id)
+            if current is not None:
+                current_status = current.get("status", "pending")
+                allowed_next = ALLOWED_TRANSITIONS.get(current_status, frozenset())
+                if new_status != current_status and allowed_next and new_status not in allowed_next:
+                    logger.warning(
+                        "Status transition %s → %s not in allowed set %s",
+                        current_status, new_status, sorted(allowed_next),
+                    )
+
+            # 终态自动记录完成时间
+            if new_status in TERMINAL_STATUSES and "completed_at" not in updates:
+                updates["completed_at"] = datetime.now().isoformat()
 
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [task_id]
@@ -176,6 +305,77 @@ class TaskHistoryManager:
                 conn.commit()
             finally:
                 conn.close()
+
+    def transition_status(
+        self,
+        task_id: str,
+        new_status: str,
+        *,
+        error: str = "",
+        error_category: str = "",
+        run_id: str = "",
+    ) -> None:
+        """执行任务状态转换（强制验证）。
+
+        Args:
+            task_id: 任务 ID
+            new_status: 目标状态
+            error: 错误消息（failed/cancelled 时）
+            error_category: 错误分类（failed 时）
+            run_id: 运行 ID（preflight → running 时关联）
+
+        Raises:
+            ValueError: 状态转换不合法
+        """
+        if new_status not in VALID_TASK_STATUSES:
+            raise ValueError(
+                f"Invalid status: {new_status!r}. Valid: {sorted(VALID_TASK_STATUSES)}"
+            )
+
+        updates: dict = {"status": new_status}
+        if run_id:
+            updates["run_id"] = run_id
+        if error:
+            updates["error"] = error
+        if error_category:
+            updates["error_category"] = error_category
+
+        self.update(task_id, **updates)
+        logger.info("Task %s: %s → %s", task_id[:20], new_status, "")
+
+    def set_preflight(self, task_id: str) -> None:
+        """pending → preflight"""
+        self.transition_status(task_id, "preflight")
+
+    def set_running(self, task_id: str, run_id: str = "") -> None:
+        """preflight → running"""
+        self.transition_status(task_id, "running", run_id=run_id)
+
+    def set_completed(self, task_id: str) -> None:
+        """running → completed"""
+        self.transition_status(task_id, "completed")
+
+    def set_degraded_completed(
+        self, task_id: str, *, reason: str = "", category: str = ""
+    ) -> None:
+        """running → degraded_completed"""
+        self.transition_status(
+            task_id, "degraded_completed",
+            error=reason, error_category=category or ErrorCategory.RECOVERABLE_DEGRADATION,
+        )
+
+    def set_failed(
+        self, task_id: str, *, reason: str, category: str = ""
+    ) -> None:
+        """running → failed"""
+        self.transition_status(
+            task_id, "failed",
+            error=reason, error_category=category or ErrorCategory.UNRECOVERABLE_FAILURE,
+        )
+
+    def set_cancelled(self, task_id: str) -> None:
+        """pending/preflight/running → cancelled"""
+        self.transition_status(task_id, "cancelled", error="用户取消")
 
     def get(self, task_id: str) -> Optional[Dict[str, Any]]:
         """获取单个任务记录"""
@@ -324,11 +524,33 @@ class TaskHistoryManager:
                 SELECT * FROM task_history
                 WHERE input_file_hash = ?
                   AND config_hash = ?
-                  AND status = 'completed'
+                  AND status IN ('completed', 'degraded_completed')
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
                 (file_hash, config_hash),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def find_by_run_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """通过 run_id 查找任务。
+
+        Args:
+            run_id: 运行 ID
+
+        Returns:
+            匹配的任务记录或 None
+        """
+        if not run_id:
+            return None
+
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT * FROM task_history WHERE run_id = ? LIMIT 1",
+                (run_id,),
             ).fetchone()
             return dict(row) if row else None
         finally:
@@ -354,9 +576,9 @@ class TaskHistoryManager:
                 conn.close()
 
     def fixup_stale_running_tasks(self) -> int:
-        """将残留的 "running" 状态任务标记为 "failed"。
+        """将残留的非终态任务标记为 'failed'。
 
-        服务器重启后，任何处于 "running" 状态的任务实际已中断，
+        服务器重启后，任何处于 'running' 或 'preflight' 状态的任务实际已中断，
         继续保留该状态会导致前端永远显示"处理中"。
 
         Returns:
@@ -367,8 +589,9 @@ class TaskHistoryManager:
             try:
                 cursor = conn.execute(
                     "UPDATE task_history SET status = 'failed', "
-                    "error = 'Server restarted during task execution' "
-                    "WHERE status = 'running'"
+                    "error = 'Server restarted during task execution', "
+                    "error_category = 'unrecoverable_failure' "
+                    "WHERE status IN ('running', 'preflight')"
                 )
                 conn.commit()
                 return cursor.rowcount

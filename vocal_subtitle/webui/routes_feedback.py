@@ -540,3 +540,134 @@ async def preview_impact(profile_name: str = "user_default"):
         ],
         "total": len(impacts),
     }
+
+
+# ---------------------------------------------------------------------------
+# 反馈审核队列端点 (FEEDBACK_LOOP.md §7)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/feedback/review-queue")
+async def feedback_review_queue(status: str = Query(default="pending")):
+    """列出待审核反馈样本。
+
+    对应 FEEDBACK_LOOP.md §7:
+      GET /api/feedback/review-queue?status=pending
+      → [{sample_id, diff_summary, confidence, submitted_at}]
+    """
+    from ..feedback.sample_manager import FeedbackSampleManager
+
+    mgr = FeedbackSampleManager()
+    queue = mgr.list_pending_review()
+
+    if status != "pending":
+        queue = [
+            item for item in queue
+            if item.get("status", "pending") == status
+        ]
+
+    return {
+        "samples": queue,
+        "total": len(queue),
+        "status": status,
+    }
+
+
+@router.get("/feedback/review/{sample_id}")
+async def feedback_review_detail(sample_id: str):
+    """获取单个反馈样本的完整审核详情。
+
+    返回原始字幕、人工修订、对齐信息和审核状态。
+    """
+    from ..feedback.sample_manager import FeedbackSampleManager
+
+    mgr = FeedbackSampleManager()
+    sample = mgr.get(sample_id)
+
+    if sample is None:
+        raise HTTPException(status_code=404, detail=f"Sample not found: {sample_id}")
+
+    return sample
+
+
+@router.post("/feedback/review/{sample_id}")
+async def feedback_review(sample_id: str, result: str = Form(...), notes: str = Form(default="")):
+    """审核一个反馈样本。
+
+    对应 FEEDBACK_LOOP.md §7:
+      POST /api/feedback/review/{sample_id}
+      Body: {result: "accepted"|"rejected"|"disputed", notes: "..."}
+    """
+    from ..feedback.sample_manager import FeedbackSampleManager
+
+    valid_results = {"accepted", "rejected", "disputed"}
+    if result not in valid_results:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid review result: {result!r}. Must be one of {sorted(valid_results)}",
+        )
+
+    mgr = FeedbackSampleManager()
+    success = mgr.review(sample_id, result, reviewer="webui", notes=notes)
+
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Sample not found: {sample_id}")
+
+    return {
+        "status": "ok",
+        "sample_id": sample_id,
+        "result": result,
+    }
+
+
+# ---------------------------------------------------------------------------
+# D3 分层抽样 (FEEDBACK_LOOP.md §5, StratifiedSampler)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/feedback/d3-sample")
+async def feedback_d3_sample(
+    strata: str = Form(default="language,scene,speaker_count"),
+    description: str = Form(default=""),
+):
+    """从已审核的 D2 样本中执行分层抽样，冻结为 D3 版本。
+
+    对应 FEEDBACK_LOOP.md §5 影子模式验证流程:
+      POST /api/feedback/d3-sample
+      Body: {strata: "language,scene,speaker_count", description: "D3 分层抽样"}
+
+    Returns:
+      {status, version_id, sample_count, balance_warnings, freeze_date}
+    """
+    from ..feedback.sample_manager import FeedbackSampleManager
+    from ..feedback.stratified_sampler import StratifiedSampler
+
+    strata_list = [s.strip() for s in strata.split(",")]
+
+    mgr = FeedbackSampleManager()
+    sampler = StratifiedSampler()
+
+    pool = sampler.pool_from_manager(mgr)
+    if not pool:
+        raise HTTPException(
+            status_code=400,
+            detail="D2 候选池中没有符合条件的样本（需要 review=accepted, anonymization=deidentified, consent≠local）",
+        )
+
+    plan = sampler.build_plan(
+        pool, strata=strata_list,
+        description=description or "WebUI D3 分层抽样",
+    )
+
+    result = sampler.sample(pool, plan)
+    version = sampler.freeze(result, description=description)
+
+    return {
+        "status": "ok",
+        "version_id": version.version_id,
+        "sample_count": version.sample_count,
+        "freeze_date": version.freeze_date,
+        "pool_size": len(pool),
+        "selection_count": result.sample_count,
+        "balance_warnings": result.balance.get("warnings", []),
+    }

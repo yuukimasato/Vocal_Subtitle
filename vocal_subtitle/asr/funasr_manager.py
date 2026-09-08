@@ -82,6 +82,16 @@ def _looks_like_model_dir(path: Path) -> bool:
     )
 
 
+def _model_candidates(path: Path):
+    """Yield a direct model directory and ModelScope snapshot children."""
+    if not path.is_dir():
+        return
+    yield path
+    snapshots = path / "snapshots"
+    if snapshots.is_dir():
+        yield from sorted(item for item in snapshots.iterdir() if item.is_dir())
+
+
 def find_local_model(model: str | None, cache_dir: Optional[Path | str] = None) -> Optional[Path]:
     """Find a complete local ModelScope snapshot without network access."""
     model_id = normalize_model_id(model)
@@ -92,23 +102,30 @@ def find_local_model(model: str | None, cache_dir: Optional[Path | str] = None) 
     relative_candidates = (
         Path(model_id),
         Path(model_id.replace("/", "_")),
+        # ModelScope's current cache layout stores names such as
+        # ``iic--speech_...`` below ``<cache>/models``.
+        Path(model_id.replace("/", "--")),
         Path("models") / model_id,
         Path("models") / model_id.replace("/", "_"),
+        Path("models") / model_id.replace("/", "--"),
     )
     for root in _cache_roots(cache_dir):
         for relative in relative_candidates:
-            candidate = root / relative
-            if _looks_like_model_dir(candidate):
-                return candidate
+            for candidate in _model_candidates(root / relative):
+                if _looks_like_model_dir(candidate):
+                    return candidate
         if root.is_dir():
             # ModelScope cache layouts have changed between releases; limit the
             # fallback search to directories named after this model only.
-            try:
-                for candidate in root.rglob(leaf):
-                    if _looks_like_model_dir(candidate):
-                        return candidate
-            except OSError:
-                continue
+            for name in (leaf, model_id.replace("/", "--")):
+                try:
+                    matches = root.rglob(name)
+                except OSError:
+                    continue
+                for candidate in matches:
+                    for resolved in _model_candidates(candidate):
+                        if _looks_like_model_dir(resolved):
+                            return resolved
     return None
 
 

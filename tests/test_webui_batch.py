@@ -85,6 +85,23 @@ def test_batch_merge_rejects_non_contiguous_selection(client):
     assert "连续" in response.json()["detail"]
 
 
+def test_batch_merge_rejects_cross_acoustic_bin_selection(client):
+    api._task_store["batch-task"]["result"]["events"][1].update(
+        {"physical_bin_id": "subtitle-bin-000001"}
+    )
+    api._task_store["batch-task"]["result"]["events"][2].update(
+        {"physical_bin_id": "subtitle-bin-000002"}
+    )
+
+    response = client.put(
+        "/api/subtitle/batch-task/batch",
+        json={"action": "merge", "indexes": [2, 3], "separator": "space"},
+    )
+
+    assert response.status_code == 400
+    assert "声学骨架" in response.json()["detail"]
+
+
 def test_batch_edit_loads_and_persists_history_only_task(monkeypatch):
     source = _task()
     updates = {}

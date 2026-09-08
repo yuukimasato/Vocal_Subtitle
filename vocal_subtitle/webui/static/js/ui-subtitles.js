@@ -1,6 +1,56 @@
 (function() {
 'use strict';
 const part = {
+    // 波形活动行变化 → 表格行高亮 + 滚动跟随（仅主面板实例）
+    initWaveformBridge() {
+      document.addEventListener('waveform:active-changed', function(event) {
+        if (event.detail.name !== 'main') return;
+        var index = Number(event.detail.index);
+        document.querySelectorAll('#subtitle-tbody tr.subtitle-row-active').forEach(function(row) {
+          row.classList.remove('subtitle-row-active');
+        });
+        if (index == null || isNaN(index)) return;
+        var row = document.querySelector('#subtitle-tbody tr[data-index="' + index + '"]');
+        if (row) {
+          row.classList.add('subtitle-row-active');
+          if (event.detail.source !== 'events') {
+            row.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+          }
+        }
+      });
+      // 波形上拖动/点击改时间 → 实时刷新该行时间单元格与最终版本列
+      document.addEventListener('waveform:timing-changed', function(event) {
+        if (event.detail.name !== 'main') return;
+        var detail = event.detail;
+        var ev = App.state.subtitleEvents.find(function(item) {
+          return Number(item.index) === Number(detail.index);
+        });
+        if (ev) {
+          ev.start = detail.start;
+          ev.end = detail.end;
+          App.ui.updateTimelineRowTimes(ev);
+        }
+      });
+    },
+
+    // 局部更新一行的时间显示（避免整表重渲染打断编辑状态）
+    updateTimelineRowTimes(event) {
+      var row = document.querySelector('#subtitle-tbody tr[data-index="' + event.index + '"]');
+      if (!row) return;
+      var cells = row.querySelectorAll('.col-time');
+      if (cells.length >= 2) {
+        cells[0].textContent = formatTime(event.start);
+        cells[1].textContent = formatTime(event.end);
+      }
+      var finalCell = row.querySelector('.col-final');
+      if (finalCell && !finalCell.classList.contains('editing')) {
+        var badge = finalCell.querySelector('.conflict-badge');
+        var keep = badge ? badge.outerHTML + ' ' : '';
+        var formatted = App.state.subtitleFinalFormat === 'ass' ? formatEventAsASS(event) : formatEventAsSRT(event);
+        finalCell.innerHTML = keep + App.ui.escapeHtml(formatted);
+      }
+    },
+
     initSubtitleBatchControls() {
       var select = document.getElementById('batch-speaker-select');
       var newInput = document.getElementById('batch-speaker-new');
@@ -349,6 +399,10 @@ const part = {
           var target = ev.target;
           if (target && target.closest && target.closest('.play-btn, input, button, select, textarea')) return;
           App.ui.handleSubtitleSelection(e.index, ev);
+          // 点击行 → 设为波形打轴的活动行（红/蓝标记线跟随此行）
+          if (window.WaveformUI && typeof WaveformUI.activeEventIndex === 'function' && WaveformUI.activeEventIndex() !== e.index) {
+            WaveformUI.setActiveEvent(e.index, {source: 'table-click'});
+          }
           App.ui.queueRowPlayback(e);
         });
 

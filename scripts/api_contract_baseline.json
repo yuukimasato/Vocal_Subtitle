@@ -1,0 +1,234 @@
+[
+  {
+    "method": "POST",
+    "path": "/asr/funasr/prepare"
+  },
+  {
+    "method": "GET",
+    "path": "/asr/funasr/status"
+  },
+  {
+    "method": "DELETE",
+    "path": "/cache"
+  },
+  {
+    "method": "PUT",
+    "path": "/cache/config"
+  },
+  {
+    "method": "GET",
+    "path": "/cache/info"
+  },
+  {
+    "method": "GET",
+    "path": "/device"
+  },
+  {
+    "method": "GET",
+    "path": "/feedback/conflicts/{profile_name}"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/conflicts/{profile_name}/resolve"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/d3-sample"
+  },
+  {
+    "method": "GET",
+    "path": "/feedback/fingerprints"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/fingerprints/match"
+  },
+  {
+    "method": "DELETE",
+    "path": "/feedback/fingerprints/{fp_id}"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/health/compute"
+  },
+  {
+    "method": "GET",
+    "path": "/feedback/health/{profile_name}"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/impact/preview"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/learn"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/preview"
+  },
+  {
+    "method": "DELETE",
+    "path": "/feedback/profile/{name}"
+  },
+  {
+    "method": "GET",
+    "path": "/feedback/profile/{name}"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/profile/{name}/rollback"
+  },
+  {
+    "method": "GET",
+    "path": "/feedback/profiles"
+  },
+  {
+    "method": "GET",
+    "path": "/feedback/review-queue"
+  },
+  {
+    "method": "GET",
+    "path": "/feedback/review/{sample_id}"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/review/{sample_id}"
+  },
+  {
+    "method": "GET",
+    "path": "/feedback/shadow/{profile_name}"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/shadow/{profile_name}/record"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/shadow/{profile_name}/toggle"
+  },
+  {
+    "method": "GET",
+    "path": "/health"
+  },
+  {
+    "method": "DELETE",
+    "path": "/history"
+  },
+  {
+    "method": "GET",
+    "path": "/history"
+  },
+  {
+    "method": "DELETE",
+    "path": "/history/{task_id}"
+  },
+  {
+    "method": "GET",
+    "path": "/history/{task_id}"
+  },
+  {
+    "method": "POST",
+    "path": "/llm/models"
+  },
+  {
+    "method": "GET",
+    "path": "/llm/providers"
+  },
+  {
+    "method": "POST",
+    "path": "/persistence/apply/{task_id}"
+  },
+  {
+    "method": "POST",
+    "path": "/persistence/cleanup"
+  },
+  {
+    "method": "DELETE",
+    "path": "/persistence/files/{task_id}"
+  },
+  {
+    "method": "GET",
+    "path": "/persistence/files/{task_id}"
+  },
+  {
+    "method": "GET",
+    "path": "/persistence/settings"
+  },
+  {
+    "method": "PUT",
+    "path": "/persistence/settings"
+  },
+  {
+    "method": "GET",
+    "path": "/persistence/stats"
+  },
+  {
+    "method": "GET",
+    "path": "/profiles"
+  },
+  {
+    "method": "GET",
+    "path": "/profiles/{name}"
+  },
+  {
+    "method": "GET",
+    "path": "/quality/report/{task_id}"
+  },
+  {
+    "method": "POST",
+    "path": "/run"
+  },
+  {
+    "method": "GET",
+    "path": "/speaker-embedding/license"
+  },
+  {
+    "method": "GET",
+    "path": "/speaker-models"
+  },
+  {
+    "method": "POST",
+    "path": "/speaker-models/{model_id}/download"
+  },
+  {
+    "method": "GET",
+    "path": "/speaker-models/{model_id}/status"
+  },
+  {
+    "method": "GET",
+    "path": "/subtitle/{task_id}"
+  },
+  {
+    "method": "PUT",
+    "path": "/subtitle/{task_id}/batch"
+  },
+  {
+    "method": "GET",
+    "path": "/subtitle/{task_id}/export"
+  },
+  {
+    "method": "PUT",
+    "path": "/subtitle/{task_id}/{index}"
+  },
+  {
+    "method": "GET",
+    "path": "/tasks"
+  },
+  {
+    "method": "GET",
+    "path": "/tasks/{task_id}"
+  },
+  {
+    "method": "GET",
+    "path": "/tasks/{task_id}/audio"
+  },
+  {
+    "method": "GET",
+    "path": "/tasks/{task_id}/audio/stream"
+  },
+  {
+    "method": "GET",
+    "path": "/tasks/{task_id}/subtitle-file"
+  }
+]

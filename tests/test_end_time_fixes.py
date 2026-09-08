@@ -8,6 +8,7 @@
 
 import numpy as np
 import pytest
+from pathlib import Path
 
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 
@@ -664,6 +665,36 @@ class TestPipelineArchitecture:
             "AcousticValidator must run AFTER LLM merge (B1 fix), "
             f"but merge={merge_call} > acoustic={acoustic_call}"
         )
+
+    def test_skeleton_constrained_events_skip_semantic_cross_bin_merge(self):
+        from vocal_subtitle.application.pipeline_result import PipelineStats
+        from vocal_subtitle.config import PipelineConfig
+        from vocal_subtitle.pipeline import Pipeline
+
+        config = PipelineConfig()
+        config.diarization.enabled = False
+        config.acoustic_validation.enabled = False
+        pipeline = Pipeline(config)
+        events = [
+            SubtitleEvent(index=1, start=0.0, end=0.2, text="one"),
+            SubtitleEvent(index=2, start=0.25, end=0.45, text="two"),
+        ]
+        pipeline._run_llm_merge = lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("semantic merge must not cross acoustic skeleton bins")
+        )
+        stats = PipelineStats(input_path="audio.wav", duration_seconds=1.0)
+
+        result = pipeline._post_process_events(
+            events,
+            Path("audio.wav"),
+            np.zeros(16000, dtype=np.float32),
+            16000,
+            stats,
+            ffmpeg_unified_result={"skeleton": [(0.0, 0.2), (0.25, 0.45)]},
+        )
+
+        assert len(result) == 2
+        assert stats.quality_diagnostics["semantic_merge"]["status"] == "skipped"
 
 
 # ===================================================================

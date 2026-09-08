@@ -9,6 +9,8 @@ import pytest
 from vocal_subtitle.diarization.speaker_clusterer import SpeakerDiarizer
 from vocal_subtitle.vad.base import SpeechSegment
 
+pytest.importorskip("sklearn")
+
 
 def _make_sine(duration: float, freq: float, sr: int = 16000) -> np.ndarray:
     """生成指定频率和时长的正弦波"""

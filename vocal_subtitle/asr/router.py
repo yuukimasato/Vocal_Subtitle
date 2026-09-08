@@ -9,7 +9,7 @@ import numpy as np
 from .base import LanguageDetection
 
 
-SUPPORTED_ENGINES = ("auto", "faster-whisper", "funasr", "whisper-cpp")
+SUPPORTED_ENGINES = ("auto", "faster-whisper", "funasr", "qwen", "whisper-cpp")
 
 
 @dataclass(frozen=True)

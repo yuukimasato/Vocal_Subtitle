@@ -12,6 +12,7 @@ from vocal_subtitle.acoustic_validator import (
     _is_time_in_speech,
     _rms_energy_check,
 )
+from vocal_subtitle.acoustic.skeleton import group_speech_intervals
 from vocal_subtitle.asr.base import WordTimestamp
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 
@@ -71,6 +72,21 @@ class TestHelperFunctions:
         is_in, nearest = _find_boundary_in_skeleton(5.0, [])
         assert is_in is False
         assert nearest == 5.0  # 返回原始时间
+
+    def test_group_speech_intervals_keeps_hard_silence(self):
+        grouped = group_speech_intervals(
+            [(1.0, 1.2), (1.45, 1.8), (2.25, 2.5)],
+        )
+
+        assert grouped == [(1.0, 1.8), (2.25, 2.5)]
+
+    def test_group_speech_intervals_sorts_and_ignores_empty_ranges(self):
+        grouped = group_speech_intervals(
+            [(2.0, 2.2), (0.0, 0.0), (1.0, 1.1)],
+            max_gap=0.1,
+        )
+
+        assert grouped == [(1.0, 1.1), (2.0, 2.2)]
 
     def test_is_time_in_speech(self, skeleton):
         assert _is_time_in_speech(2.0, skeleton) is True

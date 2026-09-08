@@ -3,6 +3,7 @@ import pytest
 from vocal_subtitle.webui.subtitle_editing import (
     SubtitleBatchEditError,
     apply_batch_edit,
+    apply_timing_edit,
 )
 
 
@@ -68,3 +69,52 @@ def test_merging_rejects_less_than_two_or_non_contiguous_selection(indexes):
 def test_empty_speaker_is_rejected():
     with pytest.raises(SubtitleBatchEditError):
         apply_batch_edit(_events(), action="speaker", indexes=[1], speaker_label="  ")
+
+
+# ---------------------------------------------------------------------------
+# 时间轴编辑（波形打轴）
+# ---------------------------------------------------------------------------
+
+
+def test_timing_edit_updates_start_and_end_and_marks_manual_source():
+    result = apply_timing_edit(_events(), 2, start=1.35, end=2.25)
+
+    assert result[1]["start"] == 1.35
+    assert result[1]["end"] == 2.25
+    assert result[1]["time_source"] == "manual_edit"
+    assert result[1]["text"] == "第二句"
+    # 输入列表保持不变（纯函数）
+    assert _events()[1]["start"] == 1.2
+
+
+def test_timing_edit_accepts_partial_updates():
+    result = apply_timing_edit(_events(), 1, end=1.5)
+
+    assert result[0]["start"] == 0.0
+    assert result[0]["end"] == 1.5
+
+
+def test_timing_edit_rejects_start_after_end():
+    with pytest.raises(SubtitleBatchEditError):
+        apply_timing_edit(_events(), 1, start=2.0, end=1.0)
+
+
+def test_timing_edit_rejects_negative_start():
+    with pytest.raises(SubtitleBatchEditError):
+        apply_timing_edit(_events(), 1, start=-0.1)
+
+
+def test_timing_edit_rejects_unknown_index():
+    with pytest.raises(SubtitleBatchEditError):
+        apply_timing_edit(_events(), 99, start=0.1, end=0.2)
+
+
+def test_timing_edit_keeps_physical_evidence_frozen():
+    events = _events()
+    events[0]["physical_start"] = 0.0
+    events[0]["physical_end"] = 1.0
+
+    result = apply_timing_edit(events, 1, start=0.2, end=0.9)
+
+    assert result[0]["physical_start"] == 0.0
+    assert result[0]["physical_end"] == 1.0

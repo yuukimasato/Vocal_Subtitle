@@ -215,11 +215,6 @@ def parse_subtitle(file_path: Path) -> List[TimelineEvent]:
             return parse_srt(file_path)
         except Exception:
             return parse_ass(file_path)
-    """秒数 → ASS 时间格式 (H:MM:SS.cs)"""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = seconds % 60
-    return f"{hours}:{minutes:02d}:{secs:05.2f}"
 
 
 def _ass_time_to_seconds(time_str: str) -> Optional[float]:

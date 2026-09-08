@@ -6,6 +6,8 @@ from vocal_subtitle.physical.ir import (
     adapt_diarization_result,
     adapt_transcription_segments,
 )
+from vocal_subtitle.physical.decision_ir import decisions_to_global_transcript
+from vocal_subtitle.asr.evidence import EvidenceDecision, EvidenceWord
 
 
 def test_transcription_adapter_creates_stable_absolute_word_ids():
@@ -49,3 +51,29 @@ def test_global_speaker_timeline_preserves_canonical_ids_and_derives_speaker_lis
     assert [turn.speaker_id for turn in timeline.turns] == [4, 2]
     assert GlobalSpeakerTimeline.from_dict(timeline.to_dict()).to_dict() == timeline.to_dict()
 
+
+def test_decision_projection_repairs_word_order_before_global_ir_validation():
+    decision = EvidenceDecision(
+        candidate_ids=("candidate-1",),
+        decision="keep",
+        final_text="hello world",
+        final_words=(
+            EvidenceWord("word-2", "world", 1.4, 1.8, 0.9),
+            EvidenceWord("word-1", "hello", 1.0, 1.3, 0.9),
+        ),
+        start=1.0,
+        end=1.8,
+        time_source="native_word_timestamp",
+        confidence=0.9,
+        risk_score=0.1,
+        risk_level="low",
+    )
+
+    transcript = decisions_to_global_transcript([decision], audio_duration=2.0)
+
+    assert [word.text for word in transcript.words] == ["hello", "world"]
+    assert transcript.segments[0].word_ids == [
+        "decision:000001:word:0000:word-1",
+        "decision:000001:word:0001:word-2",
+    ]
+    assert transcript.diagnostics["word_order_repaired_count"] == 1

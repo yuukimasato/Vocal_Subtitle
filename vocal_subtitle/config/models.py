@@ -178,10 +178,13 @@ class GlobalASRConfig:
     """全局转录配置 — 以完整音频为窗口进行 ASR"""
 
     enabled: bool = True
-    routing: str = "auto"  # auto | global | segmented
+    routing: str = "segmented"  # segmented | global (compatibility)
+    evidence_enabled: bool = True
     backend: str = "faster-whisper"
     left_context: float = 0.5
     right_context: float = 0.5
+    max_window_duration: float = 180.0
+    window_overlap: float = 0.5
     min_word_confidence: float = 0.0
     hallucination_filter: bool = True
     language_switch_threshold: float = 0.7
@@ -211,11 +214,26 @@ class ASRAutoRoutingConfig:
 
 
 @dataclass
+class ASREnginePairConfig:
+    """Primary/secondary engine pairing policy for offline review."""
+
+    enabled: bool = True
+    primary: str = "auto"
+    secondary: str = "auto"
+    policy: str = "risk_only"
+    same_family_policy: str = "reject"
+    fallback_secondary: bool = True
+    max_workers: int = 2
+    route_version: str = "asr-pair-v1"
+
+
+@dataclass
 class ASRConfig:
     """Stage 4: ASR 识别配置"""
 
-    engine: str = "auto"
+    engine: str = "auto"  # auto | faster-whisper | whisper-cpp | funasr | qwen
     model: str = "large-v3"
+    qwen_model_path: Optional[str] = None
     device: str = "auto"  # auto = 自动检测 GPU/CPU
     compute_type: str = "float16"
     language: Optional[str] = None
@@ -228,11 +246,55 @@ class ASRConfig:
     language_mode: str = "single"  # single | mixed | auto
     global_asr: "GlobalASRConfig" = field(default_factory=GlobalASRConfig)
     auto_routing: ASRAutoRoutingConfig = field(default_factory=ASRAutoRoutingConfig)
+    engine_pair: ASREnginePairConfig = field(default_factory=ASREnginePairConfig)
     # Hallucination filter thresholds
     no_speech_threshold: float = 0.6
     log_prob_threshold: float = -1.0
     compression_ratio_threshold: float = 2.4
     hallucination_filter_version: str = "v1"
+
+
+@dataclass
+class EvidenceReviewConfig:
+    """Phase 0-3 evidence review and conservative fallback policy."""
+
+    enabled: bool = True
+    shadow_mode: bool = True
+    authoritative_mode: bool = False
+    context_reasr_enabled: bool = False
+    qwen_enabled: bool = False
+    forced_aligner_enabled: bool = False
+    sed_enabled: bool = False
+    semantic_review_enabled: bool = False
+    unresolved_keeps_candidate: bool = True
+    require_multi_source_drop: bool = True
+    fallback_to_segmented: bool = True
+    local_recovery_enabled: bool = True
+    local_recovery_max_attempts: int = 3
+    local_recovery_min_confidence: float = 0.5
+    local_recovery_context_seconds: float = 0.5
+    local_recovery_request_tolerance: float = 0.15
+    qwen_model_path: Optional[str] = None
+    forced_aligner_model_path: Optional[str] = None
+    sed_model_path: Optional[str] = None
+    review_device: str = "auto"
+    allow_remote_model_download: bool = False
+    left_context: float = 0.8
+    right_context: float = 0.8
+    max_group_duration: float = 12.0
+    max_window_duration: float = 15.0
+    medium_threshold: float = 0.25
+    high_threshold: float = 0.50
+    critical_threshold: float = 0.75
+    max_workers: int = 2
+    window_timeout_seconds: Optional[float] = 60.0
+    review_policy_version: str = "review-policy-v1"
+    cover_policy: str = ""
+    engine_policy: str = ""
+    risk_policy_version: str = "risk-policy-v1"
+    decision_policy_version: str = "decision-policy-v1"
+    evidence_schema_version: str = "evidence-v1"
+    golden_quality_gate_version: str = "golden-quality-v1"
 
 
 @dataclass
@@ -407,6 +469,7 @@ class DegradationConfig:
     """
 
     mode: str = "full"                   # "full" | "degraded" | "minimal"
+    preflight_mode: str = "report"       # "report" | "enforce" — 预检失败时仅报告还是阻断
     per_module_timeout: float = 60.0     # 每个模块最大执行秒数
     ffmpeg_timeout: float = 30.0
     llm_api_timeout: float = 15.0
@@ -503,6 +566,7 @@ class PipelineConfig:
     merging: MergingConfig = field(default_factory=MergingConfig)
     diarization: DiarizationConfig = field(default_factory=DiarizationConfig)
     asr: ASRConfig = field(default_factory=ASRConfig)
+    evidence_review: EvidenceReviewConfig = field(default_factory=EvidenceReviewConfig)
     speaker_role: SpeakerRoleConfig = field(default_factory=SpeakerRoleConfig)
     speaker_embedding: SpeakerEmbeddingConfig = field(
         default_factory=SpeakerEmbeddingConfig
@@ -542,4 +606,3 @@ class PipelineConfig:
 # ---------------------------------------------------------------------------
 # 配置加载器
 # ---------------------------------------------------------------------------
-

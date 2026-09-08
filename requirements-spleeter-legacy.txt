@@ -1,0 +1,5 @@
+# Legacy Spleeter environment only. Do not install with requirements-all.txt.
+# Spleeter requires mutually incompatible numpy/librosa/httpx versions.
+numpy<1.20
+librosa<0.9
+spleeter>=2.3,<2.5

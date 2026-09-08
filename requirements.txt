@@ -1,10 +1,10 @@
 # ============================================================
-# Vocal Subtitle — 核心依赖（最小安装，CPU 可用）
+# Vocal Subtitle — 默认运行时依赖（CPU 可用）
 # ============================================================
 # 安装: pip install -r requirements.txt
 #
-# 这是最小功能集：CLI + WebRTC VAD + 规则字幕生成。
-# 完整功能需要安装对应的可选依赖。
+# 这是默认运行时集合：CLI + UVR 人声分离 + 规则字幕生成。
+# ASR、VAD 和其他扩展仍需安装对应的可选依赖或使用 install.sh。
 #
 # 可选扩展:
 #   pip install -e ".[faster-whisper]"       # ASR 语音识别 (faster-whisper)
@@ -12,10 +12,14 @@
 #   pip install -e ".[silero-vad]"           # Silero VAD (需 torch ~2GB)
 #   pip install -e ".[llm]"                  # LLM 字幕优化
 #   pip install -e ".[local-nlp]"            # 本地 NLP 语义合并 (CPU, ~120MB)
-#   pip install -e ".[uvr]"                  # UVR 高品质人声分离 (BS-RoFormer)
+#   pip install -e ".[uvr]"                  # UVR 高品质人声分离 (BS-RoFormer，已包含在本文件中)
 #   pip install -e ".[webui]"                # Web 图形界面
 #   pip install -e ".[diarization]"          # 说话人分离
 #   pip install -e ".[speaker-embedding]"    # 说话人嵌入 (SpeechBrain)
+#   pip install -e ".[review-models]"        # Qwen/SED 模型下载与运行时基础依赖
+#   pip install -e ".[qwen-runtime]"         # Qwen3-ASR runtime (Transformers 4.57.6)
+#   pip install -e ".[whisperx]"             # WhisperX 词级时间戳增强 (强制音素对齐)
+#   pip install -e ".[deepfilternet]"        # DeepFilterNet 语音增强 (降噪预处理)
 #
 # 一键部署:
 #   bash install.sh                          # 交互式安装 (自动检测 GPU)
@@ -26,7 +30,7 @@
 #
 # 说明:
 #   - torch / torchaudio 已从核心依赖中移除，改为 [silero-vad] 可选附加
-#   - 不加任何可选附加时仅含 webrtcvad，纯 CPU 可运行
+#   - UVR 是当前默认配置的分离引擎，因此作为默认运行时依赖安装
 #   - faster-whisper 是 ASR 引擎，分开发布以避免强制安装 torch
 # ============================================================
 
@@ -70,8 +74,9 @@ diskcache>=5.6
 # ---- 可选：本地语义合并 (取消注释以安装, CPU 推理 ~120MB) ----
 # sentence-transformers>=3.0
 
-# ---- 可选：UVR 高品质人声分离 (BS-RoFormer, 默认推荐) ----
-# audio-separator>=0.18
+# ---- 默认：UVR 高品质人声分离 (BS-RoFormer) ----
+audio-separator>=0.30.2,<0.31
+onnxruntime>=1.17
 
 # ---- 可选：Open-Unmix 分离引擎 ----
 # openunmix
@@ -106,6 +111,13 @@ diskcache>=5.6
 # python-multipart>=0.0.9
 # cryptography>=41.0
 # websockets>=12.0
+# pydantic>=2.0
+
+# ---- 可选：WhisperX 引擎 (词级时间戳增强) ----
+# whisperx>=3.0
+
+# ---- 可选：DeepFilterNet 语音增强 (降噪预处理) ----
+# deepfilternet>=0.5
 
 # ---- 可选：开发测试 ----
 # pytest>=7.0

@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from ..asr.base import ASRInvalidResultError
 from ..asr.contracts import ASRRuntimePorts, SegmentedASRRequest
 from ..asr.segmented_path import SegmentedASRService
+from ..acoustic.skeleton import group_speech_intervals
 from ..mapping.time_mapper import SubtitleEvent
 from ..pipeline_context import NoiseProfile, PipelineContext
 from ..utils.audio_utils import AudioUtils
 
 logger = logging.getLogger(__name__)
+ASR_CONTEXT_PADDING_SECONDS = 0.25
 
 
 class PipelineChunkMixin:
@@ -97,8 +99,8 @@ class PipelineChunkMixin:
                 "llm_optimize": False,
             }
 
-        # mode == "full": 全部按配置启用
-        return {
+        # mode == "full": 全部按配置启用，并叠加实验注册表中已启用的实验
+        active = {
             "macro_chunk": self.config.macro_chunking.enabled,
             "ffmpeg_vad": self.config.vad.ffmpeg_enabled,
             "fusion": self.config.fusion.enabled,
@@ -111,6 +113,51 @@ class PipelineChunkMixin:
             "speaker_role": self.config.speaker_role.enabled,
             "llm_optimize": self.config.llm_optimize.enabled,
         }
+
+        # ---- 查询实验注册表：已启用的实验自动激活对应配置 ----
+        self._apply_enabled_experiments(active)
+
+        return active
+
+    @staticmethod
+    def _apply_enabled_experiments(active: Dict[str, bool]) -> None:
+        """查询 ExperimentRegistry，将已启用的实验映射到配置开关。
+
+        每个 status=enabled 的实验对应一组配置覆盖。
+        此方法在 full 降级模式之外独立存在，允许 degraded/minimal
+        模式也受益于实验注册。
+        """
+        try:
+            from ..governance.experiment_registry import ExperimentRegistry, ExperimentStatus
+
+            registry = ExperimentRegistry()
+            enabled_exps = registry.list_by_status(ExperimentStatus.ENABLED.value)
+
+            for exp in enabled_exps:
+                exp_id = exp.experiment_id
+                logger.debug("Applying enabled experiment: %s (%s)", exp_id, exp.name)
+
+                if exp_id == "exp-20260802-qwen-review":
+                    # Qwen3-ASR 复核引擎
+                    if hasattr(active, "__setitem__"):
+                        pass  # active is dict, no extra module flags needed
+                    logger.info("Experiment %s active: Qwen review enabled", exp_id)
+                elif exp_id == "exp-20260802-forced-aligner":
+                    logger.info("Experiment %s active: ForcedAligner enabled", exp_id)
+                elif exp_id == "exp-20260802-sed-non-speech":
+                    logger.info("Experiment %s active: SED non-speech detection enabled", exp_id)
+                elif exp_id == "exp-20260802-vad-fusion":
+                    if "fusion" in active:
+                        active["fusion"] = True
+                    logger.info("Experiment %s active: VAD fusion enabled", exp_id)
+                elif exp_id == "exp-20260802-llm-optimize":
+                    if "llm_optimize" in active:
+                        active["llm_optimize"] = True
+                    logger.info("Experiment %s active: LLM optimize enabled", exp_id)
+                elif exp_id == "exp-20260802-noise-reduction":
+                    logger.info("Experiment %s active: Noise reduction enabled", exp_id)
+        except Exception:
+            pass  # 非致命操作
 
     def _process_chunk_pipeline(
         self,
@@ -423,6 +470,16 @@ class PipelineChunkMixin:
         )
         self._progress.finish_stage()
 
+        from ..asr.trace_contract import attach_event_trace
+        source_id = "chunk" if not chunk_label else f"chunk:{chunk_label}"
+        for event_index, event in enumerate(events, start=1):
+            attach_event_trace(
+                event,
+                source_id=source_id,
+                offset_id=f"chunk-offset:{event_index:06d}",
+                window_id=f"chunk-window:{chunk_label or 'single'}",
+            )
+
         return events, len(merged_segments), ctx
 
     # ------------------------------------------------------------------
@@ -500,6 +557,16 @@ class PipelineChunkMixin:
         self._progress.finish_stage()
 
         total_duration = len(audio) / sample_rate
+        if getattr(self, "_global_review_timeline", None) is None:
+            review_context = PipelineContext(
+                audio_path=vocals_path,
+                audio=audio,
+                sample_rate=sample_rate,
+            )
+            review_context.ffmpeg_unified_result = ffmpeg_result
+            self._global_review_timeline = self._build_review_timeline_from_context(
+                review_context, total_duration
+            )
         logger.info(
             "Skeleton segmentation: %d speech segments from %.1fs audio "
             "(noise=%.0fdB, min_silence=%.2fs, min_speech=%.2fs)",
@@ -529,7 +596,18 @@ class PipelineChunkMixin:
             )
         speech_skeleton = filtered_skeleton
 
-        # Step 2: 逐段独立处理
+        # Preserve the original physical skeleton, but provide enough context
+        # for ASR when ordinary pauses split one short utterance into tiny
+        # windows. Hard silence remains a strict ASR-window boundary.
+        asr_skeleton = group_speech_intervals(speech_skeleton)
+        if len(asr_skeleton) != len(speech_skeleton):
+            logger.info(
+                "Grouped %d physical skeleton segments into %d ASR windows",
+                len(speech_skeleton), len(asr_skeleton),
+            )
+
+        # Step 2: 先用带上下文的 ASR 窗口处理；若一个聚合窗口失败，
+        # 只回退该窗口包含的原始物理段，避免扩大失败范围或跨硬静音重试。
         all_events: List[Any] = []
         total_seg_count = 0
 
@@ -538,84 +616,165 @@ class PipelineChunkMixin:
         speaker_offset = 0
         empty_asr_segments = 0
         first_empty_asr_error: Optional[Exception] = None
+        grouped_window_fallbacks = 0
 
-        total_segments = len(speech_skeleton)
-        for idx, (seg_start, seg_end) in enumerate(speech_skeleton):
-            seg_duration = seg_end - seg_start
-            start_sample = int(seg_start * sample_rate)
-            end_sample = int(seg_end * sample_rate)
-            start_sample = max(0, start_sample)
-            end_sample = min(len(audio), end_sample)
+        total_segments = len(asr_skeleton)
+        for idx, (window_start, window_end) in enumerate(asr_skeleton):
+            window_members = [
+                item for item in speech_skeleton
+                if item[0] >= window_start - 1e-9
+                and item[1] <= window_end + 1e-9
+            ]
+            # Give grouped windows limited context to compensate for
+            # silencedetect clipping low-energy word edges. Single physical
+            # windows retain their exact bounds, preserving the legacy timing
+            # contract. Use the midpoint of a hard-silence gap as the limit
+            # between neighboring grouped windows.
+            input_start = window_start
+            input_end = window_end
+            if len(window_members) > 1:
+                input_start = max(
+                    0.0,
+                    window_start - ASR_CONTEXT_PADDING_SECONDS,
+                )
+                input_end = min(
+                    total_duration,
+                    window_end + ASR_CONTEXT_PADDING_SECONDS,
+                )
+                if idx > 0:
+                    previous_end = asr_skeleton[idx - 1][1]
+                    input_start = max(
+                        input_start,
+                        (previous_end + window_start) / 2.0,
+                    )
+                if idx + 1 < total_segments:
+                    next_start = asr_skeleton[idx + 1][0]
+                    input_end = min(
+                        input_end,
+                        (window_end + next_start) / 2.0,
+                    )
 
-            if end_sample <= start_sample:
-                continue
-
-            seg_audio = audio[start_sample:end_sample].copy()
-
-            # 创建临时 WAV 文件供 ffmpeg 子进程调用
-            with tempfile.NamedTemporaryFile(
-                suffix=".wav", delete=False,
-            ) as tmp_f:
-                tmp_path = Path(tmp_f.name)
-
-            try:
-                AudioUtils.save_audio(seg_audio, tmp_path, sample_rate)
-
-                chunk_label = f"Seg {idx+1}/{total_segments}"
-                logger.info(
-                    "Processing skeleton segment %d/%d: %.2fs → %.2fs (%.2fs)",
-                    idx + 1, total_segments, seg_start, seg_end, seg_duration,
+            attempts = [(input_start, input_end, f"skeleton:{idx}")]
+            if len(window_members) > 1:
+                attempts.extend(
+                    (
+                        member_start,
+                        member_end,
+                        f"skeleton:{idx}:fallback:{member_idx}",
+                    )
+                    for member_idx, (member_start, member_end)
+                    in enumerate(window_members)
                 )
 
-                try:
-                    seg_events, seg_count, _seg_ctx = self._process_chunk_pipeline(
-                        audio=seg_audio,
-                        sample_rate=sample_rate,
-                        vocals_path=tmp_path,
-                        chunk_label=chunk_label,
-                        parallel_vad=False,  # 骨架分段嵌套线程，避免 PyTorch 死锁
-                    )
-                except ASRInvalidResultError as exc:
-                    # A physical skeleton can contain a very short/noisy burst
-                    # that VAD keeps but ASR cannot transcribe. Skip only this
-                    # independent segment and continue with the rest.
-                    empty_asr_segments += 1
-                    if first_empty_asr_error is None:
-                        first_empty_asr_error = exc
-                    logger.warning(
-                        "%sASR produced no usable subtitles; skipping skeleton segment: %s",
-                        chunk_label,
-                        exc,
-                    )
+            window_succeeded = False
+            for attempt_index, (seg_start, seg_end, event_source) in enumerate(attempts):
+                seg_duration = seg_end - seg_start
+                start_sample = max(0, int(seg_start * sample_rate))
+                end_sample = min(len(audio), int(seg_end * sample_rate))
+
+                if end_sample <= start_sample:
                     continue
-            finally:
-                tmp_path.unlink(missing_ok=True)
 
-            # ★ 跨段 speaker_id 偏移（同多块路径）
-            seg_speakers = set()
-            for evt in seg_events:
-                if evt.speaker_id is not None:
-                    seg_speakers.add(evt.speaker_id)
-            if seg_speakers:
-                max_spk = max(seg_speakers)
-                if speaker_offset > 0:
-                    for evt in seg_events:
-                        if evt.speaker_id is not None:
-                            evt.speaker_id += speaker_offset
-                speaker_offset += max_spk + 1
+                seg_audio = audio[start_sample:end_sample].copy()
 
-            # 偏移到全局时间轴
-            for evt in seg_events:
-                evt.start += seg_start
-                evt.end += seg_start
+                # 创建临时 WAV 文件供 ffmpeg 子进程调用
+                with tempfile.NamedTemporaryFile(
+                    suffix=".wav", delete=False,
+                ) as tmp_f:
+                    tmp_path = Path(tmp_f.name)
 
-            total_seg_count += seg_count
-            all_events.extend(seg_events)
+                try:
+                    AudioUtils.save_audio(seg_audio, tmp_path, sample_rate)
 
-        if speech_skeleton and not all_events and first_empty_asr_error is not None:
+                    if attempt_index == 0:
+                        chunk_label = f"Seg {idx+1}/{total_segments}"
+                    else:
+                        chunk_label = (
+                            f"Seg {idx+1}/{total_segments} fallback "
+                            f"{attempt_index}/{len(attempts) - 1}"
+                        )
+                    logger.info(
+                        "Processing skeleton segment %d/%d: %.2fs → %.2fs (%.2fs)%s",
+                        idx + 1, total_segments, seg_start, seg_end,
+                        seg_duration,
+                        " [physical fallback]" if attempt_index else "",
+                    )
+
+                    try:
+                        seg_events, seg_count, _seg_ctx = self._process_chunk_pipeline(
+                            audio=seg_audio,
+                            sample_rate=sample_rate,
+                            vocals_path=tmp_path,
+                            chunk_label=chunk_label,
+                            parallel_vad=False,  # 骨架分段嵌套线程，避免 PyTorch 死锁
+                        )
+                    except ASRInvalidResultError as exc:
+                        empty_asr_segments += 1
+                        if first_empty_asr_error is None:
+                            first_empty_asr_error = exc
+                        logger.warning(
+                            "%sASR produced no usable subtitles; trying next bounded window: %s",
+                            chunk_label,
+                            exc,
+                        )
+                        continue
+                finally:
+                    tmp_path.unlink(missing_ok=True)
+
+                window_succeeded = True
+                if attempt_index > 0:
+                    grouped_window_fallbacks += 1
+
+                # ★ 跨段 speaker_id 偏移（同多块路径）
+                seg_speakers = set()
+                for evt in seg_events:
+                    if evt.speaker_id is not None:
+                        seg_speakers.add(evt.speaker_id)
+                if seg_speakers:
+                    max_spk = max(seg_speakers)
+                    if speaker_offset > 0:
+                        for evt in seg_events:
+                            if evt.speaker_id is not None:
+                                evt.speaker_id += speaker_offset
+                    speaker_offset += max_spk + 1
+
+                # 偏移到全局时间轴；物理范围和来源追踪必须同步偏移。
+                from ..mapping.time_mapper import offset_subtitle_event
+                for evt in seg_events:
+                    offset_subtitle_event(
+                        evt,
+                        seg_start,
+                        source=event_source,
+                    )
+                    from ..asr.trace_contract import attach_event_trace
+                    attach_event_trace(
+                        evt,
+                        source_id="skeleton",
+                        offset_id=event_source,
+                        window_id=f"skeleton-window:{idx:06d}",
+                    )
+
+                total_seg_count += seg_count
+                all_events.extend(seg_events)
+
+                # 聚合成功后不再执行其成员段；聚合失败时必须继续遍历
+                # 所有物理成员，避免第一个成员成功掩盖后续成员漏检。
+                if attempt_index == 0:
+                    break
+
+            if not window_succeeded:
+                logger.warning(
+                    "Skeleton ASR window %d/%d failed for all %d bounded attempts",
+                    idx + 1,
+                    total_segments,
+                    len(attempts),
+                )
+
+        if asr_skeleton and not all_events and first_empty_asr_error is not None:
             raise ASRInvalidResultError(
                 "ASR returned no usable subtitles for any of "
-                f"{len(speech_skeleton)} skeleton speech segments "
+                f"{len(asr_skeleton)} skeleton speech segments "
+                "(ASR windows) "
                 f"({empty_asr_segments} segment failures)"
             ) from first_empty_asr_error
 
@@ -627,8 +786,10 @@ class PipelineChunkMixin:
             evt.index = i + 1
 
         logger.info(
-            "Skeleton segmented: %d segments → %d events (%d VAD sub-segments)",
-            len(speech_skeleton), len(all_events), total_seg_count,
+            "Skeleton segmented: %d ASR windows (%d physical fallbacks) → "
+            "%d events (%d VAD sub-segments)",
+            len(asr_skeleton), grouped_window_fallbacks,
+            len(all_events), total_seg_count,
         )
 
         return all_events, total_seg_count, ffmpeg_result

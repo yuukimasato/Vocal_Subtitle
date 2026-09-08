@@ -26,6 +26,7 @@ class FinalizeConfig:
     llm_post_enabled: bool = False
     display: DisplayTimelineConfig = field(default_factory=DisplayTimelineConfig)
     validate: bool = True
+    min_duration: float = 0.8
     max_duration: float = 5.0
     max_chars_cjk: int = 20
     max_chars_latin: int = 42
@@ -98,20 +99,51 @@ def finalize_subtitle_events(
     # Step 1: 验证输入事件
     valid_events = _validate_input_events(detached_events, diagnostics)
 
-    # Split logical cues before display mapping so the preview, API payload,
-    # statistics, and exported files all observe the same cue boundaries.
+    # Restore readable word-level granularity before display mapping. This is
+    # the deterministic boundary stage; the builder below remains the final
+    # fallback for events without usable word timings.
+    from .strict_segmenter import StrictSegmentationConfig, segment_events
+    strict_result = segment_events(
+        valid_events,
+        config=StrictSegmentationConfig(
+            enabled=cfg.strict_segmentation_enabled,
+            max_duration=cfg.max_duration,
+            max_chars_cjk=cfg.max_chars_cjk,
+            max_chars_latin=cfg.max_chars_latin,
+            max_lines=cfg.max_lines,
+        ),
+        audio_duration=audio_duration,
+    )
+    valid_events = strict_result.events
+    diagnostics["strict_segmentation"] = strict_result.diagnostics
+    diagnostics["step"].append("strict_segmentation")
+
+    # Merge word-level fragments back to sentence-level subtitles after
+    # strict segmentation. The splitter's _split_long_events does NOT
+    # merge short events — it only splits over-long ones — so this step
+    # is essential to restore readable sentence-level granularity.
     from .subtitle_builder import SubtitleBuilder, SubtitleRule
 
-    splitter = SubtitleBuilder(
+    builder = SubtitleBuilder(
         rule=SubtitleRule(
+            min_duration=cfg.min_duration,
             max_duration=cfg.max_duration,
             max_chars_cjk=cfg.max_chars_cjk,
             max_chars_latin=cfg.max_chars_latin,
             max_lines=cfg.max_lines,
         )
     )
+    before_merge = len(valid_events)
+    valid_events = builder._merge_short_events(valid_events)
+    diagnostics["merge_short_event_count"] = max(
+        0, before_merge - len(valid_events)
+    )
+    diagnostics["step"].append("merge_short_events")
+
+    # Split logical cues before display mapping so the preview, API payload,
+    # statistics, and exported files all observe the same cue boundaries.
     before_split = len(valid_events)
-    valid_events = splitter._split_long_events(valid_events)
+    valid_events = builder._split_long_events(valid_events)
     diagnostics["split_long_event_count"] = max(0, len(valid_events) - before_split)
     diagnostics["step"].append("split_long_events")
 
@@ -146,6 +178,20 @@ def finalize_subtitle_events(
     for new_index, event in enumerate(valid_events, start=1):
         event.index = new_index
     diagnostics["output_event_count"] = len(valid_events)
+    boundary_trace = [
+        trace
+        for event in valid_events
+        for trace in (getattr(event, "revision_trace", ()) or ())
+        if isinstance(trace, dict)
+        and (
+            trace.get("op") in {"merge", "split"}
+            or trace.get("stage") in {"acoustic_micro_gap_merge", "boundary_arbitration"}
+        )
+    ]
+    diagnostics["boundary_trace"] = boundary_trace
+    diagnostics["revision_trace_count"] = sum(
+        len(getattr(event, "revision_trace", ()) or ()) for event in valid_events
+    )
 
     return FinalizeResult(
         events=list(valid_events),
@@ -204,6 +250,7 @@ def _events_to_semantic_groups(
             "overlap_group_id": getattr(event, "overlap_group_id", None),
             "hard_split_before": bool(getattr(event, "hard_split_before", False)),
             "hard_split_after": False,
+            "trace_context": dict(getattr(event, "trace_context", {}) or {}),
         })
     return groups
 

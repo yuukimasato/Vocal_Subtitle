@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from ..asr.base import TranscriptionSegment
+    from ..mapping.time_mapper import SubtitleEvent
+    from ..vad.base import SpeechSegment
 
 logger = logging.getLogger(__name__)
 
@@ -416,8 +422,6 @@ class PipelineDiarizationMixin:
         从已聚类的 SubtitleEvent 按 speaker_id 聚合文本，
         调用 LLM 推断角色名称并更新 speaker_label。
         """
-        from collections import defaultdict
-
         try:
             from ..diarization.role_labeler import RoleLabeler
         except ImportError as e:

@@ -5,9 +5,37 @@
 
 from .subtitle_builder import SubtitleBuilder, SubtitleRule
 from .time_mapper import TimeMapper
+from .strict_segmenter import StrictSegmentationConfig, SegmentationResult, segment_events
+from .boundary_projection import BoundaryCandidate, ProjectedBoundary, ProjectionResult, project_boundaries, project_with_repair
+from .finalize import FinalizeConfig, FinalizeResult, finalize_subtitle_events
+from .quality_report import DimensionScore, QualityReport, build_quality_report
+from .event_ops import clone_event, merge_event_group, shift_event
+from .overlap_export import OverlapExportConfig, OverlapGroup, OverlapTrack
+from .end_time_validator import EndTimePostValidator
 
 __all__ = [
     "TimeMapper",
     "SubtitleBuilder",
     "SubtitleRule",
+    "StrictSegmentationConfig",
+    "SegmentationResult",
+    "segment_events",
+    "BoundaryCandidate",
+    "ProjectedBoundary",
+    "ProjectionResult",
+    "project_boundaries",
+    "project_with_repair",
+    "FinalizeConfig",
+    "FinalizeResult",
+    "finalize_subtitle_events",
+    "DimensionScore",
+    "QualityReport",
+    "build_quality_report",
+    "clone_event",
+    "merge_event_group",
+    "shift_event",
+    "OverlapExportConfig",
+    "OverlapGroup",
+    "OverlapTrack",
+    "EndTimePostValidator",
 ]

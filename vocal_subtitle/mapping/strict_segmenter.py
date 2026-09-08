@@ -472,6 +472,49 @@ def _make_piece(
     )
     piece.physical_region_id = getattr(source, "physical_region_id", None)
     piece.source_word_ids = source_word_ids
+    # A split event owns only the physical evidence intersecting its words.
+    # Copying the source envelope unchanged makes sibling pieces overlap in
+    # the display timeline and causes the first piece to be trimmed away.
+    source_spans = list(getattr(source, "physical_spans", []) or [])
+    clipped_spans = []
+    for span in source_spans:
+        if not isinstance(span, dict):
+            continue
+        span_start = float(span.get("start", piece.start))
+        span_end = float(span.get("end", piece.end))
+        clipped_start = max(piece.start, span_start)
+        clipped_end = min(piece.end, span_end)
+        if clipped_end > clipped_start:
+            clipped = dict(span)
+            clipped["start"] = clipped_start
+            clipped["end"] = clipped_end
+            clipped_spans.append(clipped)
+    piece.physical_spans = clipped_spans
+    if clipped_spans:
+        piece.physical_start = min(float(item["start"]) for item in clipped_spans)
+        piece.physical_end = max(float(item["end"]) for item in clipped_spans)
+    else:
+        source_start = getattr(source, "physical_start", None)
+        source_end = getattr(source, "physical_end", None)
+        piece.physical_start = max(piece.start, float(source_start)) if source_start is not None else piece.start
+        piece.physical_end = min(piece.end, float(source_end)) if source_end is not None else piece.end
+    piece.revision_trace = [
+        *list(getattr(source, "revision_trace", []) or []),
+        {
+            "stage": "strict_segmentation",
+            "piece_index": piece_index,
+            "source_word_ids": list(source_word_ids),
+        },
+    ]
+    piece.trace_context = {
+        **dict(getattr(source, "trace_context", {}) or {}),
+        "candidate_id": (
+            f"{getattr(source, 'trace_context', {}).get('source_id', 'event')}:piece:{piece_index:06d}"
+            if isinstance(getattr(source, "trace_context", {}), dict)
+            else f"event:piece:{piece_index:06d}"
+        ),
+        "final_event_ids": [],
+    }
     return piece
 
 
@@ -695,6 +738,11 @@ def _physical_owner_compatible(
     right_region = getattr(right, "physical_region_id", None)
     if left_region is not None or right_region is not None:
         if left_region != right_region:
+            return False
+    left_bin = getattr(left, "physical_bin_id", None)
+    right_bin = getattr(right, "physical_bin_id", None)
+    if left_bin is not None or right_bin is not None:
+        if left_bin != right_bin:
             return False
     left_spans = list(getattr(left, "physical_spans", []) or [])
     right_spans = list(getattr(right, "physical_spans", []) or [])

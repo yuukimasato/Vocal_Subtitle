@@ -38,6 +38,8 @@ from .coverage import (
     audit_physical_coverage,
 )
 from .events import GlobalSubtitleEvent, build_events
+from .decision_projection import DecisionEventProjector, DecisionProjectionError
+from .decision_ir import decisions_to_global_transcript
 from .subtitle_bins import (
     PhysicalSubtitleBin,
     assign_word_to_bin,
@@ -87,6 +89,9 @@ __all__ = [
     "audit_physical_coverage",
     "GlobalSubtitleEvent",
     "build_events",
+    "DecisionEventProjector",
+    "DecisionProjectionError",
+    "decisions_to_global_transcript",
     "PhysicalSubtitleBin",
     "assign_word_to_bin",
     "build_physical_subtitle_bins",

@@ -11,6 +11,7 @@ from vocal_subtitle.mapping.finalize import (
     _events_to_semantic_groups,
 )
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
+from vocal_subtitle.asr.base import WordTimestamp
 
 
 def _make_event(index, start, end, text, **kwargs):
@@ -163,3 +164,60 @@ def test_finalize_splits_event_longer_than_max_duration():
     assert all(item.end - item.start <= 5.0 for item in result.events)
     assert result.subtitle_count == len(result.display_cues)
     assert result.diagnostics["split_long_event_count"] >= 1
+
+
+def test_finalize_restores_sentence_granularity_at_word_boundaries():
+    event = _make_event(
+        1,
+        0.0,
+        2.0,
+        "Hello world. Next",
+        words=[
+            WordTimestamp("Hello", 0.1, 0.4),
+            WordTimestamp("world.", 0.5, 0.9),
+            WordTimestamp("Next", 1.4, 1.8),
+        ],
+        physical_start=0.1,
+        physical_end=1.8,
+        source_word_ids=["w1", "w2", "w3"],
+    )
+
+    result = finalize_subtitle_events([event])
+
+    assert [item.text for item in result.events] == ["Hello world.", "Next"]
+    assert [item.source_word_ids for item in result.events] == [["w1", "w2"], ["w3"]]
+    assert result.diagnostics["strict_segmentation"]["sentence_split_count"] >= 1
+
+
+def test_finalize_does_not_merge_short_events_across_physical_bins():
+    events = [
+        _make_event(
+            1,
+            0.0,
+            0.6,
+            "第一句",
+            physical_start=0.0,
+            physical_end=0.6,
+            physical_bin_id="bin-a",
+            physical_bin_start=0.0,
+            physical_bin_end=0.6,
+            physical_spans=[{"physical_clip_id": "clip-a", "start": 0.0, "end": 0.6}],
+        ),
+        _make_event(
+            2,
+            0.6,
+            1.0,
+            "第二句",
+            physical_start=0.6,
+            physical_end=1.0,
+            physical_bin_id="bin-b",
+            physical_bin_start=0.6,
+            physical_bin_end=1.0,
+            physical_spans=[{"physical_clip_id": "clip-a", "start": 0.6, "end": 1.0}],
+        ),
+    ]
+
+    result = finalize_subtitle_events(events)
+
+    assert [item.text for item in result.events] == ["第一句", "第二句"]
+    assert [item.physical_bin_id for item in result.events] == ["bin-a", "bin-b"]

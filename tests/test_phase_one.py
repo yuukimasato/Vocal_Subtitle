@@ -90,6 +90,15 @@ def test_pipeline_records_filter_diagnostics():
     assert stats.to_dict()["hallucination_dropped_count"] == 1
 
 
+def test_filter_collapses_fun_asr_unbounded_cjk_repetition():
+    segments, dropped = Pipeline._filter_asr_results([
+        TranscriptionSegment("我 我 我 我 我 我", 0.0, 1.0),
+    ])
+
+    assert dropped == 0
+    assert [segment.text for segment in segments] == ["我"]
+
+
 def test_cached_and_fresh_asr_results_share_filter(monkeypatch):
     config = PipelineConfig()
     config.cache.enabled = True

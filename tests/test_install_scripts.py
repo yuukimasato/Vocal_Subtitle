@@ -55,6 +55,23 @@ def test_install_script_is_noninteractive_for_help() -> None:
     assert "--no-torch" in result.stdout
 
 
+def test_default_install_includes_uvr_runtime() -> None:
+    script = (ROOT / "install.sh").read_text(encoding="utf-8")
+
+    assert 'local extras="faster-whisper,funasr,uvr"' in script
+    assert 'EXTRAS="faster-whisper,funasr,uvr"' in script
+    assert 'import audio_separator' in script
+    assert '缺少默认 UVR 分离引擎' in script
+
+
+def test_requirements_include_default_uvr_runtime() -> None:
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+    assert "audio-separator>=0.30.2,<0.31" in requirements
+    assert "# audio-separator>=0.30.2,<0.31" not in requirements
+    assert "onnxruntime>=1.17" in requirements
+
+
 def test_runtime_metadata_schema_is_json_compatible(tmp_path: Path) -> None:
     metadata = {
         "runtime": "whisperx",

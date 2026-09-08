@@ -17,6 +17,19 @@ logger = logging.getLogger(__name__)
 
 
 class PipelinePhysicalPathMixin:
+    @staticmethod
+    def _build_review_timeline_from_context(context, duration: float):
+        """Build the evidence timeline for a segmented review pass."""
+        if context is None:
+            return None
+        try:
+            from ..physical.shadow import build_shadow_artifacts
+
+            return build_shadow_artifacts([context], duration).physical_timeline
+        except Exception as exc:
+            logger.warning("Could not build segmented review timeline: %s", exc)
+            return None
+
     def _run_early_detection(
         self,
         audio: np.ndarray,
@@ -231,13 +244,20 @@ class PipelinePhysicalPathMixin:
                 result.append(event)
                 continue
 
-            # Split at speaker boundary
+            # Split at speaker boundaries.
             split_points = sorted(set(
                 [event.start]
                 + [t.start for t in turns if event.start < t.start < event.end]
                 + [t.end for t in turns if event.start < t.end < event.end]
                 + [event.end]
             ))
+
+            def word_midpoint(word):
+                return event.start + (
+                    float(getattr(word, "start", 0.0))
+                    + float(getattr(word, "end", 0.0))
+                ) / 2.0
+
             piece_index = 0
             for b_start, b_end in zip(split_points, split_points[1:]):
                 if b_end <= b_start:
@@ -250,8 +270,8 @@ class PipelinePhysicalPathMixin:
                 # Find words whose midpoint falls in this sub-segment
                 piece_words = [
                     w for w in words
-                    if (event.start + float(getattr(w, "start", 0.0)) + event.start + float(getattr(w, "end", 0.0))) / 2.0 < b_end
-                    and (event.start + float(getattr(w, "start", 0.0)) + event.start + float(getattr(w, "end", 0.0))) / 2.0 > b_start
+                    if word_midpoint(w) < b_end
+                    and word_midpoint(w) > b_start
                 ]
                 if not piece_words:
                     continue
@@ -295,4 +315,3 @@ class PipelinePhysicalPathMixin:
                 stats.mixed_event_count += 1
 
         return result
-

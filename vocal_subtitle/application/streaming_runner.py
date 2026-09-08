@@ -14,6 +14,7 @@ from ..application.pipeline_result import PipelineStats
 from ..mapping.time_mapper import SubtitleEvent
 from ..pipeline_context import ASRFragment
 from ..utils.audio_utils import AudioUtils
+from ..utils.progress import ProgressManager
 
 logger = logging.getLogger(__name__)
 

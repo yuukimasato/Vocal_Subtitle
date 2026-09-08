@@ -29,6 +29,48 @@ def test_global_asr_service_uses_explicit_runner_port():
     assert isinstance(result, GlobalASRResult)
     assert result.events == ["event"]
     assert result.diagnostics == {"source": "fake"}
+    assert result.evidence == []
+
+
+def test_global_asr_service_prefers_transcript_ir_for_evidence():
+    transcript = SimpleNamespace(
+        backend="global-test",
+        status="degraded",
+        words=[SimpleNamespace(
+            id="w1",
+            text="hello",
+            raw_start=1.0,
+            raw_end=1.4,
+            confidence=None,
+            source_window_id="window-1",
+            metadata={"time_source": "segment_boundary"},
+        )],
+        segments=[SimpleNamespace(
+            id="s1",
+            text="hello",
+            raw_start=1.0,
+            raw_end=1.4,
+            word_ids=["w1"],
+            avg_logprob=None,
+            language="en",
+            metadata={},
+        )],
+    )
+    request = GlobalASRRequest(audio=[], sample_rate=16000, shadow=None, stats=None)
+    ports = ASRRuntimePorts(
+        config=None,
+        get_engine=lambda: None,
+        get_engine_for=lambda *args, **kwargs: None,
+        get_language=lambda: None,
+        set_language=lambda value: None,
+        quality_gate_kwargs=lambda: {},
+        global_runner=lambda item: (["legacy-event"], {}, transcript),
+    )
+
+    result = GlobalASRService().run(request, ports)
+
+    assert result.evidence[0].confidence is None
+    assert result.evidence[0].words[0].time_source == "segment_boundary"
 
 
 def test_asr_review_service_is_independent_of_pipeline():

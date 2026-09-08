@@ -285,8 +285,8 @@ class StreamingMergeEngine:
 
         委托给统一的 model_loader 工具，确保离线优先策略：
         1. 本地缓存 → 即时返回（零网络）
-        2. 本地无缓存 → 限时下载 + 镜像站回退
-        3. 全部失败 → 返回 None（优雅降级到规则模式）
+        2. 本地无缓存 → 返回 None（规则模式，不阻塞流式路径）
+        3. 显式设置下载开关后才允许网络加载
         """
         from .utils.model_loader import load_sentence_transformer
         return load_sentence_transformer(model_name)

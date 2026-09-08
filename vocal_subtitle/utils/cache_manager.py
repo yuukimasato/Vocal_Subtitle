@@ -44,6 +44,7 @@ class CacheManager:
             "vad": ttl_separation,
             "subtitle": ttl_transcription,
             "pipeline": ttl_transcription,
+            "evidence": ttl_transcription,
         }
 
         # 使用独立目录避免不同阶段键冲突

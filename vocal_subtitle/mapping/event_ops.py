@@ -48,6 +48,8 @@ def clone_event(event: SubtitleEvent, **changes) -> SubtitleEvent:
         "overlap_group_id": event.overlap_group_id,
         "overlap_tracks": copy.deepcopy(event.overlap_tracks),
         "revision_trace": list(event.revision_trace),
+        "time_offset_trace": copy.deepcopy(event.time_offset_trace),
+        "trace_context": copy.deepcopy(getattr(event, "trace_context", {})),
     }
     fields.update(changes)
     return SubtitleEvent(**fields)
@@ -200,8 +202,21 @@ def merge_event_group(
         merged_trace.extend(copy.deepcopy(e.revision_trace))
     merged_trace.append({
         "op": "merge",
+        "stage": "subtitle_builder_merge",
         "reason": reason,
         "merged_indices": [e.index for e in ordered],
+        "event_ids": [_event_id(e) for e in ordered],
+        "physical_owner": {
+            "region_ids": list(dict.fromkeys(
+                e.physical_region_id for e in ordered if e.physical_region_id
+            )),
+            "bin_ids": list(dict.fromkeys(
+                e.physical_bin_id for e in ordered if e.physical_bin_id
+            )),
+            "speaker_ids": list(dict.fromkeys(
+                e.speaker_id for e in ordered if e.speaker_id is not None
+            )),
+        },
         "merged_texts": [e.text for e in ordered],
     })
 
@@ -233,13 +248,26 @@ def merge_event_group(
     merged_text = text if text is not None else " ".join(e.text for e in ordered)
     idx = new_index if new_index is not None else ordered[0].index
 
+    merged_words = []
+    event_start = ordered[0].start
+    for event in ordered:
+        for word in event.words:
+            copied = copy.copy(word)
+            if isinstance(copied, dict):
+                copied["start"] = float(copied.get("start", 0.0)) + event.start - event_start
+                copied["end"] = float(copied.get("end", 0.0)) + event.start - event_start
+            else:
+                copied.start = float(getattr(copied, "start", 0.0)) + event.start - event_start
+                copied.end = float(getattr(copied, "end", 0.0)) + event.start - event_start
+            merged_words.append(copied)
+
     return SubtitleEvent(
         index=idx,
         start=ordered[0].start,
         end=ordered[-1].end,
         text=merged_text,
-        words=copy.deepcopy(ordered[0].words),
-        original_text=ordered[0].original_text,
+        words=merged_words,
+        original_text=merged_text,
         speaker_id=speaker_id,
         speaker_label=ordered[0].speaker_label,
         physical_start=physical_start,
@@ -257,11 +285,13 @@ def merge_event_group(
         speaker_status=speaker_status,
         speaker_source=speaker_source,
         speaker_repair_reason="",
-        asr_text=ordered[0].asr_text,
+        asr_text=merged_text,
         genuine_overlap=False,
         overlap_group_id=None,
         overlap_tracks=[],
         revision_trace=merged_trace,
+        time_offset_trace=copy.deepcopy(ordered[0].time_offset_trace),
+        trace_context=copy.deepcopy(getattr(ordered[0], "trace_context", {})),
     )
 
 
@@ -366,3 +396,14 @@ def split_event_by_word_ranges(
         ))
 
     return results
+
+
+def _event_id(event: SubtitleEvent) -> str:
+    """Return a stable event identity for boundary and merge traces."""
+    logical = getattr(event, "logical_sentence_id", None)
+    if logical:
+        return str(logical)
+    source_ids = list(getattr(event, "source_word_ids", ()) or ())
+    if source_ids:
+        return f"event:{source_ids[0]}"
+    return f"event:index:{int(getattr(event, 'index', 0) or 0):06d}"

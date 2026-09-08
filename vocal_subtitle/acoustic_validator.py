@@ -3,6 +3,16 @@
 The implementation lives in :mod:`vocal_subtitle.acoustic.validator`.
 """
 
+import warnings
+
+warnings.warn(
+    "vocal_subtitle.acoustic_validator is deprecated; import from "
+    "vocal_subtitle.acoustic instead. This shim will be removed in a "
+    "future release.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 from .acoustic.validator import (
     AcousticValidationConfig,
     AcousticValidator,
@@ -18,10 +28,12 @@ from .acoustic.validator import (
     classify_acoustic_events,
     export_skeleton_segments,
 )
+from .acoustic.diagnostics import generate_diagnostic_report
 
 __all__ = [
     "AcousticValidationConfig",
     "AcousticValidator",
     "classify_acoustic_events",
     "export_skeleton_segments",
+    "generate_diagnostic_report",
 ]

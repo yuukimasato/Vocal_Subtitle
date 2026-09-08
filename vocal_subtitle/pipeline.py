@@ -101,10 +101,13 @@ class Pipeline(PipelineASRPathMixin, PipelinePhysicalPathMixin, PipelineStageMix
         self._requested_asr_path: str = ""
         self._asr_route_decision: Optional[ASRRouteDecision] = None
         self._asr_engines: Dict[str, ASREngine] = {}
+        self._global_evidence_attempted: bool = False
+        self._global_evidence_diagnostics: Dict[str, Any] = {}
 
     # Direct full-audio ASR is intentionally bounded until the existing
     # GlobalTranscriber windowing path is promoted to the main route.
     GLOBAL_ASR_MAX_DURATION_SECONDS = 180.0
+    TASK_LANGUAGE_MIN_PROBABILITY = 0.85
 
     # ------------------------------------------------------------------
     # ASR path resolution (global vs. segmented)
@@ -118,27 +121,47 @@ class Pipeline(PipelineASRPathMixin, PipelinePhysicalPathMixin, PipelineStageMix
         Used by downstream stages (e.g. ASR, speaker labels) to avoid
         unreliable per-segment auto-detection.
         """
-        if getattr(self.config.asr, "language", None):
-            return self.config.asr.language
-        if (
-            getattr(self.config.asr, "engine", "") == "auto"
-            and self._asr_engine is None
-        ):
-            decision = self._prepare_asr_route(audio, sample_rate)
+        configured_language = getattr(self.config.asr, "language", None)
+        if configured_language:
+            self._resolved_language = configured_language
+            return configured_language
+
+        # Automatic routing has already probed complete-task windows.  Its
+        # ``None`` is deliberate for uncertain/non-supported languages and
+        # must not be replaced by a later local VAD chunk detection.
+        decision = getattr(self, "_asr_route_decision", None)
+        if decision is not None and decision.requested_engine == "auto":
+            self._resolved_language = decision.language
             return decision.language
+
         engine = self._get_asr_engine()
-        engine.load_model()
-        detector = getattr(engine, "detect_language", None)
-        if callable(detector):
-            result = detector(audio, sample_rate)
-            if result:
-                self._resolved_language = result
-                return result
+        try:
+            engine.load_model()
+        except (ImportError, ModuleNotFoundError):
+            logger.warning(
+                "ASR engine '%s' is not installed; task language detection skipped. "
+                "Install the required engine to enable language auto-detection.",
+                engine.name,
+            )
+            return None
+        except Exception:
+            logger.warning(
+                "Failed to load ASR engine '%s' for language detection. "
+                "Continuing without language auto-detection.",
+                engine.name,
+                exc_info=True,
+            )
+            return None
         detect = getattr(engine, "detect_language_info", None)
         if callable(detect):
             lang_info = detect(audio, sample_rate)
-            lang = getattr(lang_info, "language", None) or lang_info
-            if lang:
+            lang = getattr(lang_info, "language", None)
+            probability = getattr(lang_info, "probability", 0.0)
+            if (
+                lang
+                and str(lang).lower() not in {"unknown", "other", "mixed"}
+                and float(probability) >= self.TASK_LANGUAGE_MIN_PROBABILITY
+            ):
                 self._resolved_language = lang
                 return lang
         return None

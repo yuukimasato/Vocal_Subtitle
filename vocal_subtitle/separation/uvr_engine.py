@@ -132,11 +132,11 @@ class UVREngine(SeparationEngine):
 
         try:
             from audio_separator.separator import Separator
-        except ImportError:
+        except (ImportError, ModuleNotFoundError) as exc:
             raise ImportError(
-                "audio-separator is required. Install it with: "
-                "pip install audio-separator"
-            )
+                "audio-separator UVR runtime is unavailable. Install the "
+                "complete dependency set with: pip install -e '.[uvr]'"
+            ) from exc
 
         # -----------------------------------------------------------------
         # 确保本地存在有效的 download_checks.json（离线优先）
@@ -152,7 +152,13 @@ class UVREngine(SeparationEngine):
             output_dir=self.OUTPUT_DIR,
         )
 
-        self._model.load_model(model_filename=model_name)
+        try:
+            self._model.load_model(model_filename=model_name)
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise ImportError(
+                "audio-separator UVR runtime dependencies are incomplete. "
+                "Install them with: pip install -e '.[uvr]'"
+            ) from exc
         self._model_name = model_name
 
     @staticmethod

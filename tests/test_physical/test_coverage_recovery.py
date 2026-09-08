@@ -3,6 +3,11 @@ from types import SimpleNamespace
 import numpy as np
 
 from vocal_subtitle.asr.base import ASREngine, TranscriptionSegment, WordTimestamp
+from vocal_subtitle.asr.evidence_review import EvidenceReviewRuntimePorts
+from vocal_subtitle.application.offline_production import (
+    OfflineProductionCoordinator,
+    OfflineProductionRequest,
+)
 from vocal_subtitle.config import PipelineConfig
 from vocal_subtitle.mapping.subtitle_builder import SubtitleBuilder
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
@@ -58,6 +63,24 @@ def test_coverage_audit_groups_uncovered_physical_bins():
     assert report.recovery_ranges[0].bin_ids == ("bin-2",)
     assert report.recovery_ranges[1].bin_ids == ("bin-3",)
     assert report.tail_gap_seconds == 3.5
+
+
+def test_coverage_recovery_does_not_cross_default_hard_silence():
+    bins = [
+        PhysicalSubtitleBin("bin-1", 0.0, 0.4, "skeleton", physical_clip_id="clip-a"),
+        PhysicalSubtitleBin("bin-2", 0.9, 1.2, "skeleton", physical_clip_id="clip-a"),
+        PhysicalSubtitleBin("bin-3", 1.61, 2.0, "skeleton", physical_clip_id="clip-a"),
+    ]
+
+    report = audit_physical_coverage(
+        bins,
+        [_allocation("covered", 0.1, 0.2)],
+    )
+
+    assert [item.bin_ids for item in report.recovery_ranges] == [
+        ("bin-2",),
+        ("bin-3",),
+    ]
 
 
 def test_allocator_rejects_asr_word_inside_macro_clip_but_outside_speech_bin():
@@ -173,9 +196,9 @@ class _RecoveryEngine(ASREngine):
             return [
                 TranscriptionSegment(
                     text="head",
-                    start=0.2,
-                    end=0.4,
-                    words=[WordTimestamp("head", 0.2, 0.4, confidence=0.9)],
+                    start=0.0,
+                    end=0.1,
+                    words=[WordTimestamp("head", 0.0, 0.1, confidence=0.9)],
                 )
             ]
         if not self.recover:
@@ -225,23 +248,74 @@ def _run_recovery_case(monkeypatch, recover: bool):
     return engine, events, diagnostics, transcript
 
 
-def test_global_path_recovers_uncovered_tail(monkeypatch):
+def test_global_path_defers_uncovered_tail_to_evidence_review(monkeypatch):
     engine, events, diagnostics, transcript = _run_recovery_case(monkeypatch, True)
 
-    assert engine.calls == 2
-    assert [event.text for event in events] == ["head", "tail"]
-    assert diagnostics["recovery"]["status"] == "recovered"
-    assert diagnostics["physical_coverage"]["complete"] is True
-    assert transcript.status == "ok"
-
-
-def test_global_path_marks_failed_tail_recovery_degraded(monkeypatch):
-    _, events, diagnostics, transcript = _run_recovery_case(monkeypatch, False)
-
+    assert engine.calls == 1
     assert [event.text for event in events] == ["head"]
-    assert diagnostics["recovery"]["status"] == "incomplete"
+    assert diagnostics["recovery"]["status"] == "deferred_to_evidence_review"
     assert diagnostics["physical_coverage"]["complete"] is False
     assert transcript.status == "degraded"
+
+
+def test_coordinator_recovers_global_coverage_gap_through_decision_projection(monkeypatch):
+    engine, events, _, _ = _run_recovery_case(monkeypatch, True)
+    timeline = PhysicalTimeline.from_duration(2.0)
+    timeline.add_evidence(0.0, 1.0, "ffmpeg_skeleton", physical_clip_id="clip-000001")
+    timeline.add_evidence(1.2, 2.0, "ffmpeg_skeleton", physical_clip_id="clip-000001")
+    config = PipelineConfig().evidence_review
+    config.shadow_mode = False
+    config.authoritative_mode = True
+    config.context_reasr_enabled = False
+
+    result = OfflineProductionCoordinator().run(
+        OfflineProductionRequest(
+            events=events,
+            audio=np.zeros(32000, dtype=np.float32),
+            physical_timeline=timeline,
+            recovery_engine=engine,
+            recovery_language="en",
+        ),
+        EvidenceReviewRuntimePorts(config=config, language="en"),
+    )
+
+    assert engine.calls == 2
+    assert [event.text for event in result.events] == ["head", "tail"]
+    assert result.diagnostics["recovery"]["status"] == "recovered"
+    assert result.diagnostics["recovery"]["candidate_count"] == 1
+    assert result.diagnostics["physical_projection"]["coverage"]["complete"] is True
+    assert any(
+        "local_recovery" in decision.candidate_ids[0]
+        for decision in result.decisions
+    )
+
+
+def test_coordinator_keeps_failed_recovery_as_diagnostic(monkeypatch):
+    _, events, diagnostics, transcript = _run_recovery_case(monkeypatch, False)
+
+    timeline = PhysicalTimeline.from_duration(2.0)
+    timeline.add_evidence(0.0, 1.0, "ffmpeg_skeleton", physical_clip_id="clip-000001")
+    timeline.add_evidence(1.2, 2.0, "ffmpeg_skeleton", physical_clip_id="clip-000001")
+    config = PipelineConfig().evidence_review
+    config.shadow_mode = False
+    config.authoritative_mode = True
+    result = OfflineProductionCoordinator().run(
+        OfflineProductionRequest(
+            events=events,
+            audio=np.zeros(32000, dtype=np.float32),
+            physical_timeline=timeline,
+            recovery_engine=_RecoveryEngine(False),
+            recovery_language="en",
+        ),
+        EvidenceReviewRuntimePorts(config=config, language="en"),
+    )
+
+    assert [event.text for event in events] == ["head"]
+    assert diagnostics["recovery"]["status"] == "deferred_to_evidence_review"
+    assert diagnostics["physical_coverage"]["complete"] is False
+    assert transcript.status == "degraded"
+    assert [event.text for event in result.events] == ["head"]
+    assert result.diagnostics["recovery"]["status"] == "incomplete"
 
 
 def test_builder_quantization_respects_physical_bounds_and_previous_end():

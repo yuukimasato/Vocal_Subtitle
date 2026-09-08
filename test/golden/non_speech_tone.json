@@ -1,0 +1,11 @@
+{
+  "schema_version": "golden-reference-v1",
+  "events": [
+    {
+      "start": 0.0,
+      "end": 4.0,
+      "text": "tone and noise",
+      "kind": "non_speech"
+    }
+  ]
+}

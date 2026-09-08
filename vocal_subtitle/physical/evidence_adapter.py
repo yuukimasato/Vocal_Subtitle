@@ -77,13 +77,22 @@ def _add_items(
                 raise ValueError("range must satisfy 0 <= start < end")
             start = local_start + offset
             end = local_end + offset
-            if start < 0.0 or end > timeline.duration:
-                raise ValueError("global evidence range exceeds timeline duration")
             metadata = {
                 "boundary_type": "detected_evidence",
                 "source": source,
                 "time_offset": offset,
             }
+            duration_epsilon = 1e-3
+            if start < 0.0 and abs(start) <= duration_epsilon:
+                metadata["duration_clamped"] = True
+                metadata["original_start"] = start
+                start = 0.0
+            if end > timeline.duration and end - timeline.duration <= duration_epsilon:
+                metadata["duration_clamped"] = True
+                metadata["original_end"] = end
+                end = timeline.duration
+            if start < 0.0 or end > timeline.duration:
+                raise ValueError("global evidence range exceeds timeline duration")
             if isinstance(item, Mapping) and isinstance(item.get("metadata"), Mapping):
                 metadata.update(dict(item["metadata"]))
             evidence = timeline.add_evidence(

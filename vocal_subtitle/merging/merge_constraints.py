@@ -4,6 +4,10 @@ from __future__ import annotations
 
 
 def physical_owner_compatible(left: dict, right: dict) -> bool:
+    left_bin = left.get("physical_bin_id")
+    right_bin = right.get("physical_bin_id")
+    if left_bin is not None or right_bin is not None:
+        return left_bin is not None and right_bin is not None and left_bin == right_bin
     left_spans = left.get("physical_spans", []) or []
     right_spans = right.get("physical_spans", []) or []
     if not left_spans or not right_spans:
@@ -14,6 +18,10 @@ def physical_owner_compatible(left: dict, right: dict) -> bool:
 
 
 def physical_owner_compatible_for_events(left: object, right: object) -> bool:
+    left_bin = getattr(left, "physical_bin_id", None)
+    right_bin = getattr(right, "physical_bin_id", None)
+    if left_bin is not None or right_bin is not None:
+        return left_bin is not None and right_bin is not None and left_bin == right_bin
     left_spans = list(getattr(left, "physical_spans", []) or [])
     right_spans = list(getattr(right, "physical_spans", []) or [])
     if not left_spans or not right_spans:

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import math
 import re
 import unicodedata
+from collections import Counter
 from typing import Any, Dict, List, Sequence
 
 from .base import TranscriptionSegment
@@ -26,6 +27,36 @@ _NORMALIZED_TRAINING_PHRASES = frozenset(
     unicodedata.normalize("NFKC", phrase).casefold().replace(" ", "")
     for phrase in _TRAINING_PHRASES
 )
+
+
+def collapse_repeated_cjk_tokens(text: str, *, minimum_repetitions: int = 3) -> str:
+    """Collapse an unbounded run of the same CJK character.
+
+    Some Chinese ASR backends return repeated one-character tokens without
+    compression or word-confidence metadata.  The run is collapsed only
+    when the same character occurs at least three times consecutively; real
+    repeated phrases separated into different ASR segments are unaffected.
+    """
+    if not text or minimum_repetitions < 2:
+        return text
+    # A short Chinese backend segment can contain a dominant repeated token
+    # plus one hallucinated tail token (for example ``我 我 我 是``).  Only
+    # trim that tail when the segment is otherwise entirely CJK and the
+    # dominant token accounts for at least 75% of its content.
+    if re.fullmatch(
+        r"\s*[\u4e00-\u9fff](?:\s+[\u4e00-\u9fff])*\s*[.!?。！？]*",
+        text,
+    ):
+        tokens = re.findall(r"[\u4e00-\u9fff]", text)
+        if tokens:
+            token, count = Counter(tokens).most_common(1)[0]
+            if count >= minimum_repetitions and count / len(tokens) >= 0.75:
+                suffix = re.search(r"[^\w\u4e00-\u9fff]*$", text, re.UNICODE)
+                return token + (suffix.group(0) if suffix else "")
+    pattern = re.compile(
+        rf"(?P<token>[\u4e00-\u9fff])(?:\s*(?P=token)){{{minimum_repetitions - 1},}}"
+    )
+    return pattern.sub(lambda match: match.group("token"), text)
 
 
 @dataclass(frozen=True)

@@ -42,6 +42,20 @@ def test_offset_and_invalid_duration_are_explicitly_handled():
     assert result.source_counts == {"ffmpeg_coarse": 1}
 
 
+def test_detector_rounding_at_audio_end_is_clamped_not_dropped():
+    timeline = PhysicalTimeline.from_duration(10.0)
+
+    result = adapt_ffmpeg_result(
+        {"skeleton": [(9.0, 10.0000005)]},
+        timeline,
+    )
+
+    assert len(result.evidence_spans) == 1
+    assert result.evidence_spans[0].end == 10.0
+    assert result.evidence_spans[0].metadata["duration_clamped"] is True
+    assert result.skipped_count == 0
+
+
 def test_unified_ffmpeg_result_is_preferred_over_legacy_coarse_context_field():
     context = PipelineContext(audio_path=Path("audio.wav"), audio=np.zeros(16000))
     context.ffmpeg_segments = [SpeechSegment(5.0, 6.0)]
@@ -50,4 +64,3 @@ def test_unified_ffmpeg_result_is_preferred_over_legacy_coarse_context_field():
     result = build_timeline_from_context(context, 10.0)
     assert [item.source for item in result.evidence_spans] == ["ffmpeg_coarse"]
     assert result.evidence_spans[0].start == 1.0
-

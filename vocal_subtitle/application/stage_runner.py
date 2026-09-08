@@ -270,8 +270,19 @@ class PipelineStageMixin:
         })
         filtered = []
         _dropped = 0
+        from ..asr.hallucination import collapse_repeated_cjk_tokens
+
         for seg in seg_results:
             text = getattr(seg, "text", "").strip()
+            # FunASR may return an unbounded repeated-character run without
+            # word timestamps or Whisper quality metadata.  Keep this repair
+            # conservative and apply it only inside one backend segment.
+            if not getattr(seg, "words", None):
+                collapsed = collapse_repeated_cjk_tokens(text)
+                if collapsed != text:
+                    logger.info("Collapsed repeated CJK ASR tokens: %r -> %r", text, collapsed)
+                    seg.text = collapsed
+                    text = collapsed
             # Strip trailing punctuation that text normalizer may have added
             cleaned = text.rstrip(".,!?;:，。！？；：")
             if cleaned in _TRAINING_PHRASES:
@@ -318,17 +329,13 @@ class PipelineStageMixin:
         # 如果 _prepare_task_language 已预先检测，则跳过重复检测
         if resolved_language is None and hasattr(self, "_resolved_language") and self._resolved_language is not None:
             resolved_language = self._resolved_language
-        if resolved_language is None:
+        route_decision = getattr(self, "_asr_route_decision", None)
+        if resolved_language is None and route_decision is None:
             # 首先尝试 detect_language（引擎可能不支持完整音频语言检测）
-            detector = getattr(engine, "detect_language", None)
-            if callable(detector):
-                resolved_language = detector(audio, sample_rate)
-            else:
-                # 回退到 detect_language_info（旧 API）
-                detect = getattr(engine, "detect_language_info", None)
-                if callable(detect):
-                    lang_info = detect(audio, sample_rate)
-                    resolved_language = getattr(lang_info, "language", None) or lang_info
+            # This compatibility path is used by direct callers that did not
+            # enter Pipeline.run(). Production paths always prepare language
+            # from complete task audio before passing VAD/skeleton chunks here.
+            resolved_language = self._prepare_task_language(audio, sample_rate)
             if resolved_language:
                 logger.info(
                     "Global language detected: %s (will use for all %d segments)",

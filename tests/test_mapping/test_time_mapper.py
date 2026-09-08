@@ -2,8 +2,12 @@
 
 import pytest
 
-from vocal_subtitle.asr.base import TranscriptionSegment
-from vocal_subtitle.mapping.time_mapper import SubtitleEvent, TimeMapper
+from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
+from vocal_subtitle.mapping.time_mapper import (
+    SubtitleEvent,
+    TimeMapper,
+    offset_subtitle_event,
+)
 from vocal_subtitle.vad.base import SpeechSegment
 
 
@@ -51,6 +55,25 @@ class TestTimeMapper:
         # 末尾段 end 锚定到 speech_seg.end (12.0)
         assert events[0].end == 12.0
 
+    def test_map_with_offset_keeps_words_relative_to_event_start(self):
+        mapper = TimeMapper()
+        asr_results = [[TranscriptionSegment(
+            text="第二段",
+            start=0.5,
+            end=1.5,
+            words=[
+                WordTimestamp("第", 0.5, 0.8),
+                WordTimestamp("二段", 0.9, 1.5),
+            ],
+        )]]
+        speech_segments = [SpeechSegment(start=10.0, end=12.0)]
+
+        events = mapper.map(asr_results, speech_segments)
+
+        assert events[0].start == 10.5
+        assert [word.start for word in events[0].words] == pytest.approx([0.0, 0.4])
+        assert [word.end for word in events[0].words] == pytest.approx([0.3, 1.0])
+
     def test_map_multiple_segments(self):
         """多片段映射"""
         mapper = TimeMapper()
@@ -78,6 +101,34 @@ class TestTimeMapper:
         mapper = TimeMapper()
         events = mapper.map([], [])
         assert events == []
+
+    def test_offset_event_moves_all_absolute_ranges_once(self):
+        event = SubtitleEvent(
+            index=1,
+            start=0.2,
+            end=0.8,
+            text="hello",
+            physical_start=0.2,
+            physical_end=0.8,
+            physical_bin_start=0.1,
+            physical_bin_end=0.9,
+            physical_spans=[{"start": 0.2, "end": 0.8, "source": "vad"}],
+        )
+
+        offset_subtitle_event(event, 10.0, source="test-window")
+
+        assert (event.start, event.end) == (10.2, 10.8)
+        assert (event.physical_start, event.physical_end) == (10.2, 10.8)
+        assert (event.physical_bin_start, event.physical_bin_end) == (10.1, 10.9)
+        assert event.physical_spans[0]["start"] == 10.2
+        assert event.time_offset_trace == [{
+            "stage": "time_offset",
+            "source": "test-window",
+            "offset": 10.0,
+        }]
+
+        with pytest.raises(ValueError, match="already has a time offset"):
+            offset_subtitle_event(event, 1.0, source="second-window")
 
     def test_map_mismatch_raises(self):
         """输入长度不匹配应抛出异常"""
@@ -131,6 +182,20 @@ class TestTimeMapper:
         assert len(events) == 1
         assert events[0].start == 5.5
         assert events[0].end == 7.0
+
+    def test_map_single_segment_words_are_relative_to_event_start(self):
+        events = TimeMapper.map_single_segment(
+            [TranscriptionSegment(
+                text="测试",
+                start=0.5,
+                end=2.0,
+                words=[WordTimestamp("测试", 0.5, 1.2)],
+            )],
+            segment_offset=5.0,
+        )
+
+        assert [word.start for word in events[0].words] == pytest.approx([0.0])
+        assert [word.end for word in events[0].words] == pytest.approx([0.7])
 
     def test_deduplicate_overlapping_events(self):
         """重叠/重复事件去重：时间重叠 >50% + 文本相似度 >80%"""

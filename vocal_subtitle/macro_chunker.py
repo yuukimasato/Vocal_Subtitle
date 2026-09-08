@@ -278,7 +278,7 @@ class MacroChunker:
         sample_rate: int,
         depth: int = 0,
     ) -> List[MacroChunk]:
-        """递归切分仍然太长的块"""
+        """递归切分仍然太长的块（每一层换更敏感的静音阈值）"""
         cfg = self.config
 
         if depth >= len(cfg.recursive_thresholds):
@@ -286,10 +286,9 @@ class MacroChunker:
 
         threshold_db, min_silence = cfg.recursive_thresholds[depth]
 
-        result = []
+        result: List[MacroChunk] = []
         for chunk in chunks:
-            duration = chunk.end - chunk.start
-            if duration <= cfg.max_chunk_duration:
+            if chunk.duration <= cfg.max_chunk_duration:
                 result.append(chunk)
                 continue
 
@@ -320,25 +319,30 @@ class MacroChunker:
                     result.append(chunk)
                     continue
 
-                # 偏移回全局时间
-                for silence_start, silence_end in sub_silences:
-                    split_point = chunk.start + (silence_start + silence_end) / 2.0
-
-                    # 递归创建子块
-                    sub_chunks = self._split_with_overlap(
-                        [(silence_start, silence_end)],
-                        duration,
-                        chunk_audio,
-                        sample_rate,
-                    )
-                    for sc in sub_chunks:
-                        sc.start += chunk.start
-                        sc.end += chunk.start
-                        sc.index = len(result) + len(sub_chunks)
-                        result.append(sc)
-
+                # 一次传入该块内的全部静音切点：_split_with_overlap 会按顺序切出子块。
+                # 逐个静音单独调用会得到 N 份互相重叠的重复子块（整块被重复切 N 遍）
+                sub_chunks = self._split_with_overlap(
+                    sub_silences,
+                    chunk.duration,
+                    chunk_audio,
+                    sample_rate,
+                )
+                # 偏移回全局时间，仍然超长的子块交给下一层用更敏感的阈值继续切
+                for sc in sub_chunks:
+                    sc.start += chunk.start
+                    sc.end += chunk.start
+                result.extend(
+                    self._recursive_split(sub_chunks, audio_path, audio, sample_rate, depth + 1)
+                )
             finally:
                 tmp_path.unlink(missing_ok=True)
+
+        # 多层子块合并后索引与重叠标记必须按最终顺序连续
+        # （run_lifecycle 用 chunk.index 标注事件来源）
+        for i, c in enumerate(result):
+            c.index = i
+            c.overlap_with_prev = i > 0
+            c.overlap_with_next = i < len(result) - 1
 
         logger.info(
             "Recursive split (depth=%d, db=%.0f, min_s=%.1f): %d → %d chunks",

@@ -44,6 +44,11 @@ class PhysicalCoverageReport:
     transcript_end: float | None
     last_physical_speech_end: float | None
     tail_gap_seconds: float
+    # v1.1: 新增字段，对应 CONTRACTS §5 审计维度
+    coverage_ratio: float = 0.0
+    over_allocated_segments: int = 0
+    under_allocated_segments: int = 0
+    alerts: tuple[str, ...] = ()
 
     @property
     def complete(self) -> bool:
@@ -60,6 +65,10 @@ class PhysicalCoverageReport:
             "last_physical_speech_end": self.last_physical_speech_end,
             "tail_gap_seconds": self.tail_gap_seconds,
             "complete": self.complete,
+            "coverage_ratio": self.coverage_ratio,
+            "over_allocated_segments": self.over_allocated_segments,
+            "under_allocated_segments": self.under_allocated_segments,
+            "alerts": list(self.alerts),
         }
 
 
@@ -68,7 +77,9 @@ def audit_physical_coverage(
     allocations: Iterable[WordAllocation],
     *,
     min_required_duration: float = 0.08,
-    merge_gap: float = 1.0,
+    # Recovery requests must remain inside one physical speech run.  A gap at
+    # or above 400 ms is a hard-silence boundary in the offline contract.
+    merge_gap: float = 0.4,
 ) -> PhysicalCoverageReport:
     """Report physical bins that have no accepted word overlap.
 
@@ -128,6 +139,43 @@ def audit_physical_coverage(
         _merge_ranges(recovery_bins, merge_gap=merge_gap)
     )
 
+    # 计算覆盖率、过分配/欠分配和告警条件 (CONTRACTS §5)
+    total_duration = sum(
+        float(bin_item.end) - float(bin_item.start) for bin_item in ordered_bins
+    )
+    covered_duration = sum(
+        float(bin_item.end) - float(bin_item.start)
+        for bin_item in ordered_bins
+        if bin_item not in uncovered
+    )
+    ratio = covered_duration / total_duration if total_duration > 0 else 1.0
+    coverage_ratio = round(ratio, 4)
+
+    # 统计过分配/欠分配（从 allocation 计数推估）
+    over_allocated = sum(
+        1 for item in allocations
+        if getattr(item, "accepted", False)
+        and not any(
+            float(getattr(item.word, "raw_start")) < float(b.end)
+            and float(getattr(item.word, "raw_end")) > float(b.start)
+            for b in ordered_bins
+        )
+    )
+    under_allocated = len(uncovered)
+
+    # 告警条件 (CONTRACTS §5)
+    alerts: list[str] = []
+    if coverage_ratio < 0.80:
+        alerts.append(f"coverage_ratio_below_80pct:{coverage_ratio:.2f}")
+    if len(uncovered) > 0:
+        alerts.append(f"uncovered_bins:{len(uncovered)}")
+    if tail_gap > 2.0:
+        alerts.append(f"tail_gap_exceeds_2s:{tail_gap:.1f}s")
+    if over_allocated > 0:
+        alerts.append(f"over_allocated:{over_allocated}")
+    if under_allocated > 0:
+        alerts.append(f"under_allocated:{under_allocated}")
+
     return PhysicalCoverageReport(
         physical_bin_count=len(ordered_bins),
         covered_physical_bin_count=covered_count,
@@ -137,6 +185,10 @@ def audit_physical_coverage(
         transcript_end=transcript_end,
         last_physical_speech_end=last_physical_end,
         tail_gap_seconds=tail_gap,
+        coverage_ratio=coverage_ratio,
+        over_allocated_segments=over_allocated,
+        under_allocated_segments=under_allocated,
+        alerts=tuple(alerts),
     )
 
 

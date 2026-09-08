@@ -116,6 +116,7 @@ const part = {
         <div class="stat-card"><div class="stat-value">${stats.local_speaker_split_count || 0}</div><div class="stat-label">局部换人切分</div></div>
         <div class="stat-card"><div class="stat-value">${stats.speaker_conflict_count || 0}</div><div class="stat-label">说话人冲突</div></div>
         <div class="stat-card"><div class="stat-value">${stats.unknown_speaker_count || 0}</div><div class="stat-label">未确认</div></div>
+        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.status || 'completed')}</div><div class="stat-label">运行状态</div></div>
         <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.quality_status || 'pass')}</div><div class="stat-label">质量状态</div></div>
         <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml((stats.final_engine || stats.selected_engine || '—'))}</div><div class="stat-label">最终引擎</div></div>
         <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.detected_language || 'unknown')}</div><div class="stat-label">检测语言</div></div>
@@ -127,9 +128,14 @@ const part = {
       App.ws.disconnect();
       App.state.isRunning = false;
       App.ui.setRunning(false);
+      App.ui.clearPipelineError();
 
       const stats = result.stats;
       App.state.subtitleEvents = result.events || [];
+      if (window.WaveformUI) {
+        WaveformUI.setEvents(App.state.subtitleEvents);
+        WaveformUI.setTask(App.state.taskId, result, App.state.subtitleEvents);
+      }
 
       // Show stats
       App.ui.renderStats(stats);
@@ -148,11 +154,19 @@ const part = {
         }
       }, 3000);
 
+      const runtimeStatus = stats.status || result.status || 'completed';
       const qualityStatus = stats.quality_status || 'pass';
+      const railStatus = document.getElementById('process-rail-status');
+      if (railStatus) {
+        const degraded = runtimeStatus === 'degraded' || runtimeStatus === 'degraded_completed' || qualityStatus !== 'pass';
+        railStatus.textContent = degraded ? '降级完成' : '已完成';
+        railStatus.dataset.status = degraded ? 'degraded_completed' : 'completed';
+      }
       const qualityMessage = qualityStatus === 'pass'
         ? '字幕生成完成'
         : '字幕已生成，但质量状态为 ' + qualityStatus;
-      toast(qualityMessage + '，共 ' + App.state.subtitleEvents.length + ' 条', qualityStatus === 'pass' ? 'success' : 'warning');
+      const statusMessage = runtimeStatus === 'degraded' || runtimeStatus === 'degraded_completed' ? '，运行状态为降级完成' : '';
+      toast(qualityMessage + statusMessage + '，共 ' + App.state.subtitleEvents.length + ' 条', runtimeStatus === 'completed' && qualityStatus === 'pass' ? 'success' : 'warning');
 
       // Refresh history and cache info
       App.refreshHistory();
@@ -208,13 +222,38 @@ const part = {
       App.ws.disconnect();
       App.state.isRunning = false;
       App.ui.setRunning(false);
-      toast('处理失败: ' + message, 'error');
+      const errorMessage = message || '处理失败';
+      const errorPanel = $('#process-error');
+      if (errorPanel) {
+        errorPanel.textContent = '处理失败: ' + errorMessage;
+        errorPanel.hidden = false;
+      }
+      toast('处理失败: ' + errorMessage, 'error');
       $('#btn-run-text').textContent = '重试';
+      const railStatus = document.getElementById('process-rail-status');
+      if (railStatus) {
+        railStatus.textContent = '处理失败';
+        railStatus.dataset.status = 'failed';
+      }
+    },
+
+    clearPipelineError() {
+      const errorPanel = $('#process-error');
+      if (errorPanel) {
+        errorPanel.textContent = '';
+        errorPanel.hidden = true;
+      }
     },
 
     setRunning(running) {
       const btn = $('#btn-run');
       if (running) {
+        App.ui.clearPipelineError();
+        const railStatus = document.getElementById('process-rail-status');
+        if (railStatus) {
+          railStatus.textContent = '处理中';
+          railStatus.dataset.status = 'running';
+        }
         btn.classList.add('running');
         btn.disabled = true;
         $('#btn-run-text').textContent = '处理中...';
@@ -256,4 +295,3 @@ const part = {
 };
 window.VocalSubtitleUi = Object.assign(window.VocalSubtitleUi || {}, part);
 })();
-

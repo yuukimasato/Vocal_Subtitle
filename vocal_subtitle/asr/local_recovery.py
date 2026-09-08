@@ -165,6 +165,7 @@ class LocalRecoveryConfig:
     max_attempts_per_range: int = 3
     min_confidence: float = 0.5
     context_window: float = 0.5
+    request_tolerance: float = 0.15
 
     def __post_init__(self) -> None:
         if self.max_attempts_per_range < 1:
@@ -175,6 +176,8 @@ class LocalRecoveryConfig:
             raise ValueError("min_confidence must be in [0, 1]")
         if self.context_window < 0.0:
             raise ValueError("context_window must be non-negative")
+        if self.request_tolerance < 0.0:
+            raise ValueError("request_tolerance must be non-negative")
 
 
 # ── 引擎 ──────────────────────────────────────────────────────────────
@@ -278,7 +281,11 @@ class LocalRecoveryEngine:
                     candidates=candidates,
                     attempt_count=attempt,
                     outcome="recovered",
-                    diagnostics={"context_start": context_start, "context_end": context_end},
+                diagnostics={
+                    "context_start": context_start,
+                    "context_end": context_end,
+                    "request_tolerance": cfg.request_tolerance,
+                },
                 )
 
             if attempt < cfg.max_attempts_per_range:
@@ -293,8 +300,12 @@ class LocalRecoveryEngine:
                 candidates=[],
                 attempt_count=cfg.max_attempts_per_range,
                 outcome="asr_error",
-                diagnostics={"context_start": context_start, "context_end": context_end,
-                             "last_error": last_error},
+                diagnostics={
+                    "context_start": context_start,
+                    "context_end": context_end,
+                    "request_tolerance": cfg.request_tolerance,
+                    "last_error": last_error,
+                },
             )
 
         return LocalRecoveryResult(
@@ -302,7 +313,11 @@ class LocalRecoveryEngine:
             candidates=[],
             attempt_count=cfg.max_attempts_per_range,
             outcome="max_attempts_exceeded",
-            diagnostics={"context_start": context_start, "context_end": context_end},
+            diagnostics={
+                "context_start": context_start,
+                "context_end": context_end,
+                "request_tolerance": cfg.request_tolerance,
+            },
         )
 
     def _try_transcribe(
@@ -369,7 +384,12 @@ class LocalRecoveryEngine:
 
                 if seg_confidence < cfg.min_confidence:
                     continue
-                if not self._overlaps_request(g_start, g_end, request):
+                if not self._overlaps_request(
+                    g_start,
+                    g_end,
+                    request,
+                    tolerance=cfg.request_tolerance,
+                ):
                     continue
 
                 candidate = RecoveryCandidate(
@@ -390,7 +410,12 @@ class LocalRecoveryEngine:
 
                 if confidence < cfg.min_confidence:
                     continue
-                if not self._overlaps_request(g_start, g_end, request):
+                if not self._overlaps_request(
+                    g_start,
+                    g_end,
+                    request,
+                    tolerance=cfg.request_tolerance,
+                ):
                     continue
 
                 candidate = RecoveryCandidate(
@@ -411,10 +436,20 @@ class LocalRecoveryEngine:
         word_end: float,
         request: LocalRecoveryRequest,
         *,
-        epsilon: float = 0.01,
+        tolerance: float = 0.01,
     ) -> bool:
-        """检查词与请求区间是否有正重叠。"""
-        return word_start < request.end - epsilon and word_end > request.start + epsilon
+        """Check overlap with a bounded tolerance around the missing range.
+
+        Physical projection performs the final boundary check.  A small
+        request tolerance prevents a short recovery bin from rejecting a word
+        whose ASR boundary lands just outside the bin while still keeping the
+        candidate bounded to the same local region.
+        """
+        tolerance = max(0.01, float(tolerance))
+        return (
+            word_start < request.end + tolerance
+            and word_end > max(0.0, request.start - tolerance)
+        )
 
 
 # ── 便捷函数 ──────────────────────────────────────────────────────────

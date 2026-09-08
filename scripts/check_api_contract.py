@@ -8,6 +8,15 @@ import ast
 import json
 from pathlib import Path
 import subprocess
+import sys
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+DEFAULT_BASELINE = Path(__file__).resolve().parent / "api_contract_baseline.json"
+LEGACY_BASELINE_REVISION = "5079e43"
 
 
 def current_contract() -> list[dict[str, str]]:
@@ -53,8 +62,17 @@ def revision_contract(revision: str) -> list[dict[str, str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline", type=Path)
-    parser.add_argument("--baseline-revision", default="5079e43")
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        default=DEFAULT_BASELINE if DEFAULT_BASELINE.exists() else None,
+        help="JSON snapshot of method/path rows; defaults to the committed baseline file",
+    )
+    parser.add_argument(
+        "--baseline-revision",
+        default=LEGACY_BASELINE_REVISION,
+        help="Git revision to extract the frozen route contract from",
+    )
     parser.add_argument("--expected-count", type=int)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()

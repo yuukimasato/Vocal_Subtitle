@@ -209,9 +209,85 @@ class PipelineFeedbackMixin:
                 len(conflicts),
             )
 
+            # ---- D2 自动入库 ----
+            self._ingest_feedback_sample(
+                auto_events=auto_events,
+                manual_events=manual_events,
+                alignment_coverage=diff_report.alignment_coverage,
+                alignment_confidence=getattr(diff_report, "confidence", 0.8),
+                consent_level=getattr(self.config.feedback, "consent_level", "anonymous"),
+                language=getattr(self, "_resolved_language", "unknown") or "unknown",
+                diff_report=diff_report,
+            )
+
             return report
 
         except Exception as e:
             logger.warning("Feedback learning failed (non-fatal): %s", e)
             return None
+
+    def _ingest_feedback_sample(
+        self,
+        auto_events: List[SubtitleEvent],
+        manual_events: List,
+        alignment_coverage: float,
+        alignment_confidence: float,
+        consent_level: str,
+        language: str,
+        diff_report,
+    ) -> None:
+        """将反馈学习结果自动入库到 D2 候选反馈集。
+
+        非致命操作：入库失败不影响管道主流程。
+        """
+        try:
+            from ..feedback.sample_manager import FeedbackSampleManager
+
+            # 生成文本表示（SRT 格式用于哈希）
+            def _events_to_srt_text(events) -> str:
+                lines = []
+                for i, evt in enumerate(events, 1):
+                    start_ts = getattr(evt, "start", 0)
+                    end_ts = getattr(evt, "end", 0)
+                    text = getattr(evt, "text", "")
+                    lines.append(f"{i}\n{start_ts:.3f} --> {end_ts:.3f}\n{text}\n")
+                return "\n".join(lines)
+
+            auto_text = _events_to_srt_text(auto_events)
+            human_text = _events_to_srt_text(manual_events)
+
+            # 分类编辑类型
+            edit_types = {}
+            if diff_report:
+                if diff_report.text_edits:
+                    edit_types["text_correction"] = len(diff_report.text_edits)
+                if diff_report.time_shifts:
+                    edit_types["time_adjustment"] = len(diff_report.time_shifts)
+                if diff_report.merge_actions:
+                    edit_types["format_preference"] = len(diff_report.merge_actions)
+                if diff_report.structural_revision:
+                    edit_types["structural_rewrite"] = 1
+
+            mgr = FeedbackSampleManager()
+            sample = mgr.ingest(
+                auto_subtitle=auto_text,
+                human_revision=human_text,
+                alignment={
+                    "method": "dtw",
+                    "coverage_ratio": alignment_coverage,
+                    "confidence": alignment_confidence,
+                },
+                consent_level=consent_level,
+                language=language,
+                scene="",
+                audio_duration=0.0,
+                audio_condition="",
+                speaker_count=0,
+                original_config={},
+                edit_types=edit_types,
+            )
+            if sample:
+                logger.info("D2 sample ingested: %s", sample.sample_id)
+        except Exception as e:
+            logger.warning("D2 sample ingestion failed (non-fatal): %s", e)
 

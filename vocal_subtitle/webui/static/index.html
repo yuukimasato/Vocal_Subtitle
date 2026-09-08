@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vocal Subtitle — 人声分离 + 字幕生成</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-<link rel="stylesheet" href="/styles/app.css">
+<link rel="stylesheet" href="/styles/app.css?v=20260905-ab1">
 <!-- Static contract markers; interactive UI and API client live in /app.js. -->
 <!-- data-action="check" -->
 <!-- id="llm-api-key" name="llm-api-key" type="text" class="credential-mask" -->
@@ -28,6 +28,13 @@
     </svg>
     <span class="gradient-text">Vocal Subtitle</span>
   </a>
+  <nav class="workspace-nav" id="workspace-nav" aria-label="工作区导航">
+    <button type="button" class="workspace-nav-item active" data-workspace="process" title="处理">处理</button>
+    <button type="button" class="workspace-nav-item" data-workspace="review" title="字幕审核">字幕审核</button>
+    <button type="button" class="workspace-nav-item" data-workspace="feedback" title="反馈学习">反馈学习</button>
+    <button type="button" class="workspace-nav-item" data-workspace="history" title="任务历史">任务历史</button>
+    <button type="button" class="workspace-nav-item" data-workspace="quality" title="质量报告">质量报告</button>
+  </nav>
   <div class="header-spacer"></div>
   <div class="header-badge" id="device-badge">
     <span class="dot" id="device-dot"></span>
@@ -168,7 +175,7 @@
     </div>
 
     <!-- Run Button -->
-    <button class="btn-run" id="btn-run" disabled onclick="App.handleRun()">
+    <button type="button" class="btn-run" id="btn-run" disabled onclick="App.handleRun()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       <span id="btn-run-text">选择文件以开始</span>
     </button>
@@ -191,44 +198,11 @@
         <span class="c-link danger" onclick="App.clearCache()">清除缓存</span>
       </span>
     </div>
-
-    <!-- ★ 反馈学习 (Phase 5) -->
-    <div class="section-label" style="margin-top:4px;">🧠 反馈学习</div>
-    <div class="options-panel" style="margin-bottom:6px;">
-      <div class="option-group" data-group="feedback">
-        <div class="option-group-header" onclick="this.parentElement.classList.toggle('open')">
-          <span>📚 参数自适应学习</span><span class="og-arrow">▼</span>
-        </div>
-        <div class="option-group-body" id="opts-feedback">
-          <div class="feedback-section">
-            <div class="feedback-empty" id="feedback-empty-state">
-              处理字幕后，可在此提交修订版进行反馈学习
-            </div>
-            <div id="feedback-controls" style="display:none;">
-              <div class="feedback-btn-row">
-                <button class="feedback-pick-btn" id="fb-pick-ref" onclick="App.pickRefFile()">📄 选择修订字幕</button>
-                <button class="feedback-pick-btn" id="fb-pick-audio" onclick="App.pickAudioFile()">🎵 选择音频</button>
-                <button class="feedback-mini-btn primary" id="fb-learn-edits" onclick="App.handleFeedbackLearnFromEdits()" style="display:none;">📝 用当前编辑结果学习</button>
-              </div>
-              <input type="file" class="feedback-file-input" id="fb-ref-input" accept=".srt,.ass">
-              <input type="file" class="feedback-file-input" id="fb-audio-input" accept="audio/*,video/*,.mp3,.wav,.flac,.m4a,.ogg,.mp4,.mkv,.mov,.avi,.webm">
-              <div style="display:flex;gap:4px;margin-top:4px;">
-                <button class="feedback-mini-btn primary" id="fb-learn-btn" onclick="App.handleFeedbackLearn()" style="display:none;">📚 开始学习</button>
-                <button class="feedback-mini-btn" id="fb-preview-btn" onclick="App.handleFeedbackPreview()" style="display:none;">🔍 预览差异</button>
-              </div>
-              <div id="fb-file-status" style="font-size:0.62rem;color:var(--text-tertiary);margin-top:2px;"></div>
-            </div>
-            <div class="feedback-report" id="feedback-report" style="display:none;"></div>
-            <div class="feedback-divider" id="feedback-divider" style="display:none;"></div>
-            <div id="feedback-config-mgmt" style="display:none;"></div>
-          </div>
-        </div>
-      </div>
-    </div>
   </aside>
 
   <!-- Main Content -->
   <main class="content" id="main-content">
+    <div class="process-workspace" id="process-workspace">
     <!-- Stage Progress Panel -->
     <div class="panel" id="progress-panel">
       <div class="panel-header">
@@ -298,6 +272,71 @@
         </div>
       </div>
     </div>
+
+    <section class="process-action-panel panel" id="process-action-panel" aria-label="任务操作">
+      <div class="process-action-header">
+        <div>
+          <span class="workspace-eyebrow">RUN CONTEXT</span>
+          <h2>当前任务</h2>
+        </div>
+        <span class="status-chip" id="process-rail-status" data-status="ready">待处理</span>
+      </div>
+      <div class="process-action-grid">
+        <div class="insight-task-card">
+          <span class="insight-label">输入文件</span>
+          <strong id="process-rail-file">尚未选择文件</strong>
+          <span class="insight-caption">上传文件后可开始离线处理</span>
+        </div>
+        <div class="insight-metrics" aria-label="任务概览">
+          <div><span>当前模式</span><strong>离线</strong></div>
+          <div><span>字幕格式</span><strong>SRT</strong></div>
+          <div><span>质量门禁</span><strong>已启用</strong></div>
+        </div>
+        <div class="insight-actions">
+          <button type="button" class="workspace-button" data-workspace="review">打开字幕审核</button>
+          <button type="button" class="workspace-button" data-workspace="quality">查看质量报告</button>
+          <button type="button" class="workspace-button" data-workspace="feedback">打开反馈预览</button>
+        </div>
+      </div>
+      <div class="process-error" id="process-error" role="alert" aria-live="assertive" hidden></div>
+    </section>
+
+    <section class="waveform-panel panel" id="waveform-panel" aria-label="音频波形">
+      <div class="panel-header waveform-header">
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h2m2-4v8m4-12v16m4-12v8m4-4h-2"/></svg>
+          音频波形
+        </span>
+        <span class="waveform-status" id="waveform-status">等待任务音频</span>
+      </div>
+      <div class="waveform-stage" id="waveform-stage">
+        <canvas id="waveform-canvas" class="waveform-canvas" aria-label="音频波形画布（左键设开始，右键设结束，拖动标记线调整时间轴）"></canvas>
+        <div class="waveform-empty" id="waveform-empty">完成任务后将在此显示可缩放波形</div>
+        <div class="waveform-playhead" id="waveform-playhead" aria-hidden="true"></div>
+      </div>
+      <div class="waveform-toolbar" role="toolbar" aria-label="波形控制">
+        <button type="button" class="icon-btn" id="waveform-play" title="播放或暂停（空格）" aria-label="播放或暂停">▶</button>
+        <button type="button" class="icon-btn" id="waveform-stop" title="停止播放" aria-label="停止播放">■</button>
+        <span class="waveform-time" id="waveform-time">00:00.000 / 00:00.000</span>
+        <label class="waveform-zoom-label" for="waveform-zoom">缩放</label>
+        <input type="range" id="waveform-zoom" min="1" max="32" step="0.5" value="1" aria-label="波形缩放">
+        <button type="button" class="icon-btn" id="waveform-reset" title="重置波形视图" aria-label="重置波形视图">↺</button>
+        <button type="button" class="icon-btn" id="waveform-help" title="打轴快捷键" aria-label="打轴快捷键">?</button>
+      </div>
+      <div class="waveform-help-panel" id="waveform-help-panel" hidden>
+        <div class="help-grid">
+          <span class="help-title">打轴操作</span>
+          <span>左键点击波形 → 设当前行<b class="mk-start">开始</b>（并从点击处试听）；右键点击 → 设<b class="mk-end">结束</b></span>
+          <span>拖动 <b class="mk-start">红线</b>/<b class="mk-end">蓝线</b> 微调开始/结束；拖动区间整体平移；拖动空白处平移视图</span>
+          <span>双击任一字幕区间 → 切换活动行；滚轮平移，Ctrl+滚轮缩放</span>
+          <span class="help-title">键盘</span>
+          <span><kbd>空格</kbd>/<kbd>S</kbd> 播放当前行　<kbd>R</kbd> 从行首重播　<kbd>[</kbd>/<kbd>]</kbd> 播放头处设开始/结束</span>
+          <span><kbd>←</kbd>/<kbd>→</kbd> 开始 ±10ms（<kbd>Alt</kbd> ±1ms）　<kbd>Shift+←</kbd>/<kbd>→</kbd> 结束 ±10ms　<kbd>Ctrl+←</kbd>/<kbd>→</kbd> 整体平移</span>
+          <span><kbd>↑</kbd>/<kbd>↓</kbd> 上一行/下一行　<kbd>Enter</kbd> 保存并跳到下一行　<kbd>Home</kbd>/<kbd>End</kbd> 跳到行首/行尾</span>
+          <span>时间轴修改自动保存并写回字幕文件（约 0.5 秒防抖）</span>
+        </div>
+      </div>
+    </section>
 
     <!-- Results Area -->
     <div id="results-area">
@@ -400,6 +439,131 @@
         </div>
       </div>
     </div>
+
+    <!-- =========================================================
+         COMPONENT WORKSPACES
+         ========================================================= -->
+    </div>
+
+    <!-- =========================================================
+         COMPONENT WORKSPACES
+         ========================================================= -->
+    <section class="workspace-view" id="workspace-review" hidden>
+      <div class="workspace-heading">
+        <div>
+          <div class="workspace-eyebrow">REVIEW</div>
+          <h1>字幕审核</h1>
+          <div class="workspace-subline" id="review-task-meta">选择任务开始审核</div>
+        </div>
+        <div class="workspace-actions">
+          <select id="review-task-select" aria-label="选择审核任务"><option value="">选择任务</option></select>
+          <button type="button" class="icon-btn" id="review-refresh" title="刷新任务" aria-label="刷新任务">↻</button>
+        </div>
+      </div>
+      <div class="review-workspace-grid">
+        <section class="workspace-panel review-editor-panel">
+          <div class="workspace-panel-header">
+            <div class="panel-title">时间轴</div>
+            <span class="status-chip" id="review-save-status">未选择任务</span>
+          </div>
+          <div class="waveform-stage review-waveform-stage">
+            <canvas id="review-waveform-canvas" class="waveform-canvas" aria-label="审核波形（左键设开始，右键设结束，拖动标记线调整时间轴）"></canvas>
+            <div class="waveform-empty" id="review-waveform-empty">选择任务后在此显示打轴波形</div>
+            <div class="waveform-playhead" id="review-waveform-playhead" aria-hidden="true"></div>
+          </div>
+          <div class="waveform-toolbar" role="toolbar" aria-label="审核波形控制">
+            <button type="button" class="icon-btn" id="review-waveform-play" title="播放或暂停（空格）" aria-label="播放或暂停">▶</button>
+            <button type="button" class="icon-btn" id="review-waveform-stop" title="停止播放" aria-label="停止播放">■</button>
+            <span class="waveform-time" id="review-waveform-time">00:00.000 / 00:00.000</span>
+            <label class="waveform-zoom-label" for="review-waveform-zoom">缩放</label>
+            <input type="range" id="review-waveform-zoom" min="1" max="32" step="0.5" value="1" aria-label="审核波形缩放">
+            <button type="button" class="icon-btn" id="review-waveform-reset" title="重置波形视图" aria-label="重置波形视图">↺</button>
+            <button type="button" class="icon-btn" id="review-export" title="导出字幕" aria-label="导出字幕">⇩</button>
+          </div>
+          <audio id="review-audio-player" preload="metadata" hidden></audio>
+          <div class="review-table-wrap">
+            <table class="review-table">
+              <thead><tr><th>#</th><th>时间</th><th>说话人</th><th>文本</th><th aria-label="操作"></th></tr></thead>
+              <tbody id="review-tbody"></tbody>
+            </table>
+          </div>
+          <div class="workspace-empty" id="review-empty">暂无可审核字幕</div>
+        </section>
+        <aside class="workspace-panel review-inspector">
+          <div class="workspace-panel-header"><div class="panel-title">审核信息</div></div>
+          <div class="review-inspector-body" id="review-inspector-body">
+            <div class="metric-list" id="review-metrics"></div>
+            <div class="review-next-actions">
+              <button type="button" class="workspace-button primary" id="review-go-feedback">提交反馈学习</button>
+              <button type="button" class="workspace-button" id="review-go-quality">查看质量报告</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="workspace-view" id="workspace-feedback" hidden>
+      <div class="workspace-heading">
+        <div><div class="workspace-eyebrow">LEARNING</div><h1>反馈学习</h1><div class="workspace-subline">预览修订影响，再写入用户配置</div></div>
+        <div class="workspace-actions"><select id="feedback-workspace-profile" aria-label="反馈配置"><option value="user_default">user_default</option></select><button type="button" class="icon-btn" id="feedback-workspace-refresh" title="刷新反馈数据" aria-label="刷新反馈数据">↻</button></div>
+      </div>
+      <div class="feedback-workspace-grid">
+        <section class="workspace-panel feedback-source-panel">
+          <div class="workspace-panel-header"><div class="panel-title">修订来源</div><span class="status-chip" id="feedback-source-status">未选择任务</span></div>
+          <div class="feedback-source-actions">
+            <button type="button" class="workspace-button" id="feedback-use-current">使用当前编辑结果</button>
+            <label class="workspace-button file-button">选择修订字幕<input type="file" id="feedback-workspace-ref" accept=".srt,.ass"></label>
+            <label class="workspace-button file-button">选择音频<input type="file" id="feedback-workspace-audio" accept="audio/*,video/*,.mp3,.wav,.flac,.m4a,.ogg,.mp4,.mkv,.mov,.avi,.webm"></label>
+          </div>
+          <div class="feedback-source-detail" id="feedback-source-detail"></div>
+          <div class="feedback-workspace-actions"><button type="button" class="workspace-button" id="feedback-workspace-preview">预览差异</button><button type="button" class="workspace-button primary" id="feedback-workspace-learn">确认学习</button></div>
+        </section>
+        <section class="workspace-panel feedback-report-panel">
+          <div class="workspace-panel-header"><div class="panel-title">学习结果</div><span class="status-chip" id="feedback-workspace-status">等待预览</span></div>
+          <div class="feedback-result-grid" id="feedback-workspace-report"><div class="workspace-empty">暂无学习结果</div></div>
+        </section>
+      </div>
+      <div class="feedback-lower-grid">
+        <section class="workspace-panel"><div class="workspace-panel-header"><div class="panel-title">健康趋势</div></div><div id="feedback-health-chart" class="health-chart"><div class="workspace-empty">暂无趋势数据</div></div></section>
+        <section class="workspace-panel"><div class="workspace-panel-header"><div class="panel-title">审核队列</div><button type="button" class="icon-btn" id="feedback-queue-refresh" title="刷新审核队列" aria-label="刷新审核队列">↻</button></div><div id="feedback-review-queue"><div class="workspace-empty">暂无待审核样本</div></div></section>
+      </div>
+      <!-- ★ 参数自适应学习 (Phase 5, 自处理页侧栏移入) -->
+      <section class="workspace-panel" id="feedback-adaptive-panel">
+        <div class="workspace-panel-header"><div class="panel-title">📚 参数自适应学习</div></div>
+        <div class="feedback-section">
+          <div class="feedback-empty" id="feedback-empty-state">
+            在处理页面完成任务后，可在此提交修订版进行反馈学习
+          </div>
+          <div id="feedback-controls" style="display:none;">
+            <div class="feedback-btn-row">
+              <button class="feedback-pick-btn" id="fb-pick-ref" onclick="App.pickRefFile()">📄 选择修订字幕</button>
+              <button class="feedback-pick-btn" id="fb-pick-audio" onclick="App.pickAudioFile()">🎵 选择音频</button>
+              <button class="feedback-mini-btn primary" id="fb-learn-edits" onclick="App.handleFeedbackLearnFromEdits()" style="display:none;">📝 用当前编辑结果学习</button>
+            </div>
+            <input type="file" class="feedback-file-input" id="fb-ref-input" accept=".srt,.ass">
+            <input type="file" class="feedback-file-input" id="fb-audio-input" accept="audio/*,video/*,.mp3,.wav,.flac,.m4a,.ogg,.mp4,.mkv,.mov,.avi,.webm">
+            <div style="display:flex;gap:4px;margin-top:4px;">
+              <button class="feedback-mini-btn primary" id="fb-learn-btn" onclick="App.handleFeedbackLearn()" style="display:none;">📚 开始学习</button>
+              <button class="feedback-mini-btn" id="fb-preview-btn" onclick="App.handleFeedbackPreview()" style="display:none;">🔍 预览差异</button>
+            </div>
+            <div id="fb-file-status" style="font-size:0.62rem;color:var(--text-tertiary);margin-top:2px;"></div>
+          </div>
+          <div class="feedback-report" id="feedback-report" style="display:none;"></div>
+          <div class="feedback-divider" id="feedback-divider" style="display:none;"></div>
+          <div id="feedback-config-mgmt" style="display:none;"></div>
+        </div>
+      </section>
+    </section>
+
+    <section class="workspace-view" id="workspace-history" hidden>
+      <div class="workspace-heading"><div><div class="workspace-eyebrow">HISTORY</div><h1>任务历史</h1><div class="workspace-subline" id="history-summary">—</div></div><div class="workspace-actions"><select id="history-status-filter" aria-label="任务状态"><option value="">全部状态</option><option value="completed">已完成</option><option value="degraded_completed">降级完成</option><option value="failed">失败</option><option value="running">运行中</option></select><button type="button" class="icon-btn" id="history-refresh" title="刷新历史" aria-label="刷新历史">↻</button></div></div>
+      <div class="history-workspace-grid"><section class="workspace-panel"><div id="history-workspace-list" class="history-workspace-list"><div class="workspace-empty">加载中...</div></div><div class="history-pagination"><button type="button" class="icon-btn" id="history-prev" title="上一页" aria-label="上一页">←</button><span id="history-page-label">1 / 1</span><button type="button" class="icon-btn" id="history-next" title="下一页" aria-label="下一页">→</button></div></section><aside class="workspace-panel history-detail-panel"><div class="workspace-panel-header"><div class="panel-title">任务详情</div><span class="status-chip" id="history-detail-status">未选择</span></div><div id="history-detail-body" class="history-detail-body"><div class="workspace-empty">选择任务查看详情</div></div></aside></div>
+    </section>
+
+    <section class="workspace-view" id="workspace-quality" hidden>
+      <div class="workspace-heading"><div><div class="workspace-eyebrow">QUALITY</div><h1>质量报告</h1><div class="workspace-subline" id="quality-report-meta">选择任务查看运行质量</div></div><div class="workspace-actions"><select id="quality-task-select" aria-label="选择质量报告任务"><option value="">选择任务</option></select><button type="button" class="icon-btn" id="quality-refresh" title="刷新报告" aria-label="刷新报告">↻</button></div></div>
+      <div id="quality-report-content" class="quality-report-grid"><div class="workspace-panel workspace-empty">暂无质量报告</div></div>
+    </section>
   </main>
 </div>
 
@@ -412,14 +576,20 @@
 <!-- ============================================================
      JAVASCRIPT — Application Logic
      ============================================================ -->
-<script src="/js/ui-config.js"></script>
-<script src="/js/ui-progress.js"></script>
-<script src="/js/ui-subtitles.js"></script>
+<script src="/js/ui-config.js?v=20260905-timing1"></script>
+<script src="/js/ui-progress.js?v=20260804-ab1"></script>
+<script src="/js/ui-subtitles.js?v=20260905-timing1"></script>
 <script src="/js/ui-feedback.js"></script>
-<script src="/js/api-client.js"></script>
+<script src="/js/api-client.js?v=20260905-timing1"></script>
+<script src="/js/workspace.js"></script>
+<script src="/js/ui-review.js?v=20260905-timing1"></script>
+<script src="/js/ui-history.js"></script>
+<script src="/js/ui-quality.js"></script>
+<script src="/js/ui-feedback-workspace.js"></script>
+<script src="/js/waveform.js?v=20260905-timing1"></script>
 <script src="/js/websocket.js"></script>
 <script src="/js/state.js"></script>
 <script src="/js/settings.js"></script>
-<script src="/app.js"></script>
+<script src="/app.js?v=20260905-timing1"></script>
 </body>
 </html>

@@ -2,11 +2,41 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
 
 from ..utils.audio_utils import AudioUtils
+
+
+DEFAULT_HARD_SILENCE_SECONDS = 0.4
+
+
+def group_speech_intervals(
+    intervals: Iterable[Tuple[float, float]],
+    *,
+    max_gap: float = DEFAULT_HARD_SILENCE_SECONDS,
+) -> List[Tuple[float, float]]:
+    """Group intervals for ASR context without crossing hard silence.
+
+    The result is an ASR input policy only. Callers must retain the original
+    intervals for physical projection and coverage auditing.
+    """
+    if max_gap < 0:
+        raise ValueError("max_gap must be non-negative")
+
+    ordered = sorted(
+        (float(start), float(end))
+        for start, end in intervals
+        if float(end) > float(start)
+    )
+    grouped: List[Tuple[float, float]] = []
+    for start, end in ordered:
+        if not grouped or start - grouped[-1][1] > max_gap:
+            grouped.append((start, end))
+            continue
+        grouped[-1] = (grouped[-1][0], max(grouped[-1][1], end))
+    return grouped
 
 
 def is_time_in_speech(t: float, skeleton: List[Tuple[float, float]]) -> bool:

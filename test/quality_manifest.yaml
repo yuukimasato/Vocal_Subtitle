@@ -1,7 +1,11 @@
+schema_version: quality-manifest-v2
+
 scenes:
   - name: "中文双人-QS"
     audio: test/QS-0-1-2-2-人声.wav
     ground_truth: test/QS-0-1-2-2-人工.ass
+    reference_role: advisory
+    gate_profile: safety
     category: multi_speaker
     language: zh
     speaker_count: 2
@@ -10,6 +14,8 @@ scenes:
   - name: "中文单人-181"
     audio: test/181人声.wav
     ground_truth: test/181-人工修正.ass
+    reference_role: advisory
+    gate_profile: safety
     category: single_speaker
     language: zh
     speaker_count: 2
@@ -17,13 +23,17 @@ scenes:
   - name: "中文双人-培训测试"
     audio: test/培训测试-双人.wav
     ground_truth: test/培训测试-双人-人工修正.ass
+    reference_role: advisory
+    gate_profile: safety
     category: multi_speaker
-    language: zh
+    language: mixed
     speaker_count: 2
 
   - name: "中文多人"
     audio: test/中文多人员测试音频.wav
     ground_truth: test/中文多人员测试音频字幕-人工修正.ass
+    reference_role: advisory
+    gate_profile: safety
     category: multi_speaker
     language: zh
     speaker_count: 3
@@ -31,6 +41,8 @@ scenes:
   - name: "英文多人"
     audio: test/英文多人员测试音频.wav
     ground_truth: test/英文多人员测试音频-人工修正.ass
+    reference_role: advisory
+    gate_profile: safety
     category: multi_speaker
     language: en
     speaker_count: 3
@@ -38,6 +50,8 @@ scenes:
   - name: "英国老头测评"
     audio: test/video_英国老头评测中国美的移动空调_1MIN_real-人声.wav
     ground_truth: test/video_英国老头评测中国美的移动空调_手动人工字幕.ass
+    reference_role: advisory
+    gate_profile: safety
     category: single_speaker
     language: en
     speaker_count: 1
@@ -45,6 +59,8 @@ scenes:
   - name: "中文朗读双人"
     audio: test/TTS中文朗读测试-双人.wav
     ground_truth: null
+    reference_role: none
+    gate_profile: safety
     category: multi_speaker
     language: zh
     speaker_count: 2
@@ -53,7 +69,59 @@ scenes:
   - name: "巧乐兹"
     audio: test/简单三步就能复刻巧乐兹？-人声.wav
     ground_truth: null
+    reference_role: none
+    gate_profile: safety
     category: single_speaker
     language: zh
     speaker_count: 1
     tags: [no_manual_reference]
+
+  - name: "合成非语音-纯音与噪声"
+    audio: test/golden/non_speech_tone.wav
+    ground_truth: test/golden/non_speech_tone.json
+    ground_truth_format: normalized_json
+    reference_role: none
+    gate_profile: safety
+    category: non_speech
+    language: none
+    speaker_count: 0
+    tags: [non_speech]
+
+  - name: "合成重复短语-我"
+    audio: test/golden/repeated_phrase_me.wav
+    ground_truth: test/golden/repeated_phrase_me.ass
+    ground_truth_format: ass
+    reference_role: advisory
+    gate_profile: safety
+    category: single_speaker
+    language: zh
+    speaker_count: 1
+    tags: [repeated_phrase, synthetic_fixture]
+
+# Diagnostic-only fixtures. They are consumed by contract tests and are not
+# included in the production reference denominator unless an audio and
+# reference artifact is explicitly attached to a scene above.
+diagnostic_fixtures:
+  - id: "diagnostic-short-response-150ms"
+    fixture_kind: short_response
+    reference_role: diagnostic_only
+    expected_events:
+      - {id: "expected:short:0001", start: 0.40, end: 0.55, text: "好"}
+      - {id: "expected:short:0002", start: 2.10, end: 2.25, text: "嗯"}
+      - {id: "expected:short:0003", start: 4.60, end: 4.75, text: "对"}
+  - id: "diagnostic-trailing-speech-2s"
+    fixture_kind: trailing_speech
+    reference_role: diagnostic_only
+    expected_events:
+      - {id: "expected:tail:0001", start: 8.00, end: 10.00, text: "最后一句仍在说话"}
+    physical_speech_spans:
+      - {id: "physical:tail:0001", start: 8.00, end: 10.00}
+  - id: "diagnostic-overlap-ownership"
+    fixture_kind: overlap_ownership
+    reference_role: diagnostic_only
+    expected_events:
+      - {id: "expected:overlap:0001", start: 1.00, end: 1.80, text: "甲的内容", speaker_id: 1, owner: "speaker-1"}
+      - {id: "expected:overlap:0002", start: 1.40, end: 2.20, text: "乙的回应", speaker_id: 2, owner: "speaker-2"}
+    physical_speech_spans:
+      - {id: "physical:overlap:0001", start: 1.00, end: 1.80, speaker_id: 1, owner: "speaker-1"}
+      - {id: "physical:overlap:0002", start: 1.40, end: 2.20, speaker_id: 2, owner: "speaker-2"}

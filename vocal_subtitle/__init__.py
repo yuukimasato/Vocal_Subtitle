@@ -11,6 +11,9 @@
 - pipeline: 管道编排器
 - config: YAML 配置管理
 - utils: 工具函数 (音频处理 / 缓存 / GPU检测 / 日志 / 模型加载)
+- governance: 引擎生命周期管理 / 实验注册表 / 发布治理
+- reporting: 统一运行报告 / 引擎可用性检查 / 降级日志
+- quality: 质量运营 (问题分类 / 场景切片 / 趋势报告)
 
 Usage:
     >>> from vocal_subtitle import Pipeline
@@ -37,13 +40,56 @@ os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 from .pipeline import Pipeline, PipelineStats
 from .config import ConfigLoader, PipelineConfig
 
+# governance public API
+from .governance import (
+    EngineLifecycle,
+    EngineRegistry,
+    EngineStatus,
+    LifecycleManager,
+)
+
+# reporting public API
+from .reporting import (
+    DegradationLogger,
+    EngineAvailabilityChecker,
+    EngineAvailabilitySnapshot,
+    RunReport,
+    RunReportBuilder,
+    StageInfo,
+)
+
+# quality public API (key classes only)
+from .quality import (
+    IssueCategory,
+    IssueClassifier,
+    IssueSeverity,
+    QualityIssue,
+)
+
 __all__ = [
     "Pipeline",
     "PipelineStats",
     "ConfigLoader",
     "PipelineConfig",
+    # governance
+    "EngineLifecycle",
+    "EngineStatus",
+    "EngineRegistry",
+    "LifecycleManager",
+    # reporting
+    "RunReport",
+    "RunReportBuilder",
+    "StageInfo",
+    "EngineAvailabilityChecker",
+    "EngineAvailabilitySnapshot",
+    "DegradationLogger",
+    # quality
+    "IssueCategory",
+    "IssueSeverity",
+    "QualityIssue",
+    "IssueClassifier",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "vocal-subtitle contributors"
 __license__ = "MIT"

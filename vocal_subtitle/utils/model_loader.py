@@ -2,14 +2,14 @@
 
 统一管理 sentence-transformers 模型的加载策略，确保：
 1. 优先检测本地缓存（零网络，即时返回）
-2. 本地缺失时才尝试网络下载（短超时防止阻塞）
-3. 网络不可达时自动回退到 HF 镜像站
+2. 本地缺失时默认返回 None（规则逻辑优雅降级，不阻塞 Pipeline）
+3. 仅在显式允许时尝试网络下载，并回退到 HF 镜像站
 
 策略优先级:
   第一路径 — local_files_only=True（已缓存 → 即时返回）
-  第二路径 — 限时网络下载（10s 超时，防止启动/测试无限阻塞）
-  第三路径 — HF 镜像站（国内网络优化）
-  第四路径 — 返回 None（优雅降级，不影响 Pipeline 主流程）
+  第二路径 — 离线降级（返回 None，不影响 Pipeline 主流程）
+  第三路径 — 显式允许下载时的网络下载（10s 超时）
+  第四路径 — HF 镜像站（国内网络优化）
 
 关键设计:
   - 模块级 setdefault 设置 HF_HUB_OFFLINE=1，优先影响后续导入
@@ -20,7 +20,10 @@
 
 import logging
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,7 @@ os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 
 # 模型名称常量（使用完整的 org/model 路径，确保缓存目录匹配）
 MINILM_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+ALLOW_DOWNLOAD_ENV = "VOCAL_SUBTITLE_ALLOW_MODEL_DOWNLOAD"
 
 # 缓存标记：记录已确认存在于本地的模型，避免重复尝试
 _cached_models: set = set()
@@ -88,50 +92,126 @@ def load_sentence_transformer(
     model_name: str = MINILM_MODEL_NAME,
     *,
     device: str = "cpu",
+    allow_download: bool | None = None,
 ) -> Optional["SentenceTransformer"]:
     """离线优先加载 sentence-transformers 模型
 
     加载策略（按优先级）：
     1. 本地缓存 → local_files_only=True（零网络，即时返回）
-    2. 网络下载 → 10s 超时限制（需操作 hf_constants.HF_HUB_OFFLINE）
-    3. HF 镜像站 → 国内网络优化
-    4. 全部失败 → 返回 None（调用方自行降级）
+    2. 默认离线降级 → 返回 None（调用方使用规则逻辑）
+    3. 显式允许下载时 → 网络下载并回退到 HF 镜像站
 
     Args:
         model_name: HuggingFace 模型名称
         device: 推理设备 ("cpu" | "cuda")
+        allow_download: 是否允许本地缓存缺失时访问网络。未传入时仅当
+            ``VOCAL_SUBTITLE_ALLOW_MODEL_DOWNLOAD=1`` 才允许。
 
     Returns:
         SentenceTransformer 实例，加载失败时返回 None
     """
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError:
-        logger.warning(
-            "sentence-transformers not installed. "
-            "Semantic NLP features will use rule-only fallback. "
-            "Install with: pip install sentence-transformers"
-        )
-        return None
-
     # ── 第一路径：本地缓存（零网络，立即可用）──────────────────
     if is_model_cached(model_name):
         try:
-            model = SentenceTransformer(
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            logger.warning(
+                "sentence-transformers not installed. "
+                "Semantic NLP features will use rule-only fallback. "
+                "Install with: pip install sentence-transformers"
+            )
+            return None
+        try:
+            model = _load_cached_model(
+                SentenceTransformer,
                 model_name,
-                local_files_only=True,
-                device=device,
+                device,
             )
             logger.info("Model '%s' loaded from local cache", model_name)
             return model
         except Exception as e:
             logger.warning(
-                "Failed to load cached model '%s': %s. Will try network.",
+                "Failed to load cached model '%s': %s.",
                 model_name, e,
             )
 
-    # ── 第二路径：限时网络下载 ──────────────────────────────────
-    return _download_model(model_name, device)
+    if allow_download is None:
+        allow_download = os.environ.get(ALLOW_DOWNLOAD_ENV, "0").lower() in {
+            "1", "true", "yes", "on",
+        }
+    if not allow_download:
+        logger.info(
+            "Model '%s' is not available locally; offline semantic fallback is "
+            "active. Set %s=1 to allow download.",
+            model_name,
+            ALLOW_DOWNLOAD_ENV,
+        )
+        return None
+
+    # ── 第三路径：显式允许时的限时网络下载 ────────────────────────
+    try:
+        return _download_model(model_name, device)
+    except ImportError:
+        logger.warning(
+            "sentence-transformers not installed; cannot download semantic model"
+        )
+        return None
+
+
+def _load_cached_model(
+    sentence_transformer: type,
+    model_name: str,
+    device: str,
+):
+    """Load a cached model while isolating mutable Hugging Face offline state."""
+    saved_env = {
+        key: os.environ.get(key)
+        for key in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE")
+    }
+    saved_hf_offline = None
+    saved_transformers_offline = None
+    try:
+        for key in saved_env:
+            os.environ[key] = "1"
+        try:
+            import huggingface_hub.constants as hf_constants
+
+            saved_hf_offline = hf_constants.HF_HUB_OFFLINE
+            hf_constants.HF_HUB_OFFLINE = True
+        except (ImportError, AttributeError):
+            pass
+        try:
+            import transformers.utils.hub as transformers_hub
+
+            saved_transformers_offline = transformers_hub._is_offline_mode
+            transformers_hub._is_offline_mode = True
+        except (ImportError, AttributeError):
+            pass
+        return sentence_transformer(
+            model_name,
+            local_files_only=True,
+            device=device,
+        )
+    finally:
+        if saved_hf_offline is not None:
+            try:
+                import huggingface_hub.constants as hf_constants
+
+                hf_constants.HF_HUB_OFFLINE = saved_hf_offline
+            except (ImportError, AttributeError):
+                pass
+        if saved_transformers_offline is not None:
+            try:
+                import transformers.utils.hub as transformers_hub
+
+                transformers_hub._is_offline_mode = saved_transformers_offline
+            except (ImportError, AttributeError):
+                pass
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def _download_model(

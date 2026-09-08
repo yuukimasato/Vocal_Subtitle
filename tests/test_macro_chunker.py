@@ -118,6 +118,50 @@ class TestMacroChunker:
             assert chunk.duration <= chunker.config.max_chunk_duration + 5  # 允许少许超出
 
     # ----------------------------------------------------------------
+    # _recursive_split
+    # ----------------------------------------------------------------
+
+    def test_recursive_split_uses_all_silences_in_one_pass(self, temp_dir, monkeypatch):
+        """块内多个静音切点应一次切分；逐个静音单独切会产出重叠的重复子块"""
+        from vocal_subtitle.utils.audio_utils import AudioUtils
+        from vocal_subtitle.vad.ffmpeg_vad import FFmpegSilenceVAD
+
+        chunker = MacroChunker(MacroChunkConfig(
+            enabled=True,
+            auto_enable_threshold=3.0,
+            max_chunk_duration=180.0,
+            overlap_ms=200,
+            recursive=True,
+            recursive_thresholds=[(-30, 3.0)],
+        ))
+
+        sample_rate = 16000
+        audio = np.zeros(int(sample_rate * 300), dtype=np.float32)
+        # 静音检测按块内局部时间返回两个切点
+        monkeypatch.setattr(
+            FFmpegSilenceVAD,
+            "_detect_silence",
+            staticmethod(lambda *args, **kwargs: [(100.0, 103.0), (200.0, 205.0)]),
+        )
+        monkeypatch.setattr(AudioUtils, "save_audio", lambda *args, **kwargs: None)
+
+        out = chunker._recursive_split(
+            [MacroChunk(index=0, start=0.0, end=300.0)],
+            temp_dir / "x.wav",
+            audio,
+            sample_rate,
+        )
+
+        # 两个切点 → 3 个子块；旧实现每个静音各切一遍，会得到 4 块且互相重叠
+        assert len(out) == 3
+        assert [round(c.start, 1) for c in out] == [0.0, 101.3, 202.3]
+        assert [round(c.end, 1) for c in out] == [101.7, 202.7, 300.0]
+        # 索引连续、重叠标记与最终顺序一致
+        assert [c.index for c in out] == [0, 1, 2]
+        assert [c.overlap_with_prev for c in out] == [False, True, True]
+        assert [c.overlap_with_next for c in out] == [True, True, False]
+
+    # ----------------------------------------------------------------
     # stitch_chunks
     # ----------------------------------------------------------------
 

@@ -4,6 +4,7 @@
   const SETTINGS_KEYS = [
     'profile', 'separator', 'uvr_model', 'vad_engine', 'vad_threshold',
     'vad_ffmpeg_enabled', 'vad_ffmpeg_noise_db', 'asr_engine', 'asr_model',
+    'primary_engine', 'secondary_engine', 'engine_pair_policy',
     'asr_device', 'language', 'subtitle_min_duration', 'subtitle_max_duration',
     'diarization_enabled', 'diarization_distance_threshold',
     'diarization_min_speakers', 'diarization_max_speakers', 'speaker_fusion',
@@ -26,6 +27,8 @@
     separator: 'separator', uvr_model: 'uvr_model', vad_engine: 'vad_engine',
     vad_threshold: 'vad_threshold', vad_ffmpeg_enabled: 'ffmpeg_enabled',
     vad_ffmpeg_noise_db: 'ffmpeg_noise_db', asr_engine: 'asr_engine',
+    primary_engine: 'primary_engine', secondary_engine: 'secondary_engine',
+    engine_pair_policy: 'engine_pair_policy',
     asr_model: 'asr_model', language: 'language', device: 'device',
     diarization_enabled: 'diarization', speaker_fusion: 'speaker_fusion',
     global_diarization_model: 'global_diarization_model',

@@ -13,18 +13,29 @@ def result_summary(result_json: str | None, *, detail: bool = False) -> Dict[str
         result = json.loads(result_json)
     except (json.JSONDecodeError, TypeError):
         return None
+    stats = result.get("stats") or {}
+    if not isinstance(stats, dict):
+        stats = {}
     if detail:
         return {
+            "contract_version": result.get("contract_version"),
+            "task_id": result.get("task_id"),
+            "run_id": result.get("run_id") or stats.get("run_id"),
             "subtitle_path": result.get("subtitle_path"),
             "subtitle_count": result.get("subtitle_count", 0),
             "segment_count": result.get("segment_count", 0),
             "from_cache": result.get("from_cache", False),
             "stats": result.get("stats"),
+            "artifacts": result.get("artifacts") or {},
+            "diagnostics": result.get("diagnostics") or {},
+            "input_path": result.get("input_path"),
             "vocals_path": result.get("vocals_path"),
             "accompaniment_path": result.get("accompaniment_path"),
         }
-    stats = result.get("stats") or {}
     return {
+        "contract_version": result.get("contract_version"),
+        "task_id": result.get("task_id"),
+        "run_id": result.get("run_id") or stats.get("run_id"),
         "subtitle_count": result.get("subtitle_count", 0),
         "segment_count": result.get("segment_count", 0),
         "from_cache": result.get("from_cache", False),
@@ -34,8 +45,12 @@ def result_summary(result_json: str | None, *, detail: bool = False) -> Dict[str
 
 
 def history_item(task: Dict[str, Any]) -> Dict[str, Any]:
+    summary = result_summary(task.get("result_json")) or {}
     return {
         "id": task["id"],
+        "task_id": task["id"],
+        "run_id": task.get("run_id") or summary.get("run_id") or "",
+        "contract_version": summary.get("contract_version"),
         "input_file_name": task["input_file_name"],
         "input_file_hash": task.get("input_file_hash", ""),
         "input_file_size": task.get("input_file_size", 0),
@@ -45,7 +60,7 @@ def history_item(task: Dict[str, Any]) -> Dict[str, Any]:
         "total_duration_seconds": task.get("total_duration_seconds", 0),
         "created_at": task.get("created_at", ""),
         "completed_at": task.get("completed_at"),
-        "result_summary": result_summary(task.get("result_json")),
+        "result_summary": summary or None,
     }
 
 

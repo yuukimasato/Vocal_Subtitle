@@ -2,6 +2,8 @@
 
 import os
 
+import pytest
+
 from vocal_subtitle.diarization.model_registry import (
     is_model_cached,
     model_status,
@@ -113,6 +115,7 @@ def test_download_rejects_incomplete_snapshot(monkeypatch, tmp_path):
 
 
 def test_snapshot_download_honors_hf_endpoint(monkeypatch):
+    pytest.importorskip("huggingface_hub")
     observed = {}
 
     monkeypatch.setenv("HF_ENDPOINT", "https://hf-mirror.example/")

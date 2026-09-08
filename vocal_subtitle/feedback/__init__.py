@@ -42,6 +42,7 @@
 """
 
 from .aligner import AlignmentError, AlignmentPair, SemanticScorer, SubtitleAligner
+from .anonymizer import AnonymizationResult, FeedbackAnonymizer
 from .audio_fingerprint import AudioFingerprint, AudioFingerprinter, MahalanobisMatcher
 from .conflict_detector import ConflictDetector, ConflictReport, OscillationEntry
 from .diff_analyzer import DiffAnalyzer, DiffReport, ParamAdjustment
@@ -55,7 +56,9 @@ from .health_scorer import (
 )
 from .impact_estimator import ImpactEstimator, ImpactPrediction
 from .param_learner import ParamDecoupler, ParamLearner
+from .sample_manager import FeedbackSample, FeedbackSampleManager
 from .shadow_mode import ShadowEvaluation, ShadowModeEvaluator, ShadowRunResult
+from .stratified_sampler import SamplingPlan, SamplingResult, StratifiedSampler
 from .user_profile import UserProfileManager
 
 __all__ = [
@@ -64,6 +67,9 @@ __all__ = [
     "AlignmentError",
     "AlignmentPair",
     "SemanticScorer",
+    # Anonymizer
+    "AnonymizationResult",
+    "FeedbackAnonymizer",
     # Audio Fingerprint
     "AudioFingerprint",
     "AudioFingerprinter",
@@ -88,10 +94,17 @@ __all__ = [
     # ParamLearner
     "ParamLearner",
     "ParamDecoupler",
+    # Sample Manager
+    "FeedbackSample",
+    "FeedbackSampleManager",
     # Shadow Mode
     "ShadowEvaluation",
     "ShadowModeEvaluator",
     "ShadowRunResult",
+    # Stratified Sampler
+    "SamplingPlan",
+    "SamplingResult",
+    "StratifiedSampler",
     # UserProfile
     "UserProfileManager",
     # FewShot

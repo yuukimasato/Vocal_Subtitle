@@ -105,6 +105,15 @@ async def get_cache_info():
 
 @router.delete("/cache")
 async def clear_cache(stage: Optional[str] = Query(default=None)):
+    """清除缓存
+
+    Args:
+        stage: 指定阶段名称清除部分缓存，None 则清除 uploads 目录
+
+    清除全部时清理 uploads 目录下的历史上传文件。
+    计算阶段缓存（分离/转录等）保持不变，加速后续处理。
+    持久化文件不受影响，随历史记录生命周期管理。
+    """
     if stage:
         _storage.clear_stage(stage)
         return {"status": "ok", "cleared_stage": stage}
@@ -202,6 +211,7 @@ async def delete_persisted_files(task_id: str):
 
 @router.post("/persistence/cleanup")
 async def cleanup_expired_persistence():
+    """清理所有已过期的持久化文件"""
     return {"status": "ok", "cleaned_dirs": _get_persistence_mgr().cleanup_expired()}
 
 
