@@ -14,13 +14,20 @@ const EXT_MAP = new Map([
   ['ssa', 'ass'],
 ]);
 
+// 首个非空行（嗅探 WEBVTT 用：\s 可跨行，/m 锚定挡不住正文出现该字样的普通文本）
+function firstNonEmptyLine(body) {
+  return body.split('\n').find((line) => line.trim() !== '') ?? '';
+}
+
 export function detectFormat(text, filename = '') {
   const ext = (/\.([a-z0-9]+)$/i.exec(filename)?.[1] ?? '').toLowerCase();
   if (EXT_MAP.has(ext)) return EXT_MAP.get(ext);
   const body = String(text).replace(/^\uFEFF/, '');
-  if (/^\s*WEBVTT/m.test(body)) return 'vtt';
-  if (/^\s*\[Script Info\]/im.test(body) || /^\s*Dialogue\s*:/im.test(body)) return 'ass';
-  if (/\d{1,3}:\d{1,2}:\d{1,2}[,.]\d{1,3}\s*-->\s*\d{1,3}:\d{1,2}:\d{1,2}[,.]\d{1,3}/.test(body)) return 'srt';
+  // 全部行首严格锚定：时间戳 / Dialogue 出现在句中、行中不误判
+  const first = firstNonEmptyLine(body);
+  if (first.startsWith('WEBVTT')) return 'vtt';
+  if (/^[ \t]*\[Script Info\]/m.test(body) || /^[ \t]*Dialogue\s*:/m.test(body)) return 'ass';
+  if (/^\d+:\d{1,2}:\d{1,2}[,.]\d+\s*-->\s*\d+:\d{1,2}:\d{1,2}[,.]\d+/m.test(body)) return 'srt';
   return null;
 }
 
@@ -34,23 +41,62 @@ export function parseSubtitle(text, { filename = '', format } = {}) {
   return { format: fmt, cues, doc: doc ?? null };
 }
 
+// 剪贴板内容分类：能解析出 cue 的字幕 → subtitle；其余按纯文本逐行拆分（跳过空行）→ text。
+// 嗅探到字幕格式但解析失败时抛出 ParseError（残缺字幕应报错而非贴成散文行）。
+export function classifyClipboard(text) {
+  const body = String(text).replace(/^\uFEFF/, '');
+  if (!body.trim()) return null;
+  const fmt = detectFormat(body);
+  if (fmt) {
+    const { cues, doc } = PARSERS[fmt](body);
+    if (cues.length) return { kind: 'subtitle', format: fmt, cues, doc: doc ?? null };
+  }
+  const lines = body
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.length ? { kind: 'text', lines } : null;
+}
+
 export function serializeSubtitle(format, cues, doc) {
   const fn = SERIALIZERS[format];
   if (!fn) throw new ParseError(`未知格式：${format}`);
   return fn(cues, doc);
 }
 
-// 在播放头处新建 cue；ASS 来源时附上与其骨架一致的元数据
+// 在播放头处新建 cue；ASS 来源时附上与其骨架一致的元数据（样式取文档默认样式）
 export function makeNewCue(format, doc, start, end, text) {
   const cue = makeCue(start, end, text);
   if (format === 'ass') {
-    cue.meta = makeAssMeta(doc?.fields ?? DEFAULT_ASS_FIELDS, cue);
+    cue.meta = makeAssMeta(doc?.fields ?? DEFAULT_ASS_FIELDS, cue, doc?.defaultStyle);
   }
   return cue;
 }
 
+// 修改 ASS cue 的样式字段（写回原骨架字段序）；非 ASS cue 或无 style 字段返回 null
+export function cueStyle(cue) {
+  const idx = cue?.meta?.fields?.indexOf('style') ?? -1;
+  if (!cue?.meta?.parts || idx < 0) return null;
+  return cue.meta.parts[idx] ?? '';
+}
+
+export function withCueStyle(cue, style) {
+  const idx = cue?.meta?.fields?.indexOf('style') ?? -1;
+  if (!cue?.meta?.parts || idx < 0) return null;
+  const meta = { ...cue.meta, parts: [...cue.meta.parts] };
+  meta.parts[idx] = style;
+  return { ...cue, meta };
+}
+
+// ASS 骨架是否带有 [Events] 段（doc.lines 中段头以 raw 行保存）
+function assDocHasEvents(doc) {
+  return !!doc?.lines?.some((e) => e.t === 'raw' && /^\s*\[[^\]]*event/i.test(e.s));
+}
+
 export function ensureDoc(format, cues, doc) {
-  if (format === 'ass' && !doc) return buildAssDoc(cues);
+  // 骨架缺失或没有 [Events] 段（如 parseAss('') 后新增 cue）时，重建最小合法骨架
+  if (format === 'ass' && !assDocHasEvents(doc)) return buildAssDoc(cues);
   return doc;
 }
 

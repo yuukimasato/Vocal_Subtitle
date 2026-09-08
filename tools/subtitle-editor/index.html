@@ -35,50 +35,62 @@
   </header>
 
   <main class="workspace">
-    <section class="stage">
-      <div class="video-wrap">
-        <div id="video-mount"></div>
-        <div id="stage-empty" class="stage-empty">
-          <p class="stage-empty-title">拖入 视频 / 音频 文件开始</p>
-          <p>也支持拖入 SRT / VTT / ASS 字幕文件</p>
+    <div class="upper">
+      <section class="stage">
+        <div class="video-wrap">
+          <div id="video-mount"></div>
+          <div id="stage-empty" class="stage-empty">
+            <p class="stage-empty-title">拖入 视频 / 音频 文件开始</p>
+            <p>也支持拖入 SRT / VTT / ASS 字幕文件</p>
+          </div>
         </div>
-      </div>
-      <div id="split-wave" class="splitter splitter-h" title="拖动调整波形区高度，双击复位"></div>
-      <div class="wave-wrap">
-        <div id="waveform"></div>
-        <div id="wave-fallback" hidden><canvas></canvas></div>
-        <div id="wave-msg" class="wave-msg"></div>
-      </div>
-      <div id="transport" class="transport"></div>
-    </section>
+      </section>
 
-    <div id="split-cue" class="splitter splitter-v" title="拖动调整字幕列表宽度，双击复位"></div>
+      <div id="split-cue" class="splitter splitter-v" title="拖动调整字幕列表宽度，双击复位"></div>
 
-    <aside class="cue-pane">
-      <div id="cue-tools" class="cue-tools">
-        <button class="btn" type="button" title="在播放头处新建（N）">插入</button>
-        <button class="btn" type="button" title="删除选中（Delete）">删除</button>
-        <button class="btn" type="button" title="在播放头处拆分（Ctrl+D）">拆分</button>
-        <button class="btn" type="button" title="与下一句合并（Ctrl+M）">合并</button>
-        <label class="follow-label"><input type="checkbox" checked> 跟随</label>
-        <span id="cue-count" class="cue-count"></span>
+      <aside class="cue-pane">
+        <div id="cue-tools" class="cue-tools">
+          <button id="cue-insert" class="btn" type="button" title="在播放头处新建（N）">插入</button>
+          <button id="cue-delete" class="btn" type="button" title="删除选中行（Delete）">删除</button>
+          <button id="cue-split" class="btn" type="button" title="在播放头处拆分（Ctrl+D）">拆分</button>
+          <button id="cue-merge" class="btn" type="button" title="与下一句合并（Ctrl+M）">合并</button>
+          <label class="follow-label"><input type="checkbox" checked> 跟随</label>
+          <span id="save-status" class="save-status" aria-live="polite"></span>
+          <span id="cue-count" class="cue-count"></span>
+        </div>
+        <div class="cue-table-wrap">
+          <table id="cue-table">
+            <thead>
+              <tr>
+                <th scope="col" class="col-num">#</th>
+                <th scope="col">开始</th>
+                <th scope="col">结束</th>
+                <th scope="col">时长</th>
+                <th scope="col" class="col-style">样式</th>
+                <th scope="col" class="col-text">文本</th>
+                <th scope="col" class="col-play"></th>
+              </tr>
+            </thead>
+            <tbody id="cue-tbody"></tbody>
+          </table>
+        </div>
+      </aside>
+    </div>
+
+    <div id="split-wave" class="splitter splitter-h" title="拖动调整播放器高度（向下增大），双击复位"></div>
+    <div class="wave-wrap">
+      <div class="wave-main">
+        <div id="wave-display" class="wave-display" tabindex="0" aria-label="音频盒（波形定时区）">
+          <canvas id="wave-ruler"></canvas>
+          <div id="waveform"></div>
+          <div id="wave-fallback" hidden><canvas></canvas></div>
+          <div id="wave-msg" class="wave-msg"></div>
+        </div>
+        <div id="wave-side" class="wave-side"></div>
       </div>
-      <div class="cue-table-wrap">
-        <table id="cue-table">
-          <thead>
-            <tr>
-              <th class="col-num">#</th>
-              <th>开始</th>
-              <th>结束</th>
-              <th>时长</th>
-              <th class="col-text">文本</th>
-              <th class="col-ops"></th>
-            </tr>
-          </thead>
-          <tbody id="cue-tbody"></tbody>
-        </table>
-      </div>
-    </aside>
+      <div id="audio-toolbar" class="audio-toolbar"></div>
+    </div>
+    <div id="transport" class="transport"></div>
   </main>
 
   <input type="file" id="media-input" hidden accept="video/*,audio/*">
@@ -86,45 +98,79 @@
 
   <dialog id="help-dialog">
     <h2>键盘快捷键</h2>
-    <p class="dialog-hint">时间轴键位在小键盘（NumLock 任意状态均可），无小键盘时主键盘数字排等效。</p>
+    <p class="dialog-hint">音频盒交互与键位对齐 Aegisub：点击波形区获得焦点后进入「Audio」键位上下文；小键盘键位在文本/时间输入框以外的任何焦点下均可用（NumLock 任意状态；输入框内需保留数字录入）。</p>
     <div class="help-grid">
       <table>
         <tbody>
-          <tr><td><kbd>小键盘 5</kbd></td><td>播放当前字幕，到结束为止</td></tr>
-          <tr><td><kbd>小键盘 1</kbd></td><td>试听开始点之前 500ms</td></tr>
-          <tr><td><kbd>小键盘 3</kbd></td><td>试听结束点之后 500ms</td></tr>
-          <tr><td><kbd>小键盘 8</kbd></td><td>停止播放</td></tr>
-          <tr><td><kbd>小键盘 4 / 6</kbd></td><td>开始点前移 / 后移（Shift 微调 10ms）</td></tr>
-          <tr><td><kbd>小键盘 7 / 9</kbd></td><td>缩短 / 加长当前句（Shift 微调 10ms）</td></tr>
-          <tr><td><kbd>小键盘 2 / 0</kbd></td><td>下一句 / 上一句</td></tr>
-          <tr><td><kbd>小键盘 Enter</kbd></td><td>提交编辑并停止试听</td></tr>
+          <tr><th colspan="2">音频盒 · 播放</th></tr>
+          <tr><td><kbd>S</kbd> / <kbd>Space</kbd></td><td>播放选区（生效时间，含未提交改动）</td></tr>
+          <tr><td><kbd>R</kbd></td><td>播放当前行</td></tr>
+          <tr><td><kbd>B</kbd></td><td>播放选区 / 停止 切换</td></tr>
+          <tr><td><kbd>H</kbd></td><td>停止播放</td></tr>
+          <tr><td><kbd>Q</kbd> / <kbd>W</kbd></td><td>试听选区开始前 / 结束后 500ms</td></tr>
+          <tr><td><kbd>E</kbd> / <kbd>D</kbd></td><td>试听选区前 500ms / 后 500ms 段</td></tr>
+          <tr><td><kbd>T</kbd></td><td>从选区开始播放到结尾</td></tr>
+          <tr><th colspan="2">音频盒 · 定时</th></tr>
+          <tr><td><kbd>← / →</kbd> 或 <kbd>Z / X</kbd></td><td>上一行 / 下一行（未提交改动会被丢弃）</td></tr>
+          <tr><td><kbd>G</kbd> / <kbd>Enter</kbd></td><td>提交定时；「自动下一行」开启时前进</td></tr>
+          <tr><td><kbd>Shift+G</kbd></td><td>提交并新建一行（默认时长 2s）</td></tr>
+          <tr><td><kbd>C</kbd> / <kbd>V</kbd></td><td>前置（开始 −200ms）/ 延后（结束 +300ms）</td></tr>
+          <tr><td><kbd>小键盘 + / −</kbd></td><td>加长 / 缩短 10ms</td></tr>
+          <tr><td><kbd>A</kbd> / <kbd>F</kbd></td><td>视图左移 / 右移</td></tr>
         </tbody>
       </table>
       <table>
         <tbody>
-          <tr><td><kbd>Space</kbd></td><td>播放 / 暂停</td></tr>
-          <tr><td><kbd>← / →</kbd></td><td>快退 / 快进 5s（Shift 1s）</td></tr>
-          <tr><td><kbd>, / .</kbd></td><td>上一帧 / 下一帧</td></tr>
-          <tr><td><kbd>N</kbd></td><td>在播放头处插入字幕</td></tr>
-          <tr><td><kbd>Delete</kbd></td><td>删除选中行</td></tr>
-          <tr><td><kbd>Ctrl+D</kbd> / <kbd>Ctrl+M</kbd></td><td>拆分 / 合并</td></tr>
-          <tr><td><kbd>L</kbd></td><td>循环当前句</td></tr>
-          <tr><td><kbd>F</kbd></td><td>列表跟随播放滚动</td></tr>
-          <tr><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td><td>撤销 / 重做</td></tr>
-          <tr><td><kbd>Ctrl+S</kbd></td><td>按当前格式导出</td></tr>
-          <tr><td><kbd>Ctrl+滚轮</kbd></td><td>缩放波形</td></tr>
+          <tr><th colspan="2">音频盒 · 鼠标（波形/频谱区生效）</th></tr>
+          <tr><td>左键单击</td><td>设定开始时间（红线移到点击处）；若越过原结束点，结束点并拢到点击处等待重设</td></tr>
+          <tr><td>右键单击</td><td>设定结束时间（蓝线移到点击处）；若越过原开始点，开始点并拢到点击处</td></tr>
+          <tr><td>左键按住拖动</td><td>以按下位置为开始扫选区间，抬起定结束；向左拖越过起点则起点跟随</td></tr>
+          <tr><td>左键之后按住右键拖动</td><td>经典双键打轴：以左键起点为锚，移动调整区间，右键抬起的位置就是结束时间</td></tr>
+          <tr><td>左键拖标记边缘</td><td>微调开始 / 结束（3px 内抓取，光标 ↔）</td></tr>
+          <tr><td>Alt+拖动</td><td>整段平移（多选行一起移动）</td></tr>
+          <tr><td>Ctrl+拖标记</td><td>同时拖动各行共享的边界</td></tr>
+          <tr><td>Shift+拖动</td><td>临时吸附到其他行边界（工具栏「吸附行边界」开启时反之）</td></tr>
+          <tr><td>中键</td><td>把播放头定位到该处</td></tr>
+          <tr><td>滚轮 / Ctrl+滚轮</td><td>滚动视图 / 缩放波形</td></tr>
+          <tr><td>拖动顶部标尺</td><td>平移视图</td></tr>
+          <tr><th colspan="2">小键盘（输入框外任何焦点可用）</th></tr>
+          <tr><td><kbd>小键盘 5</kbd> / <kbd>8</kbd></td><td>播放选区 / 停止</td></tr>
+          <tr><td><kbd>小键盘 1</kbd> / <kbd>3</kbd></td><td>试听开始点前 / 结束点后 500ms</td></tr>
+          <tr><td><kbd>小键盘 Enter</kbd></td><td>提交定时</td></tr>
+          <tr><td><kbd>小键盘 4/6 / 7/9</kbd></td><td>开始点前移/后移、缩短/加长（±10ms，与 Aegisub 一致）</td></tr>
+          <tr><td><kbd>小键盘 2 / 0</kbd></td><td>下一句 / 上一句（只切换，不动播放头）</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="dialog-hint">双击字幕行可编辑文本与时间；拖拽波形区块边缘改时间，拖中间整体移动。</p>
+    <p class="dialog-hint">
+      其余全局键位：<kbd>N</kbd> 插入；<kbd>Delete</kbd> 删除选中行；<kbd>Ctrl+D</kbd> / <kbd>Ctrl+M</kbd> 拆分 / 合并；
+      <kbd>Ctrl+X/C/V</kbd> 剪切 / 复制 / 粘贴（剪贴板为纯多行文本时按行新建字幕行，为 SRT/VTT/ASS 内容时按原时间粘贴）；<kbd>Ctrl+A</kbd> 全选；<kbd>L</kbd> 循环当前句；<kbd>F</kbd>（音频盒外）列表跟随滚动；
+      <kbd>←/→</kbd>（音频盒外）快退快进；<kbd>, / .</kbd> 逐帧；<kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd> 撤销重做；<kbd>Ctrl+S</kbd> 导出。
+      默认「自动提交」关闭：拖拽只改预览，按 <kbd>G</kbd>/提交 才写入行（一步撤销）；切换行会丢弃未提交改动。
+    </p>
     <form method="dialog"><button class="btn btn-primary">关闭</button></form>
+  </dialog>
+
+  <dialog id="paste-dialog">
+    <h2>选择性粘贴</h2>
+    <p class="dialog-hint">勾选要从剪贴板行带入的字段，从右键所在行起逐行覆盖；未勾选字段保留原值，剪贴板行多于剩余行时在末尾追加新行。剪贴板为纯文本（无时间轴）时不弹出本窗口，直接按行新建字幕行。</p>
+    <div class="paste-fields">
+      <label><input type="checkbox" data-field="start" checked> 开始时间</label>
+      <label><input type="checkbox" data-field="end" checked> 结束时间</label>
+      <label><input type="checkbox" data-field="text" checked> 文本</label>
+    </div>
+    <form method="dialog" class="dialog-actions">
+      <button class="btn" value="cancel" type="submit">取消</button>
+      <button class="btn btn-primary" value="ok" type="submit">粘贴</button>
+    </form>
   </dialog>
 
   <dialog id="about-dialog">
     <h2>关于</h2>
     <p>字幕打轴工作台（Vocal Subtitle Timing Editor）——本地运行的网页版字幕打轴工具。</p>
     <p class="dialog-hint">
-      本工具为独立实现，未使用任何参考编辑器的源代码或美术资源。<br>
+      音频盒交互模型对齐 Aegisub 3.2 的行为（Aegisub 为 BSD-3-Clause 开源软件），
+      本工具为其独立实现，未复制其源代码或美术资源。<br>
       第三方组件（均保留许可声明，见 <code>vendor/NOTICE.md</code>）：
     </p>
     <ul class="about-list">

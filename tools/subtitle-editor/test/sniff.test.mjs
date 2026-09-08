@@ -17,6 +17,16 @@ test('按内容识别', () => {
   assert.equal(detectFormat('随便文本'), null);
 });
 
+test('普通文本含 WEBVTT 字样不误判为 VTT', () => {
+  assert.equal(detectFormat('会议记录\n\nWEBVTT 相关讨论'), null);
+  assert.equal(detectFormat('明天讨论 WEBVTT 规范'), null);
+});
+
+test('普通文本行中含时间戳不误判为 SRT', () => {
+  assert.equal(detectFormat('会议在 1:23:45,678 --> 1:23:50,000 之间召开'), null);
+  assert.equal(detectFormat('记录：Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,x'), null);
+});
+
 test('parseSubtitle 分发并附加 id', () => {
   const { format, cues } = parseSubtitle('1\n00:00:01,000 --> 00:00:02,000\n你好', { filename: 'x.srt' });
   assert.equal(format, 'srt');

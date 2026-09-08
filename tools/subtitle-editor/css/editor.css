@@ -111,24 +111,31 @@ body {
   font-weight: 600;
 }
 
-.btn-primary:hover:not(:disabled) { filter: brightness(1.08); background: linear-gradient(135deg, #7c9cff 0%, #ad7bff 100%); }
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
 
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-secondary); }
 .btn-ghost:hover:not(:disabled) { color: var(--text-primary); background: var(--surface); }
 
-/* ---------- 工作区布局（面板可拖拽调整大小） ---------- */
+/* ---------- 工作区布局（上:播放器|字幕列表,下:波形+控制条） ---------- */
 .workspace {
   flex: 1;
   display: flex;
+  flex-direction: column;
   padding: 12px;
   min-height: 0;
   gap: 2px;
 }
 
+.upper {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+/* 播放器列 */
 .stage {
   flex: 1 1 auto;
   display: flex;
-  flex-direction: column;
   min-width: 0;
   min-height: 0;
 }
@@ -200,6 +207,16 @@ body {
 /* ArtPlayer 内部件微调 */
 .video-wrap .art-video-player { border-radius: var(--radius); }
 
+/* 视频等比缩放至容器内并居中。必须居中：JASSUB 的样式预览画布
+   （vendor/jassub.esm.js 的 _getElementBoundingBox）与 .subtitle-preview 都按
+   容器居中定位，画面若锚定在左上角，字幕会整体偏离画面。 */
+#video-mount video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
 /* 字幕文本 overlay（非 ASS 预览时） */
 .subtitle-preview {
   position: absolute;
@@ -218,10 +235,11 @@ body {
     1px -1px 2px #000, -1px 1px 2px #000;
 }
 
-/* ---------- 波形区 ---------- */
+/* ---------- 音频盒（Aegisub 音频显示 + 工具栏 + 滑条竖栏） ---------- */
 .wave-wrap {
-  position: relative;
-  height: var(--wave-h, 180px);
+  display: flex;
+  flex-direction: column;
+  height: var(--wave-h, 220px);
   flex: none;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -229,29 +247,41 @@ body {
   overflow: hidden;
 }
 
-#waveform { position: absolute; inset: 0; }
-
-#waveform div::part(region-handle) {
-  width: 7px;
-  background: var(--accent);
-  opacity: 0.85;
-  border-radius: 3px;
-  box-shadow: none;
-  border: none;
+.wave-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
-#waveform div::part(regions-container) {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: rgba(230, 237, 243, 0.85);
+.wave-display {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  outline: none;
+  background: var(--bg-secondary);
+}
+.wave-display:focus { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+
+#wave-ruler {
+  display: block;
+  width: 100%;
+  height: 22px;
+  cursor: ew-resize;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.14);
 }
 
-#wave-fallback { position: absolute; inset: 0; cursor: crosshair; }
+#waveform { position: absolute; top: 23px; bottom: 0; left: 0; right: 0; cursor: crosshair; overflow: hidden; }
+
+/* 波形选区/边界标记的样式（.ab-*）在 js/ui/waveform.js 内维护：wavesurfer
+   渲染在自己的 shadow root 里，主文档样式表作用不到，故随覆盖层注入。 */
+
+#wave-fallback { position: absolute; top: 23px; bottom: 0; left: 0; right: 0; cursor: crosshair; }
 #wave-fallback canvas { width: 100%; height: 100%; display: block; }
 
 .wave-msg {
   position: absolute;
-  top: 6px;
+  top: 28px;
   left: 10px;
   right: 10px;
   font-size: 12px;
@@ -259,6 +289,77 @@ body {
   pointer-events: none;
   z-index: 5;
 }
+
+/* 右侧滑条竖栏（横向缩放/纵向振幅/音量/联动） */
+.wave-side {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 3px;
+  border-left: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.ab-slider {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+}
+.ab-slider input[type='range'] {
+  width: 90px;
+  transform: rotate(-90deg);
+  transform-origin: center;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.ab-link { flex: none; align-self: center; }
+
+/* 工具栏（按钮顺序对齐 Aegisub audio 工具栏） */
+.audio-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-wrap: wrap;
+}
+
+.abtn {
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.abtn:hover { border-color: var(--border-hover); background: var(--surface-hover); }
+.abtn.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  color: var(--text-primary);
+}
+.abtn.active .abtn-box { opacity: 1; }
+.abtn-box {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0.25;
+}
+.abtn-sep { width: 1px; height: 16px; background: var(--border); margin: 0 3px; }
+.ab-sel { height: 24px; cursor: pointer; }
 
 /* ---------- 播放控制条 ---------- */
 .transport {
@@ -290,7 +391,7 @@ body {
 .tbtn.active {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(124, 156, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .tsel {
@@ -312,7 +413,7 @@ body {
   white-space: nowrap;
 }
 
-/* ---------- 字幕面板 ---------- */
+/* ---------- 字幕面板（播放器右侧） ---------- */
 .cue-pane {
   flex: none;
   width: var(--cue-w, 400px);
@@ -345,6 +446,12 @@ body {
 }
 
 .follow-label input { accent-color: var(--accent); }
+
+.save-status {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
 
 .cue-count {
   margin-left: auto;
@@ -385,27 +492,37 @@ body {
 }
 
 #cue-table .col-num { width: 34px; }
-#cue-table .time { width: 86px; }
+#cue-table .time { width: 96px; }
 #cue-table .dur { width: 58px; color: var(--text-tertiary); }
-#cue-table .col-ops { width: 76px; }
+#cue-table .col-style { width: 92px; }
+#cue-table .col-play { width: 40px; }
+
+/* 非 ASS 或无样式表时隐藏整列 */
+.cue-table-wrap.hide-style .col-style,
+.cue-table-wrap.hide-style .style-cell { display: none; }
+
+.edit-style {
+  width: 100%;
+  max-width: 110px;
+  padding: 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+}
 
 .cue-row { cursor: pointer; }
 .cue-row:hover { background: var(--surface-hover); }
-.cue-row.active { background: rgba(124, 156, 255, 0.08); box-shadow: inset 2px 0 0 var(--accent); }
-.cue-row.selected { background: rgba(124, 156, 255, 0.15); }
-.cue-row.editing { cursor: default; background: rgba(124, 156, 255, 0.06); }
+.cue-row.active { background: color-mix(in srgb, var(--accent) 8%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.cue-row.selected { background: color-mix(in srgb, var(--accent) 15%, transparent); }
 
 #cue-table .num { color: var(--text-tertiary); }
-#cue-table .text {
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-primary);
-  min-width: 80px;
-}
+#cue-table .text-cell { min-width: 120px; }
 
 .op {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -413,14 +530,11 @@ body {
   color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
 
-.cue-row:hover .op, .op:focus { opacity: 1; }
 .op:hover { color: var(--text-primary); border-color: var(--border-hover); background: var(--surface-hover); }
-.op.ok { color: var(--accent-green); opacity: 1; }
-.op.cancel { color: var(--accent-red); opacity: 1; }
+.op.play { color: var(--accent); }
 
 .edit-time, .edit-text {
   width: 100%;
@@ -433,7 +547,16 @@ body {
   font-family: var(--mono);
 }
 
-.edit-text { font-family: var(--font); resize: vertical; min-width: 100px; }
+.edit-text {
+  font-family: var(--font);
+  resize: none;
+  overflow: hidden;
+  max-height: 110px;
+  min-width: 100px;
+  line-height: 1.45;
+  display: block;
+}
+
 .edit-time:focus, .edit-text:focus { outline: none; border-color: var(--accent); }
 .edit-time.invalid { border-color: var(--accent-red); }
 
@@ -441,6 +564,49 @@ body {
   text-align: center;
   padding: 36px 10px;
   color: var(--text-tertiary);
+}
+
+/* ---------- 右键菜单 ---------- */
+.ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ctx-item:hover:not(:disabled) { background: var(--surface-hover); }
+.ctx-item:disabled { opacity: 0.4; cursor: default; }
+.ctx-item kbd { font-size: 11px; color: var(--text-tertiary); }
+.ctx-danger { color: var(--accent-red); }
+
+.ctx-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
 }
 
 /* ---------- toast ---------- */
@@ -468,9 +634,12 @@ body {
   max-width: 70vw;
   opacity: 1;
   transition: opacity 0.3s;
+  pointer-events: auto; /* 容器不接收指针，但单条 toast 可点击关闭 */
+  cursor: pointer;
 }
 
 .toast-error { border-color: var(--accent-red); color: #ffb3ad; }
+.toast-warn { border-color: var(--accent-orange); }
 .toast-out { opacity: 0; }
 
 /* ---------- 对话框 ---------- */
@@ -500,6 +669,29 @@ dialog h2 { margin: 0 0 12px; font-size: 17px; }
 .help-grid td { padding: 5px 10px 5px 0; vertical-align: top; }
 .help-grid td:first-child { white-space: nowrap; }
 
+.paste-fields {
+  display: flex;
+  gap: 18px;
+  margin: 14px 0;
+}
+
+.paste-fields label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.paste-fields input { accent-color: var(--accent); }
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0;
+}
+
 kbd {
   display: inline-block;
   padding: 1px 7px;
@@ -520,10 +712,11 @@ dialog code { background: var(--bg-tertiary); padding: 1px 5px; border-radius: 4
   .workspace {
     flex-direction: column;
   }
+  .upper { flex-direction: column; }
   .splitter { display: none; } /* 堆叠布局不提供拖拽 */
   .video-wrap { min-height: 260px; }
   .wave-wrap { height: 160px; }
-  .cue-pane { width: auto; max-height: 46vh; }
+  .cue-pane { width: auto; min-width: 0; max-height: 46vh; }
 }
 
 @media (max-width: 640px) {

@@ -5,7 +5,7 @@ import { showToast } from './toast.js';
 const MEDIA_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|mp3|wav|flac|m4a|ogg|opus)$/i;
 const SUB_EXT = /\.(srt|vtt|ass|ssa)$/i;
 
-export function createToolbar({ store, actions, player, waveform, assPreview, draft }) {
+export function createToolbar({ store, actions, player, waveform, assPreview, draft, flushEdits }) {
   const mediaInput = document.getElementById('media-input');
   const subtitleInput = document.getElementById('subtitle-input');
   const buttons = {
@@ -33,8 +33,15 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
     subtitleInput.value = '';
   });
 
-  buttons.undo.addEventListener('click', () => actions.undo());
-  buttons.redo.addEventListener('click', () => actions.redo());
+  // 与 Ctrl+Z/Ctrl+Shift+Z 一致：先落盘未提交的行内编辑再撤销/重做
+  buttons.undo.addEventListener('click', () => {
+    flushEdits?.();
+    actions.undo();
+  });
+  buttons.redo.addEventListener('click', () => {
+    flushEdits?.();
+    actions.redo();
+  });
   store.on('history', () => {
     buttons.undo.disabled = !actions.history.canUndo;
     buttons.redo.disabled = !actions.history.canRedo;
@@ -72,7 +79,7 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
         JSON.stringify(draftData.cues) !== JSON.stringify(parsed.cues)
       ) {
         const when = new Date(draftData.savedAt ?? Date.now()).toLocaleString();
-        if (confirm(`检测到本地编辑草稿（保存于 ${when}），比文件内容更新。\n\n确定：恢复草稿；取消：打开文件内容。`)) {
+        if (confirm(`检测到本地编辑草稿（保存于 ${when}），比文件内容更新。\n\n确定：恢复草稿；取消：放弃草稿并打开文件内容。`)) {
           actions.loadSubtitle(draftData.cues, {
             name: file.name,
             format: draftData.format ?? parsed.format,
@@ -82,6 +89,8 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
           showToast('已恢复编辑草稿');
           return;
         }
+        // 用户放弃草稿：立即删除，避免下次打开重复弹恢复确认
+        draft.discard(file.name, store.state.mediaName);
       }
       actions.loadSubtitle(parsed.cues, {
         name: file.name,
@@ -107,12 +116,13 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
 
   // ---------- 导出 ----------
   function download(format) {
+    flushEdits?.(); // 先落盘尚未提交的行内编辑
     const s = store.state;
     if (!s.cues.length) {
       showToast('没有可导出的字幕', 'error');
       return;
     }
-    const fmt = FORMATS.some((f) => f.id === format) ? format : 'srt';
+    const fmt = FORMATS.some((f) => f.id === format) ? format : 'ass';
     let content;
     try {
       content = serializeSubtitle(fmt, s.cues, ensureDoc(fmt, s.cues, s.subDoc));
@@ -128,11 +138,15 @@ export function createToolbar({ store, actions, player, waveform, assPreview, dr
     a.download = `${base}.${fmt}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const draftName = s.subtitleName || s.mediaName; // markExported 会改写 subtitleName，先取草稿键名
     actions.markExported(fmt, `${base}.${fmt}`);
+    draft.discard(draftName, s.mediaName); // 导出成功即落盘，草稿完成使命
     showToast(`已导出 ${base}.${fmt}`);
   }
 
   return {
-    exportCurrent: () => download(store.state.subtitleFormat || 'srt'),
+    exportCurrent: () => download(store.state.subtitleFormat || 'ass'),
+    openMediaFile,
+    openSubtitleFile,
   };
 }

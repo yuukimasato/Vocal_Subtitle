@@ -17,14 +17,31 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const ESBUILD_VERSION = '0.25.12';
 
 function bundle() {
-  const out = join(mkdtempSync(join(tmpdir(), 'vst-build-')), 'bundle.mjs');
-  execFileSync('npx', [
-    '-y', `esbuild@${ESBUILD_VERSION}`,
-    join(ROOT, 'js/main.js'),
-    '--bundle', '--format=esm', '--minify',
-    `--outfile=${out}`,
-  ], { cwd: ROOT, stdio: 'inherit' });
-  return readFileSync(out, 'utf8');
+  const dir = mkdtempSync(join(tmpdir(), 'vst-build-'));
+  try {
+    const out = join(dir, 'bundle.mjs');
+    execFileSync('npx', [
+      '-y', `esbuild@${ESBUILD_VERSION}`,
+      join(ROOT, 'js/main.js'),
+      '--bundle', '--format=esm', '--minify',
+      `--outfile=${out}`,
+    ], { cwd: ROOT, stdio: 'inherit' });
+    return readFileSync(out, 'utf8');
+  } finally {
+    rmSync(dir, { recursive: true, force: true }); // try/finally 清理，避免每次构建泄漏临时目录
+  }
+}
+
+// 产物头部的构建标记：日期 + 短提交号（不在 git 仓库/无 git 时只写日期）
+function buildMarker() {
+  const date = new Date().toISOString().slice(0, 10);
+  let rev = '';
+  try {
+    rev = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  } catch {
+    // git 不可用：忽略
+  }
+  return `<!-- built from source @ ${date}${rev ? ` (${rev})` : ''} -->\n`;
 }
 
 // 内联脚本里不允许出现字面 </script>，统一转义（字符串/模板/正则中 \/ 语义不变）
@@ -71,5 +88,5 @@ if (out.includes('js/main.js') || out.includes('css/editor.css')) {
 }
 
 const target = join(ROOT, 'subtitle-editor-standalone.html');
-writeFileSync(target, out);
+writeFileSync(target, buildMarker() + out);
 console.log(`已生成 ${target}（${(out.length / 1024 / 1024).toFixed(2)} MB）`);
