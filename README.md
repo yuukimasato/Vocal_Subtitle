@@ -38,6 +38,8 @@
 - **三级缓存架构**：文件级分离缓存 + 片段级转录缓存 + SQLite 持久化任务历史
 - **💾 设置持久化**：所有用户参数自动保存，刷新页面后恢复上次配置；服务端持久化到 cache/
 - **🧠 自适应反馈学习 (Phase 5)**：上传修订字幕自动学习用户偏好，音频指纹匹配、参数震荡检测、健康度评分、Few-shot 示例缓存、Shadow Mode 安全试错
+- **🛡️ 质量治理与黄金集门禁**：离线生产链预检 (preflight)、运行生命周期管理、决策追踪 (decision trace) 与运行报告；黄金集质量门禁覆盖幻觉保留、真实语音漏删、物理越界、跨静音等指标
+- **🎛️ 字幕打轴工作台 (独立工具)**：零构建网页版打轴编辑器，视频/音频播放 + Aegisub 式音频盒（波形/标记拖拽）+ ASS 样式预览，提供双击即用的单文件版（见 [tools/subtitle-editor](tools/subtitle-editor/README.md)）
 - **全 MIT 兼容**：所有依赖可自由商用
 
 ## 快速开始
@@ -252,6 +254,27 @@ result = pipeline.run(
 )
 ```
 
+## 字幕打轴工作台（独立工具）
+
+`tools/subtitle-editor/` 提供一个**零构建、零 npm 依赖、纯本地运行**的网页版字幕打轴编辑器，与主管道解耦，可单独使用：
+
+- 🎬 视频/音频播放（ArtPlayer）+ ASS 样式实时预览（JASSUB，含 wasm 渲染）
+- 🌊 Aegisub 式音频盒：波形 + 时间标尺 + 红/蓝标记拖拽 + 播放头打点（`[` / `]`）
+- 📝 字幕列表行内编辑、多格式读写（SRT / VTT / ASS）、格式自动嗅探
+- ⌨️ 完整快捷键体系、撤销/重做、草稿自动保存
+- 📦 **单文件独立版** `subtitle-editor-standalone.html`：全部 JS/CSS 与 wasm/worker/字体内嵌于一个 HTML，双击即可使用（`file://` 协议、无需服务器、不联网）
+
+```bash
+cd tools/subtitle-editor
+python3 -m http.server 8631   # 模块版（开发形态）
+# 或直接双击 subtitle-editor-standalone.html
+
+npm test                      # 运行测试（node --test，120 项）
+node build-standalone.mjs     # 重新生成单文件版
+```
+
+详见 [tools/subtitle-editor/README.md](tools/subtitle-editor/README.md)。
+
 ## 处理流程
 
 ```
@@ -323,16 +346,19 @@ Stage 5: 时间轴映射 + 字幕构建 — pysubs2
 
 | 模块 | 路径 | 职责 |
 |------|------|------|
-| `pipeline.py` | `vocal_subtitle/pipeline.py` | 管道编排器，调度全部阶段，管理数据流 (~4628 行) |
-| `config.py` | `vocal_subtitle/config.py` | YAML 配置管理 + 24 个 dataclass 定义 (~1221 行) |
-| `pipeline_context.py` | `vocal_subtitle/pipeline_context.py` | 统一数据上下文 (跨模块数据交换) |
-| `streaming.py` | `vocal_subtitle/streaming.py` | 流式处理架构（滑动窗口 + 模块降级映射, ~316 行） |
-| `macro_chunker.py` | `vocal_subtitle/macro_chunker.py` | 宏观静音切块 (Plan 0, ~345 行) |
-| `audio_preprocessor.py` | `vocal_subtitle/audio_preprocessor.py` | 预 VAD 降噪（频谱门 + 突发噪声抑制, ~477 行） |
-| `acoustic_validator.py` | `vocal_subtitle/acoustic_validator.py` | 方向感知声学校验门控 + 诊断报告 (Plan 7, ~1037 行) |
+| `pipeline.py` | `vocal_subtitle/pipeline.py` | 管道入口（组件化后的薄编排层，实际调度在 `application/`） |
+| `application/` | `vocal_subtitle/application/` | 编排层：preflight 预检、run 生命周期、契约协调、阶段/分块/流式执行、运行报告（17 模块） |
+| `config/` | `vocal_subtitle/config/` | YAML 配置管理 + dataclass 定义 + 覆盖解析 |
+| `contracts/` | `vocal_subtitle/contracts/` | 跨层契约（证据/决策/投影的稳定接口，9 模块） |
+| `streaming.py` | `vocal_subtitle/streaming.py` | 流式处理架构（滑动窗口 + 模块降级映射） |
+| `macro_chunker.py` | `vocal_subtitle/macro_chunker.py` | 宏观静音切块 (Plan 0) |
+| `acoustic/` | `vocal_subtitle/acoustic/` | 声学骨架 + 声学校验（含 Plan 7 方向感知门控） |
+| `quality/` | `vocal_subtitle/quality/` | 质量门禁与黄金集校准（10 模块） |
+| `governance/` | `vocal_subtitle/governance/` | 发布治理（配对/默认值/发布检查） |
+| `reporting/` | `vocal_subtitle/reporting/` | 运行报告与诊断聚合（8 模块） |
 | `session_manager.py` | `vocal_subtitle/utils/session_manager.py` | 会话管理 (hash 目录 + 去重 + 输出命名) |
-| `feedback/` | `vocal_subtitle/feedback/` | 自适应反馈学习引擎 (Phase 5) — 差异分析、参数学习、健康度评分、音频指纹、Shadow Mode 等 10 个模块 (~4184 行) |
-| `physical/` | `vocal_subtitle/physical/` | 物理优先中间层 (Phase 0-3) — 全局坐标系、物理时间线 IR、词级分配、覆盖审计、字幕分箱等 15 个模块 (~4187 行) |
+| `feedback/` | `vocal_subtitle/feedback/` | 自适应反馈学习引擎 (Phase 5) — 差异分析、参数学习、健康度评分、音频指纹、Shadow Mode、匿名化与分层采样 |
+| `physical/` | `vocal_subtitle/physical/` | 物理优先中间层 (Phase 0-3) — 全局坐标系、物理时间线 IR、词级分配、覆盖审计、决策 IR/投影 |
 
 ### 引擎层
 
@@ -490,248 +516,67 @@ API 不可用      → 自动降级到规则模式
 
 ```
 Vocal_Subtitle/
-├── vocal_subtitle/                 # 核心包
-│   ├── pipeline.py                 # 管道编排器 (~4628 行)
-│   ├── config.py                   # YAML 配置 + 24 个 dataclass 定义 (~1221 行)
-│   ├── cli.py                      # Click CLI 命令行入口 (~898 行)
-│   ├── pipeline_context.py         # 统一数据上下文
-│   ├── streaming.py                # 流式处理架构 (~316 行)
-│   ├── macro_chunker.py            # Plan 0: 宏观静音切块 (~345 行)
-│   ├── audio_preprocessor.py       # 预 VAD 降噪 (~477 行)
-│   ├── acoustic_validator.py       # Plan 7: 方向感知声学校验门控 + 诊断 (~1037 行)
-│   ├── separation/                 # Stage 1: 人声分离 (3 engines, ~679 行)
-│   │   ├── uvr_engine.py              # UVR BS-RoFormer (ONNX)
-│   │   ├── spleeter_engine.py         # Spleeter (TF)
-│   │   └── openunmix_engine.py        # Open-Unmix (PyTorch)
-│   ├── vad/                        # Stage 2: VAD 检测 (4 engines + fusion, ~1264 行)
-│   │   ├── silero_vad.py              # Silero VAD (ONNX 神经网络)
-│   │   ├── webrtc_vad.py              # WebRTC VAD (轻量信号处理)
-│   │   ├── ten_vad.py                 # TEN VAD (纯能量回退)
-│   │   ├── ffmpeg_vad.py              # ffmpeg silencedetect (Plan 1)
-│   │   └── boundary_fusion.py         # Plan 2: 三方法边界融合
-│   ├── merging/                    # Stage 3: 片段合并 + LLM 语义合并 (~2173 行)
-│   │   ├── merge_strategy.py          # 合并策略 + Plan 3 段内预切分 (~728 行)
-│   │   ├── llm_merge_engine.py        # Plan 5: LLM 语义合并 + Plan 6 帧级无缝 (~1131 行)
-│   │   └── semantic_window.py         # 语义窗口分析
-│   ├── asr/                        # Stage 4: ASR 识别 + 边界优化子系统 (~4626 行)
-│   │   ├── faster_whisper_engine.py   # faster-whisper (CTranslate2)
-│   │   ├── whisper_cpp_engine.py      # whisper.cpp (subprocess)
-│   │   ├── funasr_engine.py           # FunASR (中文优化)
-│   │   ├── funasr_manager.py          # FunASR 自动安装 + 模型准备 (~205 行)
-│   │   ├── whisperx_engine.py         # WhisperX (词级时间戳增强, ~335 行)
-│   │   ├── global_transcriber.py      # 全局语言检测 + 完整音频转录 (~272 行)
-│   │   ├── hallucination.py           # 幻觉过滤 (~253 行)
-│   │   ├── local_recovery.py          # 局部回退转录恢复 (~434 行)
-│   │   ├── boundary_refiner.py        # Plan 4: 双向边界精修 (~528 行)
-│   │   ├── boundary_confidence.py     # 边界置信度评估 (5维度, ~400 行)
-│   │   ├── boundary_reasr.py          # 滑动窗口冗余 ASR (3窗口, ~483 行)
-│   │   ├── boundary_arbitration.py    # LLM 语义仲裁器 (~681 行)
-│   │   └── text_normalizer.py         # 文本后处理 (~152 行)
-│   ├── diarization/                # Stage 3.5: 说话人分离 (~4237 行)
-│   │   ├── speaker_embedding.py       # 声学嵌入提取 (SpeechBrain, ~604 行)
-│   │   ├── feature_extractor.py       # 87维声学特征提取 (~369 行)
-│   │   ├── speaker_clusterer.py       # 凝聚聚类 + 文本降级 (~647 行)
-│   │   ├── speaker_fusion.py          # 全局 + 局部说话人融合 (~632 行)
-│   │   ├── pyannote_engine.py         # pyannote 全局聚类 (~415 行)
-│   │   ├── speaker_change.py          # 说话人变更检测 (~434 行)
-│   │   ├── role_labeler.py            # LLM 角色标注 (~334 行)
-│   │   ├── turn_reconciler.py         # 话轮协调 (~227 行)
-│   │   ├── canonicalizer.py           # 规范标签 (~151 行)
-│   │   └── model_registry.py          # 说话人模型注册 (~231 行)
-│   ├── physical/                   # Phase 0-3: 物理优先中间层 (~4187 行)
-│   │   ├── coordinate.py              # CoordinateMapper 全局坐标系
-│   │   ├── timeline.py                # PhysicalTimeline 物理时间线
-│   │   ├── ir.py                      # GlobalTranscript / GlobalWord 全局 IR
-│   │   ├── ir_cache.py                # IR 持久化缓存
-│   │   ├── evidence_adapter.py        # 证据适配 (VAD/ffmpeg/diarization → IR)
-│   │   ├── allocator.py               # 词级物理分配 + 迟到词修复
-│   │   ├── coverage.py                # 物理覆盖审计
-│   │   ├── subtitle_bins.py           # 物理字幕分箱
-│   │   ├── events.py                  # GlobalSubtitleEvent 构建
-│   │   ├── context.py                 # 上下文窗口构建
-│   │   ├── shadow.py                  # Shadow 制品构建
-│   │   ├── boundary_arbiter.py        # 物理边界仲裁
-│   │   ├── noise_profile.py           # 噪声画像
-│   │   └── word_alignment.py          # 词级对齐
-│   ├── mapping/                    # Stage 5: 时间轴映射 + 字幕构建 (~4814 行)
-│   │   ├── time_mapper.py             # 时间轴映射 + 去重 (~712 行)
-│   │   ├── subtitle_builder.py        # pysubs2 字幕输出 (~720 行)
-│   │   ├── strict_segmenter.py        # 严格分段器 (~789 行)
-│   │   ├── boundary_projection.py     # 边界投影 (~433 行)
-│   │   ├── semantic_fragments.py      # 语义片段 (~369 行)
-│   │   ├── event_ops.py               # 事件操作 (~368 行)
-│   │   ├── quality_report.py          # 质量报告 (~294 行)
-│   │   ├── overlap_export.py          # 重叠导出 (~236 行)
-│   │   ├── event_constraints.py       # 事件约束 (~200 行)
-│   │   ├── display_timeline.py        # 展示时间轴 (~197 行)
-│   │   ├── finalize.py                # 最终化 (~198 行)
-│   │   ├── final_validator.py         # 最终校验 (~126 行)
-│   │   ├── end_time_validator.py      # 结束时间校验 (~104 行)
-│   │   └── llm_guard.py               # LLM 保护 (~55 行)
-│   ├── utils/                      # 工具层 (~3160 行)
-│   │   ├── audio_utils.py             # 音频加载/转换/重采样
-│   │   ├── cache_manager.py           # 磁盘缓存管理 (diskcache)
-│   │   ├── session_manager.py         # 会话管理 (hash 目录 + 去重)
-│   │   ├── persistence_manager.py     # 持久化文件管理
-│   │   ├── task_history.py            # SQLite 任务历史
-│   │   ├── progress.py                # 进度管理器 (CLI + WebSocket 双路)
-│   │   ├── gpu_detector.py            # CUDA/MPS/CPU 自动检测
-│   │   ├── model_loader.py            # 模型加载工具
-│   │   ├── file_hasher.py             # SHA256 文件哈希
-│   │   ├── hf_token_store.py          # HuggingFace Token 安全存储
-│   │   └── logger.py                  # structlog 结构化日志
-│   └── webui/                      # FastAPI Web GUI (~3640 行)
-│       ├── api.py                     # REST API (~2691 行, 46+ 端点)
-│       ├── websocket.py               # WebSocket 实时通信 (~156 行)
-│       ├── models.py                  # Pydantic 数据模型 (~362 行)
-│       ├── cli_runner.py              # GUI 启动入口
-│       ├── runtime.py                  # 运行时辅助 (~82 行)
-│       ├── subtitle_editing.py        # 字幕批量编辑（合并/拆分/说话人, ~205 行）
-│       ├── app.py                     # FastAPI 工厂
-│       └── static/                    # 前端 SPA (index.html, ~4207 行)
-├── llm_subtitle_optimizer/         # LLM 字幕优化独立包 (~1223 行)
-│   ├── optimizer.py                   # Agent Loop 优化器 (最多3轮, ~640 行)
-│   ├── llm_client.py                  # OpenAI 兼容 API 客户端 (~202 行)
-│   ├── aligner.py                     # Diff 对齐修复
-│   ├── prompts.py                     # 提示词模板
-│   ├── text_utils.py                  # 文本工具函数
-│   └── prompts/                       # 提示词模板文件
-│       ├── subtitle.md
-│       └── speaker_role.md
-├── configs/                        # YAML 场景模板 (5个)
-│   ├── default.yaml                   # 通用 (平衡配置)
-│   ├── podcast.yaml                   # 播客/访谈
-│   ├── education.yaml                 # 教学/演讲
-│   ├── variety_show.yaml              # 综艺/直播
-│   └── music_live.yaml                # 音乐现场
-├── scripts/                        # 工具脚本
-│   ├── benchmark.py                   # 性能基准测试
-│   ├── run_benchmarks.py              # 批量 Benchmark 运行器
-│   ├── compare_timeline.py            # 字幕时间轴对比 (ASS/SRT)
-│   ├── evaluate_acoustic_gold.py      # 声学 Gold 评估
-│   ├── run_quality_benchmark.py       # 质量基准运行器
-│   ├── generate_test_fixtures.py      # 测试数据生成
-│   ├── install_deps.sh                # 系统依赖安装脚本
-│   └── download_speaker_model.sh      # 说话人模型下载
-├── tests/                          # 测试套件 (~100+ 测试文件, ~6178 行)
-│   ├── test_pipeline.py               # 全链路集成测试
-│   ├── test_cli.py                    # CLI 端到端测试
-│   ├── test_webui.py                  # Web GUI API 测试
-│   ├── test_webui_batch.py            # Web GUI 批量操作测试
-│   ├── test_webui_runtime.py          # Web GUI 运行时测试
-│   ├── test_subtitle_editing.py       # 字幕批量编辑测试
-│   ├── test_feedback.py               # 反馈学习模块测试
-│   ├── test_phase_five.py             # Phase 5 集成测试
-│   ├── test_global_asr_path.py        # 全局 ASR 路径测试
-│   ├── test_audio_preprocessor.py     # 降噪模块测试
-│   ├── test_acoustic_validator.py     # 声学校验测试
-│   ├── test_acoustic_gold.py          # 声学 Gold 标准测试
-│   ├── test_macro_chunker.py          # 宏观切块测试
-│   ├── test_streaming.py              # 流式处理测试
-│   ├── test_end_time_fixes.py         # 结束时间修正测试
-│   ├── test_session_manager.py        # 会话管理器测试
-│   ├── test_persistence_manager.py    # 持久化管理器测试
-│   ├── test_benchmark_rollout.py      # Benchmark 展开测试
-│   ├── test_quality_benchmark.py      # 质量基准测试
-│   ├── test_compare_timeline.py       # 时间轴对比测试
-│   ├── test_deployment_defaults.py    # 部署默认值测试
-│   ├── test_install_scripts.py        # 安装脚本测试
-│   ├── test_language_policy.py        # 语言策略测试
-│   ├── test_separation/               # 分离引擎测试 (3 文件)
-│   ├── test_vad/                      # VAD 引擎测试 (5 文件)
-│   ├── test_merging/                  # 合并模块测试 (3 文件)
-│   ├── test_asr/                      # ASR 引擎测试 (8 文件)
-│   ├── test_mapping/                  # 映射模块测试 (8 文件)
-│   ├── test_diarization/              # 说话人分离测试 (10 文件)
-│   ├── test_utils/                    # 工具模块测试 (5 文件)
-│   ├── test_physical/                 # 物理层测试 (11 文件)
-│   ├── benchmarks/                    # Benchmark 场景 (6 目录)
-│   └── fixtures/                      # 测试数据 (音频/配置/期望输出)
-├── docs/                           # 技术文档 + 治理规范 (50+ 篇)
-│   ├── ARCHITECTURE.md                # 技术架构文档
-│   ├── ARCHITECTURE_STATE.md          # 架构状态表
-│   ├── DOCUMENT_INDEX.md              # 文档状态索引
-│   ├── NAMING_CONVENTIONS.md          # 命名规范
-│   ├── DATA_ASSETS.md                 # 数据资产登记
-│   ├── RUN_REPORT_SCHEMA.md           # 运行报告 Schema
-│   ├── TASK_STATE_MACHINE.md          # 任务状态机
-│   ├── ENGINE_LIFECYCLE.md            # 引擎生命周期
-│   ├── EXPERIMENT_REGISTRY.md         # 实验注册表
-│   ├── CONTRACTS_EVIDENCE_DECISION_PROJECTION.md  # 契约文档
-│   ├── FEEDBACK_LOOP.md               # 反馈闭环
-│   ├── QUALITY_OPERATIONS.md          # 质量运营
-│   ├── RELEASE_GOVERNANCE.md          # 发布治理
-│   ├── adr/                           # 架构决策记录
-│   ├── superpowers/specs/             # 设计规范
-│   └── ...
-├── main.py                         # CLI 入口
-├── main_gui.py                     # GUI 入口
-├── ARCHITECTURE.md                 # 架构文档入口 → docs/ARCHITECTURE.md
-├── install.sh                      # 一键安装脚本 (~1111 行)
+├── vocal_subtitle/                 # 核心包（~61,000 行）
+│   ├── pipeline.py                 # 管道入口（组件化后的薄编排层）
+│   ├── application/                # 编排层：preflight、run 生命周期、契约协调、
+│   │                               #   阶段/分块/流式执行、离线生产链、运行报告 (17 模块)
+│   ├── config/                     # YAML 配置 + dataclass 定义 + 覆盖解析
+│   ├── contracts/                  # 跨层契约（证据/决策/投影稳定接口, 9 模块）
+│   ├── separation/                 # Stage 1: 人声分离 (UVR / Spleeter / Open-Unmix)
+│   ├── vad/                        # Stage 2: VAD (Silero/WebRTC/TEN/ffmpeg + 三方法边界融合)
+│   ├── merging/                    # Stage 3: 片段合并 + Plan 5/6 语义合并与帧级衔接
+│   ├── diarization/                # Stage 3.5: 说话人分离 (嵌入/聚类/角色标注/pyannote)
+│   ├── asr/                        # Stage 4: 多引擎 ASR + 边界精修 + 证据/复核调度 (37 模块)
+│   ├── acoustic/                   # 声学骨架 + Plan 7 方向感知声学校验门控
+│   ├── physical/                   # Phase 0-3 物理中间层：坐标系/时间线 IR/词分配/
+│   │                               #   覆盖审计/决策 IR/投影
+│   ├── mapping/                    # Stage 5: 时间轴映射 + 字幕构建 + 最终化
+│   ├── quality/                    # 质量门禁 + 黄金集校准 (10 模块)
+│   ├── governance/                 # 发布治理（引擎配对/生产默认值）
+│   ├── reporting/                  # 运行报告与诊断聚合 (8 模块)
+│   ├── feedback/                   # Phase 5 自适应反馈学习（含匿名化/分层采样）
+│   ├── cli_commands/               # CLI 子命令实现
+│   ├── utils/                      # 缓存/会话/任务历史/进度/GPU 检测/日志
+│   └── webui/                      # FastAPI Web GUI + 前端工作区 (23 模块)
+├── tools/subtitle-editor/          # 字幕打轴工作台（独立零构建网页编辑器）
+├── llm_subtitle_optimizer/         # LLM 字幕优化独立包 (~1,200 行)
+├── configs/                        # YAML 场景模板 (5 个)
+├── scripts/                        # 工具脚本（基准/门禁/复核模型下载/发布检查, 22 个）
+├── tests/                          # 测试套件 (126 文件, ~20,500 行)
+├── docs/                           # 技术文档 + ADR + 设计/实施报告
+├── main.py / main_gui.py           # CLI / GUI 入口
+├── install.sh                      # 一键安装脚本
 └── pyproject.toml                  # 项目元数据 + 依赖定义
 ```
 
 **代码规模统计** (核心模块):
 
-| 子系统 | 行数 |
+| 子系统 | 行数 (约) |
 |--------|------|
-| `pipeline.py` | 4,628 |
-| `asr/` (15 文件) | 4,626 |
-| `mapping/` (14 文件) | 4,814 |
-| `diarization/` (10 文件) | 4,237 |
-| `physical/` (15 文件) | 4,187 |
-| `feedback/` (10 文件) | 4,184 |
-| `webui/` (7 文件) | 3,640 |
-| `utils/` (12 文件) | 3,160 |
-| `merging/` (3 文件) | 2,173 |
-| `vad/` (5 文件) | 1,264 |
-| `config.py` | 1,221 |
-| `acoustic_validator.py` | 1,037 |
-| `cli.py` | 898 |
-| `separation/` (3 文件) | 679 |
-| `audio_preprocessor.py` | 477 |
-| `macro_chunker.py` | 345 |
-| `streaming.py` | 316 |
-| **核心包总计** | **~33,000** |
-| `llm_subtitle_optimizer/` | ~1,223 |
-| `tests/` (~100+ 文件) | ~6,178 |
-| **项目总计** | **~42,000** |
-│   ├── test_session_manager.py        # 会话管理器测试
-│   ├── test_feedback.py               # 反馈学习模块测试
-│   ├── test_end_time_fixes.py         # 结束时间修正测试
-│   ├── test_separation/               # 分离引擎测试 (3 文件)
-│   ├── test_vad/                      # VAD 引擎测试 (5 文件)
-│   ├── test_merging/                  # 合并模块测试 (3 文件)
-│   ├── test_asr/                      # ASR 引擎测试 (8 文件)
-│   ├── test_mapping/                  # 映射模块测试 (8 文件)
-│   ├── test_diarization/              # 说话人分离测试 (10 文件)
-│   ├── test_physical/                 # 物理层测试 (11 文件)
-│   ├── test_utils/                    # 工具模块测试 (5 文件)
-│   ├── benchmarks/                    # Benchmark 场景 (6 目录)
-│   └── fixtures/                      # 测试数据 (音频/配置/期望输出)
-├── docs/                           # 技术文档 + 治理规范 (50+ 篇)
-│   ├── ARCHITECTURE.md                # 技术架构文档
-│   ├── ARCHITECTURE_STATE.md          # 架构状态表
-│   ├── DOCUMENT_INDEX.md              # 文档状态索引
-│   ├── NAMING_CONVENTIONS.md          # 命名规范
-│   ├── DATA_ASSETS.md                 # 数据资产登记
-│   ├── RUN_REPORT_SCHEMA.md           # 运行报告 Schema
-│   ├── TASK_STATE_MACHINE.md          # 任务状态机
-│   ├── ENGINE_LIFECYCLE.md            # 引擎生命周期
-│   ├── EXPERIMENT_REGISTRY.md         # 实验注册表
-│   ├── CONTRACTS_EVIDENCE_DECISION_PROJECTION.md  # 契约文档
-│   ├── FEEDBACK_LOOP.md               # 反馈闭环
-│   ├── QUALITY_OPERATIONS.md          # 质量运营
-│   ├── RELEASE_GOVERNANCE.md          # 发布治理
-│   ├── adr/                           # 架构决策记录
-│   ├── superpowers/specs/             # 设计规范
-│   └── ...
-├── main.py                         # CLI 入口
-├── main_gui.py                     # GUI 入口
-├── ARCHITECTURE.md                 # 架构文档入口 → docs/ARCHITECTURE.md
-├── install.sh                      # 一键安装脚本 (~1111 行)
-└── pyproject.toml                  # 项目元数据 + 依赖定义
-```
+| `asr/` (37 文件) | 10,054 |
+| `application/` (17 文件) | 5,988 |
+| `mapping/` | 5,350 |
+| `feedback/` | 5,289 |
+| `diarization/` | 4,967 |
+| `physical/` | 4,837 |
+| `webui/` (23 文件) | 4,623 |
+| `utils/` | 3,670 |
+| `quality/` (10 文件) | 3,156 |
+| `merging/` | 2,393 |
+| `acoustic/` | 1,278 |
+| `governance/` | 1,316 |
+| `reporting/` | 1,153 |
+| `config/` | 1,506 |
+| `contracts/` | 1,004 |
+| `cli_commands/` | 950 |
+| `vad/` | 1,264 |
+| `separation/` | 685 |
+| 顶层模块 (pipeline/cli/streaming 等) | 2,015 |
+| **核心包总计** | **~61,000** |
+| `tests/` (126 文件) | ~20,500 |
+| `tools/subtitle-editor/` | ~5,700 |
+| `llm_subtitle_optimizer/` | ~1,200 |
+| **项目总计** | **~88,000** |
 
 ## 缓存架构
 
