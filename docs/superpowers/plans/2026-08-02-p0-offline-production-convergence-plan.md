@@ -2,6 +2,24 @@
 
 依据：[P0 设计文档](../specs/2026-08-02-p0-offline-production-convergence-design.md)
 
+## 执行状态（2026-08-02）
+
+代码实施已完成，发布质量门禁未通过，因此状态为“P0 架构收敛完成，禁止发布”。
+
+| 阶段 | 状态 | 落实结果 |
+|---|---|---|
+| 1. 配置与路由 | 已完成 | 默认使用 segmented primary；global 在主链完成后作为 evidence 执行。 |
+| 2. Global evidence 合约 | 已完成 | 有效词时间、窗口和物理范围校验后的 global 候选才可作为高风险窗口的替代项。 |
+| 3. Coordinator/projector 诊断 | 已完成 | shadow 记录 `shadow_observed`，authoritative 和降级路径均产出决策与投影追踪。 |
+| 4. 物理尾段与局部召回 | 已完成 | 由 projector coverage 的 `recovery_ranges` 驱动；LocalRecovery 候选以 `local_recovery` 证据重进 review/decision/projector，不再由 global 路径直接追加事件。 |
+| 5. 黄金集归因与门禁 | 已完成 | runner 支持 baseline、shadow、authoritative 三种可比较模式，输出漏识别归因和生产模式元数据。 |
+
+本轮已完成真实的 10 场景、`faster-whisper large-v3` 三模式验收，并执行 `.venv-production/bin/python -m pytest -q`（`1014 passed, 1 skipped`）。baseline 与 shadow 的 `real_speech_drop_rate` 均为 `0.125`；baseline 按设计不具备 review diagnostics，shadow 的诊断、物理违规、跨静音、trace 和 raw bypass 均通过。authoritative 在修复语言状态污染及物理 bin 跨界合并后，从 `0.175` 降至 `0.100`，但仍高于 `0.05` 发布线；物理违规、跨静音、幻觉保留、unresolved、trace、raw bypass 和诊断完整性均通过。
+
+authoritative 未匹配归因：`asr_text_mismatch=8`、`speech_candidate_missing=3`、`timeline_shift_or_boundary_mismatch=1`。剩余问题是候选文本/召回质量，而非门禁阈值或 projector 契约问题；不得通过放宽门禁或把跨物理 bin 的片段拼接为一次匹配来标记发布。
+
+本地 Qwen3-ASR-1.7B smoke 可加载，但对重复短语样本只返回无词级时间的文本结果；它不满足 P0 的替代候选时间契约，因此黄金集 runner 继续将 Qwen 保持为禁用的替换能力，不能以其文本结果绕过 physical projection。
+
 ## 实施原则
 
 - 保留工作区已有用户改动，不做回滚或无关重构。

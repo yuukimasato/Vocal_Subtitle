@@ -104,3 +104,19 @@ build-deb.sh
 # Downloaded Archives
 # ============================================================
 gh.tar.gz
+
+# ============================================================
+# 本地运行时环境与参考资料（不入库）
+# ============================================================
+.venv-production/
+/docs/docs.tar.gz
+/vtt-editor-pro-3.1/
+
+# 字幕编辑器本地测试媒体与调试页
+tools/subtitle-editor/.fixture/
+tools/subtitle-editor/.smoke/
+tools/subtitle-editor/debug-jassub.html
+
+# 基准运行产物（体积大且含本机路径，可用 scripts/run_offline_golden_production.py 复现）
+/docs/superpowers/reports/*.json
+/docs/superpowers/reports/subtitles/

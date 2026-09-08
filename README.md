@@ -11,7 +11,7 @@
 - **多引擎可切换**：
   - 分离：UVR (BS-RoFormer, 默认) / Spleeter / Open-Unmix
   - VAD：Silero VAD (默认) / WebRTC VAD / TEN VAD / ffmpeg silencedetect
-  - ASR：faster-whisper (默认) / whisper.cpp / FunASR / WhisperX
+  - ASR：FunASR / Qwen3-ASR / faster-whisper / whisper.cpp
 - **物理优先架构 (Phase 0-3)**：
   - 全局坐标系 (CoordinateMapper)：将各阶段碎片化时间轴统一映射到原始音频时间轴
   - 物理时间线 IR (PhysicalTimeline)：统一承载分离后的音频、VAD 语音段、ffmpeg 骨干证据
@@ -49,8 +49,8 @@
 git clone <repo-url>
 cd Vocal_Subtitle
 
-# CLI + Web GUI 一键部署
-bash install.sh --gui
+# 生产链 + CLI/Web GUI（CPU 示例；GPU 可去掉 --cpu）
+bash install.sh --production --cpu --download-review qwen3-asr-1.7b --review-mirror
 
 # 安装完成后，激活环境并启动
 source venv/bin/activate
@@ -73,6 +73,9 @@ pip install -e ".[faster-whisper,silero-vad,uvr,webui]"
 pip install -e ".[faster-whisper,silero-vad,uvr,webui,llm,local-nlp,diarization]"
 # 全量安装:
 pip install -e ".[all]"
+# Spleeter 已从全量兼容集合中隔离；需要时请使用独立环境:
+python -m venv venv-spleeter
+venv-spleeter/bin/pip install -r requirements-spleeter-legacy.txt
 
 # 3. 安装系统依赖
 # Ubuntu/Debian
@@ -81,10 +84,49 @@ sudo apt install ffmpeg
 brew install ffmpeg
 ```
 
+生产安装会固定安装 faster-whisper、FunASR、Qwen runtime 和 WebUI，并要求默认
+Qwen 本地权重预检通过；模型下载到 `~/.cache/vocal-subtitle/review-models/`。
+四种显式配对可通过 `--primary-engine`、`--secondary-engine` 和
+`--engine-pair-policy risk_only|full_quality` 设置：
+`FunASR -> Qwen`、`Qwen -> FunASR`、`Qwen -> Whisper`、`Whisper -> Qwen`。
+
 ### 下载模型（可选，首次运行自动下载）
 
 ```bash
 vocal-subtitle download-models --all
+```
+
+多引擎复核模型（Qwen3-ASR、ForcedAligner、SED）不会在普通安装时自动下载。先安装对应依赖，再按需下载：
+
+```bash
+pip install -e ".[review-models,qwen-runtime]"
+# qwen-asr 0.0.6 固定使用 Transformers 4.57.6，避免 Transformers 5.x API 漂移。
+
+# 查看已登记的官方地址
+python3 scripts/download_review_models.py --list
+
+# 下载全部复核模型，默认保存到 ~/.cache/vocal-subtitle/review-models/
+python3 scripts/download_review_models.py --all
+
+# 只下载指定模型；可用 --mirror 切换到 hf-mirror.com
+python3 scripts/download_review_models.py --model qwen3-asr-1.7b
+python3 scripts/download_review_models.py --model sed-ast-audioset --mirror
+```
+
+模型注册表及地址如下：
+
+| 用途 | Hugging Face 仓库 |
+| --- | --- |
+| Qwen3-ASR 高质量识别 | [Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) |
+| Qwen3-ASR 低显存识别 | [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) |
+| 强制对齐复核 | [Qwen/Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) |
+| SED 声事件检测 | [MIT/ast-finetuned-audioset-10-10-0.4593](https://huggingface.co/MIT/ast-finetuned-audioset-10-10-0.4593) |
+
+也可以在一键安装时显式下载：
+
+```bash
+bash install.sh --all --download-review-models
+bash install.sh --download-review qwen3-asr-1.7b
 ```
 
 ### CLI 基本用法
@@ -363,6 +405,16 @@ vocal-subtitle run input.mp3 --config configs/my_custom.yaml
 
 完整 Pipeline，所有 7 个 Plan 可用，支持宏观切块、三方法融合、批量 LLM 合并。
 
+离线字幕默认使用 `production + risk_only` 复核链：分段主候选先经过 EvidenceDecision 和物理投影，再进入后处理。异质副引擎缺失、语言不匹配、超时或失败时保留主候选，并记录 `production_path=segmented_fallback`；需要回归对比时可在配置中显式设置 `shadow_mode: true` 和 `authoritative_mode: false`。
+
+发布前使用黄金集门禁：
+
+```bash
+python scripts/run_golden_quality_gate.py --input golden-report.json --ci
+```
+
+门禁报告覆盖幻觉误保留、真实对白误删除、物理越界、跨静音、`unresolved/split/drop`、decision trace 和 raw-event bypass。真实黄金集数据不随默认安装下载。
+
 ### 流式模式
 
 滑动窗口处理，自动降级全局依赖模块：
@@ -595,12 +647,22 @@ Vocal_Subtitle/
 │   ├── test_physical/                 # 物理层测试 (11 文件)
 │   ├── benchmarks/                    # Benchmark 场景 (6 目录)
 │   └── fixtures/                      # 测试数据 (音频/配置/期望输出)
-├── docs/                           # 技术文档 (35+ 篇)
+├── docs/                           # 技术文档 + 治理规范 (50+ 篇)
 │   ├── ARCHITECTURE.md                # 技术架构文档
-│   ├── 人声分离字幕工程化方案.md       # 工程化方案详细说明
-│   ├── 字幕时间轴精度优化方案.md       # 时间轴精度优化
-│   ├── 统一优化方案.md                 # 统一优化方案概览
-│   ├── superpowers/specs/             # Phase 0-3 设计规范 (28 篇)
+│   ├── ARCHITECTURE_STATE.md          # 架构状态表
+│   ├── DOCUMENT_INDEX.md              # 文档状态索引
+│   ├── NAMING_CONVENTIONS.md          # 命名规范
+│   ├── DATA_ASSETS.md                 # 数据资产登记
+│   ├── RUN_REPORT_SCHEMA.md           # 运行报告 Schema
+│   ├── TASK_STATE_MACHINE.md          # 任务状态机
+│   ├── ENGINE_LIFECYCLE.md            # 引擎生命周期
+│   ├── EXPERIMENT_REGISTRY.md         # 实验注册表
+│   ├── CONTRACTS_EVIDENCE_DECISION_PROJECTION.md  # 契约文档
+│   ├── FEEDBACK_LOOP.md               # 反馈闭环
+│   ├── QUALITY_OPERATIONS.md          # 质量运营
+│   ├── RELEASE_GOVERNANCE.md          # 发布治理
+│   ├── adr/                           # 架构决策记录
+│   ├── superpowers/specs/             # 设计规范
 │   └── ...
 ├── main.py                         # CLI 入口
 ├── main_gui.py                     # GUI 入口
@@ -647,12 +709,22 @@ Vocal_Subtitle/
 │   ├── test_utils/                    # 工具模块测试 (5 文件)
 │   ├── benchmarks/                    # Benchmark 场景 (6 目录)
 │   └── fixtures/                      # 测试数据 (音频/配置/期望输出)
-├── docs/                           # 技术文档 (35+ 篇)
+├── docs/                           # 技术文档 + 治理规范 (50+ 篇)
 │   ├── ARCHITECTURE.md                # 技术架构文档
-│   ├── 人声分离字幕工程化方案.md       # 工程化方案详细说明
-│   ├── 字幕时间轴精度优化方案.md       # 时间轴精度优化
-│   ├── 统一优化方案.md                 # 统一优化方案概览
-│   ├── superpowers/specs/             # Phase 0-3 设计规范 (28 篇)
+│   ├── ARCHITECTURE_STATE.md          # 架构状态表
+│   ├── DOCUMENT_INDEX.md              # 文档状态索引
+│   ├── NAMING_CONVENTIONS.md          # 命名规范
+│   ├── DATA_ASSETS.md                 # 数据资产登记
+│   ├── RUN_REPORT_SCHEMA.md           # 运行报告 Schema
+│   ├── TASK_STATE_MACHINE.md          # 任务状态机
+│   ├── ENGINE_LIFECYCLE.md            # 引擎生命周期
+│   ├── EXPERIMENT_REGISTRY.md         # 实验注册表
+│   ├── CONTRACTS_EVIDENCE_DECISION_PROJECTION.md  # 契约文档
+│   ├── FEEDBACK_LOOP.md               # 反馈闭环
+│   ├── QUALITY_OPERATIONS.md          # 质量运营
+│   ├── RELEASE_GOVERNANCE.md          # 发布治理
+│   ├── adr/                           # 架构决策记录
+│   ├── superpowers/specs/             # 设计规范
 │   └── ...
 ├── main.py                         # CLI 入口
 ├── main_gui.py                     # GUI 入口

@@ -2,36 +2,33 @@
 
 ## 一键部署
 
-源码部署需要 Python 3.10-3.13 和 ffmpeg；默认安装还会安装 WhisperX 及其
-PyTorch CPU/CUDA 运行时：
+源码部署需要 Python 3.10-3.13 和 ffmpeg。生产链安装会安装
+faster-whisper、FunASR、Qwen runtime、WebUI 以及当前 CPU/GPU 对应的 VAD：
 
 ```bash
-bash install.sh
+bash install.sh --production --cpu --download-review qwen3-asr-1.7b
 source venv/bin/activate
 vocal-subtitle-gui
 ```
 
-默认安装包含 WhisperX 全局 ASR、faster-whisper legacy fallback、WebRTC VAD、CLI
-和 Web GUI。没有 NVIDIA 驱动时使用 CPU；CUDA 运行时安装失败会自动回退 CPU。
-如需不安装 WhisperX/PyTorch 的轻量旧路径，使用 `bash install.sh --no-torch`。
-模型在第一次使用时下载；`--download-models` 可在安装阶段预下载 faster-whisper 模型。
+若只需要代码和基础 CLI，可使用 `bash install.sh --cpu`；它不会安装 Qwen runtime
+或下载 Qwen 权重。生产模式下默认模型必须存在，否则脚本会以非零状态结束。
+模型在安装阶段显式下载，避免运行时联网漂移。
 
 带背景音乐的原始音频安装 UVR 扩展：
 
 ```bash
-bash install.sh --profile separation
+bash install.sh --uvr
 ```
 
 其他扩展：
 
 ```bash
-bash install.sh --profile gpu
-bash install.sh --profile gpu-monitor
-bash install.sh --profile silero-vad
-bash install.sh --profile diarization
-bash install.sh --profile llm
-bash install.sh --profile local-nlp
-bash install.sh --profile full
+bash install.sh --gpu
+bash install.sh --diarization
+bash install.sh --llm
+bash install.sh --local-nlp
+bash install.sh --all
 
 # 只安装轻量 legacy 路径
 bash install.sh --no-torch
@@ -114,6 +111,17 @@ sudo apt purge vocal-subtitle
 不可用时，系统会完整回退到旧分段 ASR，并在 `PipelineStats`、CLI、WebUI 和
 任务历史中记录 `asr_path`、`fallback_category` 与 `fallback_reason`。
 
+离线复核生产链默认是 `production + risk_only`。Qwen、FunASR 或 Whisper 异质副端口
+缺失、超时或语言不匹配不会阻断主候选；复核协调器或物理投影失败时记录
+`production_path=segmented_fallback`。质量对比可显式启用 `shadow_mode`，回滚可设置
+`authoritative_mode: false`。
+
+发布前运行黄金集门禁并要求 `--ci` 返回成功：
+
+```bash
+python scripts/run_golden_quality_gate.py --input golden-report.json --ci
+```
+
 临时使用旧路径：
 
 ```bash
@@ -129,7 +137,7 @@ vocal-subtitle run input.wav --asr-path global
 安装全局 ASR 可选依赖：
 
 ```bash
-uv pip install -e '.[whisperx]'
+pip install -e '.[faster-whisper,funasr]'
 ```
 
 发布前运行基准验收：

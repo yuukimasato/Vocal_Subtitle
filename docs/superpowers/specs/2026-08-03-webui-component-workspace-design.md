@@ -1,7 +1,7 @@
 # Vocal Subtitle WebUI 组件工作区设计
 
 日期：2026-08-03
-状态：已确认，待实施
+状态：已实施
 前置阶段：后端组件契约
 
 ## 1. 目标与范围
@@ -88,6 +88,7 @@ Vocal Subtitle
 vocal_subtitle/webui/static/js/
   workspace.js       # hash 导航、视图生命周期、共享任务选择
   ui-review.js       # 字幕审核工作区
+  ui-feedback-workspace.js # 反馈学习工作区
   ui-history.js      # 任务历史工作区
   ui-quality.js      # 质量报告工作区
 ```

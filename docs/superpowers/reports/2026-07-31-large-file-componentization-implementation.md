@@ -56,8 +56,8 @@
 899 passed in 5.97s
 
 ./.venv/bin/pytest -q /tmp/vocal-subtitle-baseline.pJ3erE/tests \
-  --confcutdir=/home/hope/Tools/Vocal_Subtitle \
-  --rootdir=/home/hope/Tools/Vocal_Subtitle
+  --confcutdir=. \
+  --rootdir=.
 887 passed, 2 failed
 ```
 
