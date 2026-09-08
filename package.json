@@ -5,6 +5,6 @@
   "type": "module",
   "description": "Vocal Subtitle 字幕打轴工作台：零构建网页版字幕打轴编辑器（独立工具）",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test"
   }
 }

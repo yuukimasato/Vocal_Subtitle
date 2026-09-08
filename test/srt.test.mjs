@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSrt, stringifySrt } from '../js/format/srt.js';
 import { ParseError } from '../js/format/time.js';
+import { makeCue } from '../js/format/cue.js';
 
 const SAMPLE = [
   '1',
@@ -67,4 +68,13 @@ test('SRT 导出为 UTF-8 无 BOM、块间空行分隔', () => {
   assert.ok(!text.startsWith('\uFEFF'));
   assert.equal(text.split('\n\n').length, 2);
   assert.ok(text.endsWith('\n'));
+});
+
+test('SRT 文本含空行 round-trip：导出折叠为单换行', () => {
+  const text = stringifySrt([makeCue(1, 2, 'a\n\nb\n\nc')]);
+  // 空行是块分隔符：cue 文本内不得出现空行，否则读回会被拆成多个块
+  assert.equal(text.split('\n\n').length, 1);
+  const reparsed = parseSrt(text).cues;
+  assert.equal(reparsed.length, 1);
+  assert.equal(reparsed[0].text, 'a\nb\nc');
 });

@@ -2,7 +2,8 @@
 import { ParseError, parseTimestamp, formatSrtTime } from './time.js';
 import { makeCue, sortCues } from './cue.js';
 
-const TIME_LINE = /(\d{1,3}:\d{1,2}:\d{1,2}[,.]\d{1,3})\s*-->\s*(\d{1,3}:\d{1,2}:\d{1,2}[,.]\d{1,3})/;
+// 规范用逗号毫秒，现实中点号同样放行；毫秒超 3 位交给 parseTimestamp 截断
+const TIME_LINE = /(\d+:\d{1,2}:\d{1,2}[,.]\d+)\s*-->\s*(\d+:\d{1,2}:\d{1,2}[,.]\d+)/;
 
 export function parseSrt(text) {
   const lines = String(text).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n');
@@ -33,11 +34,8 @@ export function parseSrt(text) {
     if (end < start) {
       throw new ParseError(`SRT 第 ${blockStart + timeIdx + 1} 行：结束时间早于开始时间`);
     }
-    const textLines = block.slice(timeIdx + 1).filter((line, i, arr) => {
-      // 去掉首尾空行，保留中间的（多行字幕的空行分隔极少见，原样保留）
-      if (line.trim() !== '') return true;
-      return i > 0 && i < arr.length - 1;
-    });
+    // 分块逻辑保证块内无空行（空行即块边界），时间行之后的行全部是文本
+    const textLines = block.slice(timeIdx + 1);
     // 时间行之前的序号行（纯数字）忽略；其他内容也忽略（宽容处理）
     cues.push(makeCue(start, end, textLines.join('\n')));
     block = [];
@@ -59,7 +57,13 @@ export function stringifySrt(cues) {
   return (
     sorted
       .map((cue, i) => {
-        const text = String(cue.text ?? '').replace(/\r/g, '');
+        // 空行是 SRT 的块分隔符：文本内连续空行折叠为单换行、去掉首尾空行，
+        // 否则写出的 cue 会被拆成多个块而无法读回；U+2028（ASS 软换行占位）规范为换行
+        const text = String(cue.text ?? '')
+          .replace(/\r/g, '')
+          .replace(/\u2028/g, '\n')
+          .replace(/\n{2,}/g, '\n')
+          .replace(/^\n+|\n+$/g, '');
         return `${i + 1}\n${formatSrtTime(cue.start)} --> ${formatSrtTime(cue.end)}\n${text}`;
       })
       .join('\n\n') + (sorted.length ? '\n' : '')
