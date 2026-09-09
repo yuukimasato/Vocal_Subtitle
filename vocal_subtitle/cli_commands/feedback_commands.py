@@ -308,6 +308,162 @@ def import_profile(input_file: str, profile_name: str | None):
     click.echo(f"   Few-shot 示例: {len(profile['few_shot_examples'])} 条")
 
 
+@feedback.command("ingest-journal")
+@click.argument("files", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option("--original", "-o", type=click.Path(exists=True), default=None,
+              help="原始字幕文件（缺省在每份日志同目录自动发现 <同名>.srt/.ass/.vtt）")
+@click.option("--feedback-profile", default="user_default", help="用户配置名称 (默认: user_default)")
+@click.option("--consent", "-c", default="anonymous", type=click.Choice(["local", "anonymous", "full"]),
+              help="D2 入库的同意级别")
+@click.option("--apply/--no-apply", "apply_prefs", default=True, help="是否把编辑器维度偏好写入 user_profile")
+@click.option("--dry-run", is_flag=True, help="仅输出统计报告与归因，不入库不写配置")
+@verbose_option
+def ingest_journal(files: tuple, original: str | None, feedback_profile: str, consent: str,
+                   apply_prefs: bool, dry_run: bool, verbose: bool):
+    """摄取编辑器日志（edit-journal-v1）→ 重放校验 → 统计报告 → D2 入库 → 偏好学习。
+
+    FILES: 一个或多个 .journal.jsonl 文件（编辑器导出搭车产物）。
+    """
+    from ..config import FeedbackConfig
+    from ..feedback import (UserProfileManager, check_v3_trigger, derive_editor_preferences,
+                            journal_statistics, load_journal_files, replay_journal)
+    from ..feedback.diff_analyzer import analyze_journal_events
+    from ..feedback.journal_ingest import find_original_subtitle, load_original_events, journal_to_text_sample
+    from ..feedback.sample_manager import FeedbackSampleManager
+
+    journal_paths = [Path(f) for f in files]
+    try:
+        journal_files = load_journal_files(journal_paths)
+    except Exception as exc:
+        click.echo(f"✗ 日志解析失败: {exc}", err=True)
+        raise SystemExit(1)
+
+    all_events = [event for journal in journal_files for event in journal.events]
+    if not all_events:
+        click.echo("✗ 日志中没有有效事件（schema=edit-journal-v1）", err=True)
+        raise SystemExit(1)
+    click.echo(f"📖 已读取 {len(journal_files)} 份日志，共 {len(all_events)} 个事件"
+               f"（跳过 {sum(j.skipped for j in journal_files)} 个无效行）")
+
+    # ---- 重放校验（原始字幕 + 日志 = 最终字幕）----
+    replay_summary = []
+    for journal in journal_files:
+        original_path = Path(original) if original else find_original_subtitle(journal.path)
+        if original_path is None:
+            click.echo(f"⚠️  {journal.path.name}: 同目录未找到原始字幕，跳过重放（可用 --original 指定）")
+            continue
+        try:
+            original_events = load_original_events(original_path)
+        except Exception as exc:
+            click.echo(f"⚠️  {journal.path.name}: 原始字幕解析失败（{exc}），跳过重放")
+            continue
+        result = replay_journal(original_events, journal.events)
+        replay_summary.append((journal.path.name, original_path, result))
+        icon = "✓" if result.exact else "⚠️"
+        click.echo(f"   {icon} {journal.path.name}: 重放还原 {len(result.final_events)} 条"
+                   f"（对应原行 {result.matched_ids}，新增 {result.unmatched_ids}）")
+
+    # ---- V1 统计报告 ----
+    stats = journal_statistics(journal_files)
+    click.echo("\n📊 V1 统计报告:")
+    click.echo(f"   事件数: {stats.event_count}（{stats.session_count} 个会话）")
+    click.echo(f"   actor 分布: {stats.actors or '{}'}")
+    top_commands = sorted(stats.commands.items(), key=lambda kv: kv[1], reverse=True)[:8]
+    click.echo(f"   高频命令: {top_commands or '无'}")
+    if stats.structural:
+        click.echo(f"   结构操作: {stats.structural}（删行/拆分/合并是取舍思维信号）")
+    if stats.start_delta_median is not None:
+        click.echo(f"   开始时间偏移: 中位 {stats.start_delta_median * 1000:+.0f}ms / 均值 {stats.start_delta_mean * 1000:+.0f}ms")
+    if stats.end_delta_median is not None:
+        click.echo(f"   结束时间偏移: 中位 {stats.end_delta_median * 1000:+.0f}ms / 均值 {stats.end_delta_mean * 1000:+.0f}ms")
+    if stats.gap_after_median is not None:
+        click.echo(f"   留白偏好: 中位 {stats.gap_after_median * 1000:.0f}ms")
+    if stats.cps_p90 is not None:
+        click.echo(f"   CPS P90: {stats.cps_p90:.2f}")
+    if stats.boundary_snap_rate is not None:
+        click.echo(f"   终点贴合语音边界率: {stats.boundary_snap_rate:.0%}")
+    click.echo(f"   出处覆盖（manifest）: {stats.provenance_coverage:.0%}")
+
+    # ---- 事件级归因 ----
+    attributions = analyze_journal_events(all_events)
+    if attributions:
+        click.echo("\n📈 事件级归因 → 管线参数建议:")
+        for adjustment in attributions.values():
+            icon = "↑" if adjustment.direction == "increase" else "↓"
+            click.echo(f"   {icon} {adjustment.param_path}: {adjustment.reason}")
+            click.echo(f"     置信度: {adjustment.confidence:.2f}, 分级: {adjustment.param_tier}")
+    else:
+        click.echo("\n✅ 编辑行为不足以归因到管线参数（样本量或偏移幅度不足）")
+
+    preferences = derive_editor_preferences(stats)
+    if preferences:
+        click.echo("\n🧭 编辑器维度偏好（写入 user_profile）:")
+        for key, value in sorted(preferences.items()):
+            click.echo(f"   {key}: {value}")
+
+    if dry_run:
+        click.echo("\n🔍 [dry-run 模式] 未入库、未更新配置。")
+        return
+
+    # ---- D2 候选样本入库（每个日志文件一份，重放终态 = 人工终审）----
+    sample_manager = FeedbackSampleManager()
+    ingested = 0
+    for journal_name, original_path, result in replay_summary:
+        if not result.final_events:
+            continue
+        original_events = load_original_events(original_path)
+        auto_text, final_text = journal_to_text_sample(original_events, result.final_events)
+        edit_types = {}
+        if stats.structural.get("remove"):
+            edit_types["structural_rewrite"] = 1
+        if stats.start_delta_median is not None or stats.end_delta_median is not None:
+            edit_types["time_adjustment"] = len(all_events)
+        sample = sample_manager.ingest(
+            auto_subtitle=auto_text,
+            human_revision=final_text,
+            alignment={"method": "journal-replay", "coverage_ratio": 1.0 if result.exact else 0.8,
+                       "confidence": 0.9 if result.exact else 0.7},
+            consent_level=consent,
+            edit_types=edit_types,
+        )
+        if sample:
+            ingested += 1
+            click.echo(f"📥 D2 反馈样本已入库: {sample.sample_id}（来源 {journal_name}）")
+
+    # ---- 编辑器维度偏好 → user_profile ----
+    if apply_prefs and preferences:
+        from datetime import datetime
+
+        profile_mgr = UserProfileManager(FeedbackConfig())
+        profile = profile_mgr.load(feedback_profile)
+        merged = dict(profile.get("editor_preferences") or {})
+        merged.update(preferences)
+        profile["editor_preferences"] = merged
+        profile.setdefault("history", []).append({
+            "timestamp": datetime.now().isoformat(),
+            "source": "journal",
+            "event_count": stats.event_count,
+            "diff_report_summary": f"journal ingest: {len(preferences)} 个编辑器偏好, {len(attributions)} 条归因",
+        })
+        profile_mgr.save(profile)
+        click.echo(f"\n📚 已更新用户配置 {feedback_profile} 的 editor_preferences（{len(merged)} 项）")
+
+    # ---- V3 触发检查（D16）----
+    triggered, message = check_v3_trigger(
+        sample_manager.count_by_status() + ingested,
+        stats.provenance_coverage,
+        0.0,
+        min_samples=FeedbackConfig().v3_trigger_min_samples,
+        min_coverage=FeedbackConfig().v3_trigger_min_coverage,
+        max_conflict_rate=FeedbackConfig().v3_trigger_max_conflict_rate,
+    )
+    if triggered:
+        click.echo(f"\n🚀 V3 触发提示: {message}")
+    else:
+        click.echo(f"\nℹ️  V3: {message}")
+    click.echo("\n✓ 日志摄取完成。")
+
+
 @feedback.group("sample")
 def feedback_sample_group():
     """D3 分层抽样：从 D2 候选反馈集抽样生成 D3 回归集。"""

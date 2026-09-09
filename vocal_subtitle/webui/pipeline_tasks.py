@@ -40,8 +40,9 @@ def _pipeline_class() -> Type[Pipeline]:
 
 
 def _serialize_events(events: List[Any]) -> List[Dict[str, Any]]:
-    return [
-        {
+    serialized = []
+    for event in events:
+        payload = {
             "index": event.index,
             "start": event.start,
             "end": event.end,
@@ -65,8 +66,19 @@ def _serialize_events(events: List[Any]) -> List[Dict[str, Any]]:
             "alignment_warning": event.alignment_warning,
             "revision_trace": event.revision_trace,
         }
-        for event in events
-    ]
+        # 词级时间戳（可选字段，供 review-manifest-v1 出处）：相对时间原样保留
+        if getattr(event, "words", None):
+            payload["words"] = [
+                {
+                    "word": word.word,
+                    "start": word.start,
+                    "end": word.end,
+                    "confidence": word.confidence,
+                }
+                for word in event.words
+            ]
+        serialized.append(payload)
+    return serialized
 
 
 def _persistence_manager():

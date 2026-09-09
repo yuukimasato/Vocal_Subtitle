@@ -55,6 +55,17 @@ from .health_scorer import (
     should_auto_rollback,
 )
 from .impact_estimator import ImpactEstimator, ImpactPrediction
+from .journal_ingest import (
+    JournalFile,
+    JournalIngestError,
+    JournalStats,
+    ReplayResult,
+    check_v3_trigger,
+    derive_editor_preferences,
+    journal_statistics,
+    load_journal_files,
+    replay_journal,
+)
 from .param_learner import ParamDecoupler, ParamLearner
 from .sample_manager import FeedbackSample, FeedbackSampleManager
 from .shadow_mode import ShadowEvaluation, ShadowModeEvaluator, ShadowRunResult
@@ -91,6 +102,16 @@ __all__ = [
     # Impact Estimator
     "ImpactEstimator",
     "ImpactPrediction",
+    # Journal ingest（edit-journal-v1）
+    "JournalFile",
+    "JournalIngestError",
+    "JournalStats",
+    "ReplayResult",
+    "check_v3_trigger",
+    "derive_editor_preferences",
+    "journal_statistics",
+    "load_journal_files",
+    "replay_journal",
     # ParamLearner
     "ParamLearner",
     "ParamDecoupler",

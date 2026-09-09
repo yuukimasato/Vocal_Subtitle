@@ -30,7 +30,8 @@
   </a>
   <nav class="workspace-nav" id="workspace-nav" aria-label="工作区导航">
     <button type="button" class="workspace-nav-item active" data-workspace="process" title="处理">处理</button>
-    <button type="button" class="workspace-nav-item" data-workspace="review" title="字幕审核">字幕审核</button>
+    <!-- 字幕审核入口已下线（D13）：审核工作流迁移至 subtitle-editor 管线面板，
+         workspace-review 区块与 ui-review.js 保留一个里程碑后删除 -->
     <button type="button" class="workspace-nav-item" data-workspace="feedback" title="反馈学习">反馈学习</button>
     <button type="button" class="workspace-nav-item" data-workspace="history" title="任务历史">任务历史</button>
     <button type="button" class="workspace-nav-item" data-workspace="quality" title="质量报告">质量报告</button>
@@ -293,7 +294,6 @@
           <div><span>质量门禁</span><strong>已启用</strong></div>
         </div>
         <div class="insight-actions">
-          <button type="button" class="workspace-button" data-workspace="review">打开字幕审核</button>
           <button type="button" class="workspace-button" data-workspace="quality">查看质量报告</button>
           <button type="button" class="workspace-button" data-workspace="feedback">打开反馈预览</button>
         </div>

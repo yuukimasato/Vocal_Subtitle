@@ -174,9 +174,13 @@ def _rewrite_subtitle_files(task_result: Dict[str, Any]) -> List[str]:
     return errors
 
 
-@router.put("/subtitle/{task_id}/batch")
+@router.put("/subtitle/{task_id}/batch", deprecated=True)
 async def update_subtitles_batch(task_id: str, body: SubtitleBatchEditRequest):
-    """批量修改最终字幕事件并同步历史与导出文件。"""
+    """批量修改最终字幕事件并同步历史与导出文件。
+
+    Deprecated（D13）：webui 审核前端退役后编辑走 subtitle-editor；
+    本端点保留一个里程碑，随旧审核前端一并删除。
+    """
     task, result = _load_completed_subtitle_task(task_id)
     try:
         updated_events = apply_batch_edit(
@@ -213,9 +217,13 @@ async def update_subtitles_batch(task_id: str, body: SubtitleBatchEditRequest):
     }
 
 
-@router.put("/subtitle/{task_id}/{index}")
+@router.put("/subtitle/{task_id}/{index}", deprecated=True)
 async def update_subtitle(task_id: str, index: int, body: SubtitleEditRequest):
-    """编辑单条字幕（文本和/或时间轴），并自动保存到磁盘文件"""
+    """编辑单条字幕（文本和/或时间轴），并自动保存到磁盘文件
+
+    Deprecated（D13）：webui 审核前端退役后编辑走 subtitle-editor；
+    本端点保留一个里程碑，随旧审核前端一并删除。
+    """
     task, result = _load_completed_subtitle_task(task_id)
     events = result.get("events", [])
 

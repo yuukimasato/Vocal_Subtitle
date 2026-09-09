@@ -280,7 +280,47 @@ class PersistenceManager:
         except IOError as e:
             logger.warning("Failed to write persistence manifest: %s", e)
 
+        # review-manifest-v1（编辑器审核出处）：final 字幕落盘时一并生成
+        self._write_review_manifest(task_id, task_result, task_dir)
+
         return manifest
+
+    @staticmethod
+    def _write_review_manifest(task_id: str, task_result: Dict[str, Any], task_dir: Path) -> None:
+        """在持久化目录与输入会话目录各写一份 <字幕同名>.manifest.json（失败不阻塞）"""
+        try:
+            from ..contracts.review_manifest import build_review_manifest, write_review_manifest
+
+            events = task_result.get("events", [])
+            stats = task_result.get("stats") or {}
+            final_engine = stats.get("final_engine") or stats.get("selected_engine") or ""
+            input_name = Path(task_result.get("input_path", "")).name if task_result.get("input_path") else None
+            if not events:
+                return
+            # 跟随实际持久化的 final 字幕（SRT 优先）
+            subtitle_path = next(
+                (candidate for candidate in (task_dir / "final.srt", task_dir / "final.ass") if candidate.exists()),
+                None,
+            )
+            if subtitle_path is None:
+                return
+            manifest = build_review_manifest(
+                task_id=task_id,
+                run_id=task_result.get("run_id", ""),
+                subtitle_path=subtitle_path,
+                events=events,
+                input_name=input_name,
+                duration=stats.get("duration_seconds"),
+                engines={"asr": final_engine} if final_engine else None,
+            )
+            write_review_manifest(subtitle_path, manifest)
+
+            # 会话目录（uploads/<hash>/）内的管线主字幕旁再放一份，供就地审核
+            session_subtitle = task_result.get("subtitle_path")
+            if session_subtitle:
+                write_review_manifest(Path(session_subtitle), manifest)
+        except Exception as e:
+            logger.warning("Failed to write review manifest for task %s: %s", task_id, e)
 
     def get_persisted_files(self, task_id: str) -> Optional[Dict[str, Any]]:
         """获取任务的持久化文件信息"""

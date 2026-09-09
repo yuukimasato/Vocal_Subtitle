@@ -404,3 +404,111 @@ class DiffAnalyzer:
                     )
 
         return attributions
+
+
+# ---------------------------------------------------------------------------
+# 事件级归因入口（edit-journal-v1，方案 §3.2/§4）
+#
+# journal 事件即过程对齐，不依赖 DTW：直接从编辑行为统计推导管线参数建议。
+# padding 语义为两端向外扩展（start -= padding, end += padding），故
+# 「用户把开始拖早/把结束拖晚」→ 增大 padding；反之减小。
+# ---------------------------------------------------------------------------
+
+_EVENT_SHIFT_THRESHOLD_SECONDS = 0.03   # 中位偏移超过 30ms 才归因
+_EVENT_MERGE_RATIO_THRESHOLD = 0.15     # 合并/删除占比阈值，与成品归因一致
+
+
+def _median(values: List[float]) -> Optional[float]:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def analyze_journal_events(events: List[Dict[str, Any]]) -> Dict[str, ParamAdjustment]:
+    """从编辑日志事件推导管线参数调整建议。
+
+    Args:
+        events: edit-journal-v1 事件列表（已校验、已去重）
+
+    Returns:
+        param_path → ParamAdjustment（可能为空：行为不足以归因时）
+    """
+    attributions: Dict[str, ParamAdjustment] = {}
+    start_deltas: List[float] = []
+    end_deltas: List[float] = []
+    commands = 0
+    structural_merge = 0  # 用户合并（mergeWithNext）
+    structural_remove = 0  # 用户删除整行（去 ASR 幻觉/冗余行的取舍信号）
+
+    for event in events:
+        commands += 1
+        command = str(event.get("command") or "")
+        if command in ("mergeWithNext", "mergeCues"):
+            structural_merge += 1
+        elif command in ("removeCues", "removeCue"):
+            structural_remove += 1
+        for entry in event.get("diff") or []:
+            if entry.get("op") != "modify":
+                continue
+            for change in entry.get("changes") or []:
+                if change.get("before") is None or change.get("after") is None:
+                    continue
+                if change.get("field") == "start":
+                    start_deltas.append(float(change["after"]) - float(change["before"]))
+                elif change.get("field") == "end":
+                    end_deltas.append(float(change["after"]) - float(change["before"]))
+
+    if not commands:
+        return attributions
+
+    # ---- 时间边界归因 ----
+    median_start = _median(start_deltas)
+    median_end = _median(end_deltas)
+
+    if median_start is not None and abs(median_start) > _EVENT_SHIFT_THRESHOLD_SECONDS:
+        attributions["merging.padding_min"] = ParamAdjustment(
+            param_path="merging.padding_min",
+            param_tier="short_term",
+            observed_value=round(abs(median_start), 3),
+            confidence=min(1.0, abs(median_start) / 0.15),
+            learn_weight=0.8,
+            direction="increase" if median_start < 0 else "decrease",
+            reason=f"开始时间中位偏移 {median_start * 1000:+.0f}ms（{len(start_deltas)} 处）→ "
+                   + ("用户倾向更早开口，增大起端 padding" if median_start < 0 else "用户倾向收紧起端，减小 padding"),
+        )
+
+    if median_end is not None and abs(median_end) > _EVENT_SHIFT_THRESHOLD_SECONDS:
+        attributions["merging.padding_max"] = ParamAdjustment(
+            param_path="merging.padding_max",
+            param_tier="short_term",
+            observed_value=round(abs(median_end), 3),
+            confidence=min(1.0, abs(median_end) / 0.15),
+            learn_weight=0.8,
+            direction="increase" if median_end > 0 else "decrease",
+            reason=f"结束时间中位偏移 {median_end * 1000:+.0f}ms（{len(end_deltas)} 处）→ "
+                   + ("用户倾向延长句尾，增大末端 padding" if median_end > 0 else "用户倾向收紧句尾，减小 padding"),
+        )
+
+    # ---- 结构归因：用户频繁合并 → 合并间隙偏小；频繁删行 → ASR 冗余（记录信号，V1 不调参）----
+    if commands and structural_merge / commands > _EVENT_MERGE_RATIO_THRESHOLD:
+        attributions["merge_decision.fast_merge_max_gap"] = ParamAdjustment(
+            param_path="merge_decision.fast_merge_max_gap",
+            param_tier="medium_term",
+            observed_value=round(structural_merge / commands, 3),
+            confidence=min(1.0, structural_merge / max(commands, 1) / 0.3),
+            learn_weight=1.0,
+            direction="increase",
+            reason=f"用户手动合并 {structural_merge} 次（{structural_merge / commands:.0%}）→ 增大快速合并间隙",
+        )
+    if structural_remove:
+        logger.info(
+            "Journal shows %d line deletions — kept as selection signals for D2, "
+            "not attributed to pipeline params in V1",
+            structural_remove,
+        )
+
+    return attributions

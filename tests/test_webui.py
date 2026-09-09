@@ -247,11 +247,11 @@ class TestStaticFiles:
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
         assert "Vocal Subtitle" in resp.text
-        assert 'data-workspace="review"' in resp.text
+        # 字幕审核入口已下线（D13）：审核工作流迁移至 subtitle-editor 管线面板
+        assert 'data-workspace="review"' not in resp.text
         assert 'id="workspace-quality"' in resp.text
         assert '<button type="button" class="btn-run" id="btn-run"' in resp.text
         assert 'id="process-error"' in resp.text
-        assert "/js/ui-review.js" in resp.text
         assert 'data-action="check"' in resp.text
         assert "'speaker_embedding_hf_token'," not in resp.text
         assert "'speaker_embedding_hf_token': 'speaker_embedding_token'" not in resp.text

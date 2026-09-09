@@ -552,6 +552,14 @@ class FeedbackConfig:
     few_shot_min_weight_to_inject: float = 0.3  # 注入 Prompt 的最低权重
     few_shot_enabled: bool = True
 
+    # 编辑日志摄取（edit-journal-v1 第三触发通道）
+    journal_enabled: bool = True            # 是否消费编辑日志数据
+
+    # V3 触发机制（D16：只定机制与可配置阈值，不定数值——等 V1 数据分布校准）
+    v3_trigger_min_samples: Optional[int] = None       # D2+journal 样本数下限
+    v3_trigger_min_coverage: Optional[float] = None    # 对齐/出处覆盖率下限 [0,1]
+    v3_trigger_max_conflict_rate: Optional[float] = None  # 参数冲突率上限 [0,1]
+
 
 @dataclass
 class PipelineConfig:

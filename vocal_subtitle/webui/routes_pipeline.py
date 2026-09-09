@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
-
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from .models import TaskStatus
@@ -111,6 +110,32 @@ async def get_task_status(task_id: str):
         artifacts=result.get("artifacts"),
         diagnostics=result.get("diagnostics"),
     )
+
+
+@router.get("/tasks/{task_id}/manifest")
+async def get_task_manifest(task_id: str):
+    """获取任务的 review-manifest-v1 审核清单（按任务结果即时构建）"""
+    from ..contracts.review_manifest import REVIEW_MANIFEST_SCHEMA, build_review_manifest
+    from .routes_subtitles import _load_completed_subtitle_task
+
+    task, result = _load_completed_subtitle_task(task_id)
+    stats = result.get("stats") or {}
+    events = result.get("events", [])
+    engines = {
+        "asr": stats.get("final_engine") or stats.get("selected_engine") or "",
+    }
+    input_path = result.get("input_path") or ""
+    manifest = build_review_manifest(
+        task_id=task_id,
+        run_id=result.get("run_id", ""),
+        subtitle_path=result.get("subtitle_path") or "subtitle.srt",
+        events=events,
+        input_name=Path(input_path).name if input_path else None,
+        duration=stats.get("duration_seconds"),
+        engines={k: v for k, v in engines.items() if v} or None,
+    )
+    manifest["schema"] = REVIEW_MANIFEST_SCHEMA
+    return manifest
 
 
 @router.get("/tasks")

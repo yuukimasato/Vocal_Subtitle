@@ -74,6 +74,7 @@ from .routes_feedback_learning import (
     router as feedback_learning_router,
 )
 from .routes_history import router as history_router
+from .routes_journal import router as journal_router
 from .routes_quality import router as quality_router
 from .routes_llm import (
     fetch_llm_models,
@@ -153,6 +154,7 @@ router.include_router(models_router)
 router.include_router(history_router)
 router.include_router(quality_router)
 router.include_router(pipeline_router)
+router.include_router(journal_router)
 router.include_router(subtitles_router)
 
 
