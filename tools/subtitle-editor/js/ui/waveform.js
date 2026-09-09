@@ -8,7 +8,7 @@
 //   悬停边缘↔光标、鼠标释放在显示边缘时自动滚屏、滚轮滚动视图（Ctrl+滚轮缩放）；
 // - 音频盒获得焦点时进入 Aegisub「Audio」键位上下文（见 shortcuts.js）。
 import WaveSurfer from '../../vendor/wavesurfer.esm.js';
-import { captureAudioPeaks, isCaptureSupported } from '../audio/capture.js';
+import { captureAudioPeaks, isCaptureSupported, TARGET_RATE } from '../audio/capture.js';
 
 const SENSITIVITY_PX = 3; // Audio/Start Drag Sensitivity：边缘抓取半径
 const SNAP_PX = 10; // Audio/Snap/Distance：吸附半径
@@ -272,6 +272,7 @@ export function createWaveform({
   let captureTried = false;
   let captureAbortCtl = null;
   let captureRetryArmed = false;
+  let captureChannels = null; // 采集兜底产出的降采样数据：getPeaksData 的数据源之一
 
   function cancelCapture() {
     captureAbortCtl?.abort();
@@ -283,6 +284,7 @@ export function createWaveform({
     mediaUrl = url;
     cancelCapture();
     captureTried = false;
+    captureChannels = null;
     exitFallback();
     messageEl.textContent = '正在解码音频…';
     try {
@@ -532,6 +534,7 @@ export function createWaveform({
       }
       exitFallback();
       messageEl.textContent = '正在渲染波形…';
+      captureChannels = channels;
       await ws.load(mediaUrl, channels, dur); // 提供 channelData：wavesurfer 跳过自身 fetch+decode
       if (seq !== loadSeq) return;
       messageEl.textContent = '';
@@ -901,8 +904,33 @@ export function createWaveform({
     return Math.max(5, Math.min(30, visible / 4));
   }
 
+  // Agent 数据口（window.agent.getPeaks 的数据源）：返回 [t0,t1] 内的单声道原始采样。
+  // 主路来自 decodeAudioData 的 AudioBuffer（原生采样率）；采集兜底路来自加速采集的
+  // 4kHz 数据。两路与 CLI 的 ffmpeg/WAV 直读经同一个 createPeakCollector 归一（见 AGENTS.md）。
+  function getPeaksData(t0 = 0, t1 = null) {
+    const dur = duration();
+    if (!dur) return null;
+    const start = Math.max(0, Math.min(Number(t0) || 0, dur));
+    const end = Math.max(start, Math.min(t1 == null ? dur : Number(t1), dur));
+    const buf = ws?.getDecodedData?.();
+    if (buf) {
+      const ch = buf.getChannelData(0);
+      const si = Math.floor(start * buf.sampleRate);
+      const ei = Math.min(ch.length, Math.ceil(end * buf.sampleRate));
+      return { rate: buf.sampleRate, duration: dur, start, end, samples: ch.slice(si, ei) };
+    }
+    if (captureChannels?.[0]?.length) {
+      const ch = captureChannels[0];
+      const si = Math.floor(start * TARGET_RATE);
+      const ei = Math.min(ch.length, Math.ceil(end * TARGET_RATE));
+      return { rate: TARGET_RATE, duration: dur, start, end, samples: ch.slice(si, ei) };
+    }
+    return null;
+  }
+
   return {
     loadMedia,
+    getPeaksData,
     syncView,
     seekStep,
     getZoom,

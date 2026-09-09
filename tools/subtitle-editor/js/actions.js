@@ -109,6 +109,11 @@ export function createActions(store, deps = {}) {
       return history.canUndo;
     },
 
+    // 撤销栈深度（window.agent.getSnapshot 的 history.depth 用：核对 coalesce 是否生效）
+    historyDepth() {
+      return history.past.length;
+    },
+
     undo() {
       const snap = history.undo(structuredClone(store.state.cues));
       if (!snap) return false;

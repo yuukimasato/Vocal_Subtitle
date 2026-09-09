@@ -14,11 +14,16 @@ import { createToolbar } from './ui/toolbar.js';
 import { initSplitters } from './ui/splitters.js';
 import { createDraftStore } from './draft.js';
 import { serializeSubtitle } from './format/index.js';
+import { createAgentApi } from './agent-api.js';
 import { showToast } from './ui/toast.js';
 
 const $ = (selector) => document.querySelector(selector);
 
 initSplitters();
+
+// agent 会话（?agent=1）：草稿走独立命名空间且不自动落盘（人机同屏互不覆盖，见 docs/开发文档 §4.5）
+const AGENT_QUERY_FLAG = 'agent';
+const agentMode = new URLSearchParams(location.search).has(AGENT_QUERY_FLAG);
 
 const store = createStore();
 const actions = createActions(store);
@@ -104,7 +109,7 @@ cueList = createCueList({
   pasteDialog: $('#paste-dialog'),
 });
 
-const draft = createDraftStore(store);
+const draft = createDraftStore(store, agentMode ? { namespace: AGENT_QUERY_FLAG, autoSave: false } : {});
 
 const toolbar = createToolbar({
   store,
@@ -150,6 +155,18 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 
+// URL 加载：autoload 与 window.agent.loadMedia/loadSubs 共用的固化 fetch 路径（与打开文件同路）
+async function loadFromUrl(url, open) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const name = decodeURIComponent(url.split('/').pop() || 'media');
+  if (/\.(srt|vtt|ass|ssa)$/i.test(name)) {
+    await open(new File([await res.text()], name, { type: 'text/plain' }));
+  } else {
+    await open(new File([await res.blob()], name));
+  }
+}
+
 // 自动化测试/演示辅助：?media=<url>&subs=<url> 启动时直接加载（与打开文件同一路径）
 async function autoloadFromQuery() {
   const q = new URLSearchParams(location.search);
@@ -157,23 +174,23 @@ async function autoloadFromQuery() {
   const subs = q.get('subs');
   if (!media && !subs) return;
   try {
-    if (media) {
-      const res = await fetch(media);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const name = decodeURIComponent(media.split('/').pop() || 'media');
-      await toolbar.openMediaFile(new File([await res.blob()], name));
-    }
-    if (subs) {
-      const res = await fetch(subs);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const name = decodeURIComponent(subs.split('/').pop() || 'subs.srt');
-      await toolbar.openSubtitleFile(new File([await res.text()], name, { type: 'text/plain' }));
-    }
+    if (media) await loadFromUrl(media, (f) => toolbar.openMediaFile(f));
+    if (subs) await loadFromUrl(subs, (f) => toolbar.openSubtitleFile(f));
   } catch (err) {
     console.warn('[autoload] 失败:', err);
   }
 }
 autoloadFromQuery();
 
-// 调试句柄（控制台可用：__editor.store.state 等）
+// window.agent：版本化契约（见 js/agent-api.js 与 .smoke/agent-contract.baseline.json）；
+// 调试句柄 __editor 保留（非契约，控制台排查用）
 window.__editor = { store, actions, player, waveform, timing, audioCommands, assPreview };
+window.agent = createAgentApi({
+  store,
+  actions,
+  player,
+  waveform,
+  loadMedia: (url) => loadFromUrl(url, (f) => toolbar.openMediaFile(f)),
+  loadSubs: (url) => loadFromUrl(url, (f) => toolbar.openSubtitleFile(f)),
+  saveDraft: () => draft.saveNow(true),
+});

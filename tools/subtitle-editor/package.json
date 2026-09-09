@@ -1,9 +1,9 @@
 {
-  "name": "vocal-subtitle-timing-editor",
+  "name": "subtitle-timing-editor",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Vocal Subtitle 字幕打轴工作台：零构建网页版字幕打轴编辑器（独立工具）",
+  "description": "零构建、零依赖的本地字幕打轴编辑器与 Agent 工具链",
   "scripts": {
     "test": "node --test"
   }

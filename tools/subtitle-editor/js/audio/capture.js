@@ -10,7 +10,7 @@
 // 注意：绝不能对主播放器的 <video> 建 MediaElementSourceNode——那会永久改道
 // 它的音频输出。这里始终用独立隐藏元素，用完即毁。
 
-const TARGET_RATE = 4000; // 降采样目标率：波形渲染足够，兼顾高倍缩放的细节
+export const TARGET_RATE = 4000; // 降采样目标率：波形渲染足够，兼顾高倍缩放的细节
 const RATES = [8, 4, 2, 1]; // 倍速阶梯：设置失败或产出停滞时逐级回落
 const STALL_CHECK_SEC = 2; // 每隔多少墙钟秒核对一次采集进度
 const NO_AUDIO_TIMEOUT_SEC = 6; // 播放这么久仍无任何采样 → 判定采集不可用

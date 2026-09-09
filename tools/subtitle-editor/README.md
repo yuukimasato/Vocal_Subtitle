@@ -1,6 +1,6 @@
-# 字幕打轴工作台（Vocal Subtitle Timing Editor）
+# 字幕打轴工作台（Subtitle Timing Editor）
 
-本地运行的网页版字幕打轴编辑器：视频/音频播放、Aegisub 式音频盒（波形/时间标尺/标记拖拽/提交模型）、字幕列表行内编辑、SRT/VTT/ASS 读写、ASS 样式预览。
+本地运行的网页版字幕打轴编辑器：视频/音频播放、Aegisub 式音频盒（波形/时间标尺/标记拖拽/提交模型）、字幕列表行内编辑、SRT/VTT/ASS 读写、ASS 样式预览；另带一套零依赖的 Agent 工具链（headless CLI + 浏览器 harness），可与任意 ASR 流水线配合完成自动粗打轴。
 
 **零构建、零 npm 依赖、纯本地运行**——不联网、不上传任何文件。
 
@@ -102,6 +102,24 @@ node --test        # 解析器、动作、定时控制器、采集与剪贴板/�
 ```
 
 目录结构：`js/audio/timing.js` 为 Aegisub 对话定时控制器（audio_timing_dialogue.cpp）的语义移植（纯逻辑，可单测）；`js/audio/capture.js` 为波形兜底解码（加速采集，采集数学部分可单测）；`js/audio/commands.js` 为音频命令层；`js/ui/waveform.js` 为音频显示（指针/滚轮/标尺/覆盖层）；`js/ui/audio-toolbar.js` 为工具栏与滑条。浏览器控制台可用 `__editor` 句柄查看内部状态；`?media=<url>&subs=<url>` 可在启动时自动加载（测试/演示用）。
+
+## 与 ASR 流水线集成
+
+本工具是**独立开源组件**，定位于 ASR 的功能补充：ASR 引擎产出文本与粗时间 → 本工具做时间轴精修（打轴）。任何流水线（包括但不限于 [Vocal_Subtitle](https://github.com/yuukimasato/Vocal_Subtitle)）都可以作为消费者接入，方式有三层：
+
+1. **Headless CLI（`agent/cli.mjs`，零依赖）**——字幕读写变换、格式互转、结构校验、波形峰值、语音段候选（内置确定性 VAD，可选外部 provider 增强），全部 JSON in/out 与稳定退出码（0 正常 / 2 输入错误 / 3 校验发现问题），可直接被脚本或 Agent 驱动：
+
+   ```bash
+   node agent/cli.mjs vad media.mkv > seg.json              # 语音段候选（内置，零依赖）
+   node agent/cli.mjs cues draft.srt set --plan plan.json -o timed.srt
+   node agent/cli.mjs check timed.srt --media media.mkv     # 退出码 0 才放行
+   ```
+
+2. **页面 Agent API（`window.agent`，版本化契约）**——在真实页面中读状态/波形、执行编辑命令，配合撤销栈与草稿机制人机同屏（agent 会话 `?agent=1` 使用独立草稿命名空间）；
+3. **通用 CDP harness（`agent/harness.mjs`，零依赖）**——经 Chrome DevTools Protocol 驱动真实页面（`open/eval/shot/close` 原语，不绑定本产品）；
+4. **MCP server（`agent/mcp-server.mjs`，可选）**——把上述 CLI/harness 命令挂成 MCP tools，供 ZCode 等 Agent 客户端即插即用。
+
+能力分层：Tier 0（字幕变换/校验）与 Tier 1（WAV 直读）仅靠 Node 标准库即可用；ffmpeg 检测到即用（任意媒体解码）；内置 VAD 零依赖默认可用；更高质量的 VAD 通过 `docs/vad-provider-contract.md` 定义的可选 provider 契约接入，缺失时自动退回内置实现。环境理解入口见 **[AGENTS.md](AGENTS.md)**，设计依据见 `docs/`。
 
 ## 已知限制
 
