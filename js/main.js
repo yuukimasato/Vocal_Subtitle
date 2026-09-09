@@ -133,6 +133,7 @@ function syncAssPreview() {
 }
 store.on('assPreview', syncAssPreview);
 store.on('subtitleFormat', syncAssPreview);
+store.on('mediaLoaded', () => assPreview.onMediaChanged());
 store.on('cues', () => assPreview.requestRefresh());
 
 // 空状态与离开提醒（关闭前先提交未落库的编辑并立刻保存草稿）

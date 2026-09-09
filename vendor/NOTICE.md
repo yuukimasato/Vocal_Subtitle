@@ -13,6 +13,7 @@ spawn 增加了回退。`jassub/` 目录为官方 npm 包 dist 的本地化副�
 | `wavesurfer.esm.js` | wavesurfer.js 7.12.11 | BSD-3-Clause | `wavesurfer-LICENSE` |
 | `artplayer.mjs` | artplayer 5.4.0 | MIT（© Harvey Zhao / zhw2590582） | `artplayer-LICENSE` |
 | `jassub.esm.js`、`jassub-worker.js`、`jassub-worker.wasm`、`jassub-default.woff2`、`jassub/` | jassub 2.5.14 | JS 为 MIT；WASM 内含 libass/freetype/fribidi/harfbuzz 等编译库，许可栈见下 | `jassub-LICENSE` |
+| `noto-sans-sc-subset.woff2` | Noto Sans CJK SC Regular（noto-cjk）的 pyftsubset 子集：CJK 基本区全部汉字（U+4E00–U+9FFF）+ ASCII/Latin-1/Extended-A + CJK 标点与全角 + 平假名/片假名 | SIL OFL 1.1（© 2014-2021 Adobe） | `noto-sans-sc-LICENSE` |
 
 JASSUB 的 WASM 产物许可栈（引自其 package.json）：
 `LGPL-2.1-or-later AND (FTL OR GPL-2.0-or-later) AND MIT AND MIT-Modern-Variant AND ISC AND NTP AND Zlib AND BSL-1.0`。

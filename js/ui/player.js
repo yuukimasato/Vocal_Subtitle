@@ -89,7 +89,13 @@ export function createPlayer({ store, mountEl, transportEl, onError }) {
       loopBtn.classList.toggle('active', store.state.loopCue);
       previewBtn.classList.toggle('active', store.state.previewOn);
       assBtn.classList.toggle('active', store.state.assPreview);
-      assBtn.disabled = store.state.subtitleFormat !== 'ass' || !art;
+      // 纯音频媒体没有视频画面，libass 无法出图，预览不可用（自动走文本 overlay）
+      const hasPicture = Boolean(art && art.video.videoWidth > 0 && art.video.videoHeight > 0);
+      assBtn.disabled = store.state.subtitleFormat !== 'ass' || !hasPicture;
+      assBtn.title = hasPicture
+        ? '使用 libass 按样式渲染 ASS 字幕'
+        : '使用 libass 按样式渲染 ASS 字幕（当前媒体无视频画面，不可用）';
+      assBtn.setAttribute('aria-label', assBtn.title);
     };
     store.on('loopCue', sync);
     store.on('previewOn', sync);

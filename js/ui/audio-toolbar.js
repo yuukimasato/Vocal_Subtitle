@@ -112,13 +112,18 @@ export function createAudioToolbar({ store, actions, player, waveform, commands,
 
   const ampFromSlider = (v) => Math.pow(Math.min(100, Math.max(1, v)) / 50, 3);
 
-  // 波形侧缩放（滚轮/ready 初始缩放）回写滑条：对数反映射到 0-100。
-  // 程序赋值不触发 input，不会形成回路
+  // 横向缩放滑条：0-100 对数映射到 5-1000 px/秒（与 waveform.setZoom 的钳位一致）
+  const zoomFromSlider = (v) => PX_PER_SEC_MIN * Math.pow(PX_PER_SEC_MAX / PX_PER_SEC_MIN, v / 100);
+  const sliderFromZoom = (px) => {
+    if (!(px > 0)) return 0;
+    return Math.round((Math.log(px / PX_PER_SEC_MIN) / Math.log(PX_PER_SEC_MAX / PX_PER_SEC_MIN)) * 100);
+  };
+  const hZoom = mkSlider('横向缩放（波形）', (v) => waveform.setZoom(zoomFromSlider(v)));
+  hZoom.value = String(Math.min(100, Math.max(0, sliderFromZoom(waveform.getPxPerSec?.() ?? 0))));
+
+  // 波形侧缩放（滚轮/ready 初始缩放）回写滑条。程序赋值不触发 input，不会形成回路
   store.on('zoom', () => {
-    const px = waveform.getPxPerSec?.() ?? 0;
-    if (!(px > 0)) return;
-    const v = Math.round((Math.log(px / PX_PER_SEC_MIN) / Math.log(PX_PER_SEC_MAX / PX_PER_SEC_MIN)) * 100);
-    hZoom.value = String(Math.min(100, Math.max(0, v)));
+    hZoom.value = String(Math.min(100, Math.max(0, sliderFromZoom(waveform.getPxPerSec?.() ?? 0))));
   });
 
   // 音量应用（音量滑条与 vZoom 联动共用）；无媒体时仅记录显示值
