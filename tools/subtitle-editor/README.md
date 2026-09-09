@@ -4,13 +4,15 @@
 
 **零构建、零 npm 依赖、纯本地运行**——不联网、不上传任何文件。
 
+![字幕打轴工作台：播放器、字幕列表与 Aegisub 式音频盒](resources/preview1.png)
+
 ## 启动
 
 两种方式：
 
 **方式一：单文件版（双击即用）**
 
-直接用浏览器打开 `subtitle-editor-standalone.html`——全部代码与 JASSUB 的 wasm/worker/字体内嵌在一个文件里，无需任何服务。`file://` 下浏览器的 Worker 限制可能使 ASS 样式预览自动回退为纯文本预览（其余功能不受影响）。
+从 [GitHub Releases](https://github.com/yuukimasato/subtitle-editor/releases) 下载最新的 `subtitle-editor-standalone-*.html`，或直接用浏览器打开本仓库的 `subtitle-editor-standalone.html`——全部代码与 JASSUB 的 wasm/worker/字体内嵌在一个文件里，无需任何服务（worker/wasm/字体注入为 `data:` URL，`file://` 下 ASS 样式预览同样可用）。
 
 重新生成单文件版：`node build-standalone.mjs`（需 npx 拉取 esbuild，仅构建期使用）。
 
@@ -80,7 +82,7 @@ python3 -m http.server 8631
 1. 点击「打开媒体」或把 视频/音频 文件拖进页面；
 2. 点击「打开字幕」或拖入 SRT/VTT/ASS 字幕（也可以从零开始：把播放头移到目标位置按 `N` 或点「插入」）；
 3. 按上面的音频盒方式打轴：点击列表行选中，波形上扫选/拖标记定时，`S` 试听、`G` 提交；
-4. 字幕列表位于播放器右侧：点击行的文本 / 时间即可直接编辑（文本停顿约 0.7s 自动提交；时间字段在失焦或回车时提交，避免半输入被误写），**修改后自动保存草稿**（localStorage）；播放时当前句自动高亮滚动；
+4. 字幕列表位于播放器右侧：**单击选中行，双击文本 / 时间进入编辑**（文本停顿约 0.7s 自动提交；时间字段在失焦或回车时提交，避免半输入被误写；Esc 退出编辑），**修改后自动保存草稿**（localStorage）；播放时当前句自动高亮滚动；
 5. **右键字幕行**打开行操作菜单：插入（之前/之后）、以视频时间插入（之前/之后）、重复行、剪切行、复制行、粘贴行、选择性粘贴、删除行；Ctrl 点击加选 / Shift 点击连选，多选行会随活动行一起定时（Aegisub 同款）；
 6. **智能粘贴**：剪贴板为纯多行文本（如逐行歌词、译文）时，「粘贴行 / 选择性粘贴」自动**按行新建字幕行**——从参考行结束处（无参考行则播放头/文档开头）起每行顺序占位 5 秒，之后在音频盒逐句打轴；剪贴板为 SRT / VTT / ASS 内容（含从 Aegisub 复制的 `Dialogue:` 行）时按原时间解析粘贴，「选择性粘贴」弹出字段覆盖对话框（Aegisub Paste-Over 语义）；
 7. 「导出 SRT / VTT / ASS」下载结果；下次打开同名字幕时可恢复本地草稿。
@@ -91,27 +93,29 @@ python3 -m http.server 8631
 
 - **SRT / WebVTT**：双向读写；VTT 的 cue settings、`STYLE` / `REGION` 块、头部元数据与 cue 标识行原样保留。
 - **ASS/SSA**：基础读写——文本与时间可编辑，`{\...}` 标签原样保留，其余字段（样式、边距等）与文档其余部分逐字保留；删除的句子对应行整体移除，新建句子以默认字段追加。从 SRT/VTT 导出 ASS 时自动构造最小合法骨架。
-- **ASS 样式预览**：经 JASSUB（WASM libass）按样式渲染到画面，可开关；编辑内容约 0.6s 后经 `setTrack` 原地换轨刷新（不重建 worker），视频暂停时也会主动补帧，改完即见。默认字体为 Liberation Sans（Latin 字形）；中文字幕在无匹配字体时会回退，样式预览初始化失败时自动回退为纯文本预览，不影响编辑。
+- **ASS 样式预览**：经 JASSUB（WASM libass）按样式渲染到画面，可开关；编辑内容约 0.6s 后经 `setTrack` 原地换轨刷新（不重建 worker），视频暂停时也会主动补帧，改完即见。**纯音频媒体没有视频画面**（libass 按视频尺寸出图），预览自动关闭并回退为文本 overlay，字幕照常显示。默认字体为内置的 **Noto Sans CJK SC 子集**（CJK 基本区全部汉字，简繁通用 + 拉丁 + 假名，见 `vendor/noto-sans-sc-LICENSE`）：libass 只在样式字体缺少字形时回退到默认字体，因此样式里写 `Arial` 之类无汉字字形的字体时，中文仍能正常显示；样式字体在本机可用时优先按样式字体渲染——Chrome/Edge 下首次启用预览会弹出一次「读取本地字体」授权（Local Font Access API），授权后 libass 按样式里写的字体名从本机加载，与 Aegisub 一致；Firefox/Safari 没有该 API，只能用内置字体。样式预览初始化失败时自动回退为纯文本预览，不影响编辑。
 
 ## 开发
 
 ```bash
-node --test        # 解析器、动作、定时控制器与剪贴板/格式单测（86 项）
+node --test        # 解析器、动作、定时控制器、采集与剪贴板/格式单测（126 项）
 ```
 
-目录结构：`js/audio/timing.js` 为 Aegisub 对话定时控制器（audio_timing_dialogue.cpp）的语义移植（纯逻辑，可单测）；`js/audio/commands.js` 为音频命令层；`js/ui/waveform.js` 为音频显示（指针/滚轮/标尺/覆盖层）；`js/ui/audio-toolbar.js` 为工具栏与滑条。浏览器控制台可用 `__editor` 句柄查看内部状态；`?media=<url>&subs=<url>` 可在启动时自动加载（测试/演示用）。
+目录结构：`js/audio/timing.js` 为 Aegisub 对话定时控制器（audio_timing_dialogue.cpp）的语义移植（纯逻辑，可单测）；`js/audio/capture.js` 为波形兜底解码（加速采集，采集数学部分可单测）；`js/audio/commands.js` 为音频命令层；`js/ui/waveform.js` 为音频显示（指针/滚轮/标尺/覆盖层）；`js/ui/audio-toolbar.js` 为工具栏与滑条。浏览器控制台可用 `__editor` 句柄查看内部状态；`?media=<url>&subs=<url>` 可在启动时自动加载（测试/演示用）。
 
 ## 已知限制
 
-- ASS 样式预览内置字体仅覆盖拉丁字形，中文渲染依赖运行环境字体能力；
-- 波形依赖浏览器 `decodeAudioData`，个别编码（或超大文件）无法解码时自动降级为时间刻度视图：上述鼠标定时与播放命令同样可用，仅无波形细节、滚轮缩放与视图滚动；
+- ASS 样式预览的内置 CJK 字体覆盖 CJK 基本区（含简体与繁体）；基本区之外的生僻字（CJK 扩展 A/B 区等）仍显示为空白/豆腐块，此时可安装对应字体并授权本页读取本地字体，或改用纯文本预览；
+- 波形优先走浏览器 `decodeAudioData`；覆盖不了的媒体（MKV/WebM 容器、AC-3/DTS 等音轨、单文件版 `file://` 下的 fetch 限制、超大文件）自动改用「加速采集」兜底：后台以倍速静默快进一遍媒体并边采边降采样（4kHz 单声道，约 57MB/小时），完成后显示波形，进度可取消；无音轨或采集失败时降级为时间刻度视图：上述鼠标定时与播放命令同样可用，仅无波形细节、滚轮缩放与视图滚动；
 - 仅支持浏览器原生可播放的媒体格式；卡拉OK音节定时与频谱视图未实现（工具栏不含对应开关）。
 
 ## 版权与实现声明
 
+- 本项目代码以 **MIT 许可证**发布，详见 **[LICENSE](LICENSE)**。
 - 本工具为**独立实现**：交互模型对齐 Aegisub 3.2 的公开文档行为（Aegisub 为 BSD-3-Clause 开源软件），代码为从零编写，未复制、未分发 Aegisub 的任何源代码或美术资源。
 - 第三方组件均在 `vendor/` 内以原始产物形式分发并保留许可声明，详见 **[vendor/NOTICE.md](vendor/NOTICE.md)**：
   - ArtPlayer 5.4.0 —— MIT License © Harvey Zhao（zhw2590582）
   - wavesurfer.js 7.12.11 —— BSD 3-Clause © katspaugh and contributors
   - JASSUB 2.5.14 —— JS 为 MIT；其 WASM 产物内含 libass/freetype/fribidi/harfbuzz 等编译库（LGPL-2.1-or-later AND (FTL OR GPL-2.0-or-later) AND MIT AND MIT-Modern-Variant AND ISC AND NTP AND Zlib AND BSL-1.0，均为商用友好许可）
+  - Noto Sans CJK SC 子集（`vendor/noto-sans-sc-subset.woff2`）—— SIL OFL 1.1 © 2014-2021 Adobe，供 ASS 样式预览的中文回退字体使用
 - `vendor/jassub.esm.js` 为上游 `dist/jassub.js` 与其运行时依赖的 esbuild 打包产物，未修改任何逻辑。

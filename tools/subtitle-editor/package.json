@@ -1,6 +1,6 @@
 {
   "name": "vocal-subtitle-timing-editor",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Vocal Subtitle 字幕打轴工作台：零构建网页版字幕打轴编辑器（独立工具）",
