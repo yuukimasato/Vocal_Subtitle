@@ -217,6 +217,16 @@ body {
   object-position: center;
 }
 
+/* JASSUB 把画布插在 video 之后，position:absolute 但 z-index:auto；ArtPlayer 的
+   .art-video 带 z-index:10，画布会被压在视频下面（内容画了但看不见）。层级取 20：
+   盖住视频与海报，仍在 .art-layers(40)/控制条(60) 之下，控制条保持可点。 */
+#video-mount canvas.JASSUB { z-index: 20; }
+
+/* ArtPlayer 5.4 的底部控制条常驻（模板里就带 art-control-show，从不移除），其
+   100px 高的黑色渐变会把画面下缘的 ASS 字幕压到几乎看不见。本工具自带控制条，
+   这里去掉这层遮罩，让底部字幕保持原色；控制图标自身带阴影，仍可辨认。 */
+#video-mount .art-bottom { background-image: none; }
+
 /* 字幕文本 overlay（非 ASS 预览时） */
 .subtitle-preview {
   position: absolute;
@@ -289,6 +299,20 @@ body {
   pointer-events: none;
   z-index: 5;
 }
+
+/* 波形采集进度里的「取消采集」按钮：父容器不放行指针事件，按钮自己放行 */
+.wave-msg .wave-msg-btn {
+  pointer-events: auto;
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-orange) 55%, transparent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent-orange);
+  cursor: pointer;
+}
+.wave-msg .wave-msg-btn:hover { background: color-mix(in srgb, var(--accent-orange) 15%, transparent); }
 
 /* 右侧滑条竖栏（横向缩放/纵向振幅/音量/联动） */
 .wave-side {
@@ -559,6 +583,14 @@ body {
 
 .edit-time:focus, .edit-text:focus { outline: none; border-color: var(--accent); }
 .edit-time.invalid { border-color: var(--accent-red); }
+
+/* 单击只选中行、双击才进入编辑：非编辑态让输入框不接收指针事件，
+   否则单击落在 textarea/时间框上会直接聚焦，把小键盘时间轴键位吞成数字输入。
+   编辑态选择器要带上 #cue-table 才压得过上面的 id 选择器。 */
+#cue-table .edit-time,
+#cue-table .edit-text { pointer-events: none; }
+#cue-table .cue-row.editing .edit-time,
+#cue-table .cue-row.editing .edit-text { pointer-events: auto; }
 
 .cue-empty {
   text-align: center;

@@ -4,8 +4,9 @@
 //
 // 用法：node build-standalone.mjs
 // 依赖：npx esbuild@0.25.12（仅构建期使用，产物已提交，日常使用无需构建）。
-// 注意：模块版（index.html）仍是开发形态；两者功能一致，单文件版受 file://
-// 对 Worker 的限制，ASS 样式预览可能自动回退为纯文本预览（已有降级逻辑）。
+// 注意：模块版（index.html）仍是开发形态；两者功能一致。单文件版把 JASSUB 的
+// worker/wasm/字体注入为 data: URL——file:// 下 blob URL 无法创建模块 worker，
+// 换 data: URL 后 ASS 样式预览在双击打开的页面里同样可用；初始化失败仍回退文本预览。
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -59,12 +60,15 @@ function vendorAssetScript() {
 window.__vstEmbedded = {
   jassubWorker: { b64: ${JSON.stringify(b64('jassub-worker.js'))}, mime: 'text/javascript' },
   jassubWasm: { b64: ${JSON.stringify(b64('jassub-worker.wasm'))}, mime: 'application/wasm' },
-  jassubFont: { b64: ${JSON.stringify(b64('jassub-default.woff2'))}, mime: 'font/woff2' }
+  jassubFont: { b64: ${JSON.stringify(b64('jassub-default.woff2'))}, mime: 'font/woff2' },
+  jassubCjkFont: { b64: ${JSON.stringify(b64('noto-sans-sc-subset.woff2'))}, mime: 'font/woff2' }
 };
+// 必须用 data: URL 而不是 blob: URL：file:// 下 Chrome 拒绝以 blob URL 创建模块
+// worker（"cannot be accessed from origin 'null'"），且 worker 内部也 fetch 不到页面的
+// blob URL；data: URL 两者皆可，ASS 样式预览才能在双击打开的 file:// 页面里工作。
 window.VstEditorVendorAssets = {};
 for (const [key, item] of Object.entries(window.__vstEmbedded)) {
-  const bytes = Uint8Array.from(atob(item.b64), (c) => c.charCodeAt(0));
-  window.VstEditorVendorAssets[key] = URL.createObjectURL(new Blob([bytes], { type: item.mime }));
+  window.VstEditorVendorAssets[key] = 'data:' + item.mime + ';base64,' + item.b64;
 }
 </script>`;
 }

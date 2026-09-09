@@ -11,7 +11,33 @@ const ASSETS = typeof window !== 'undefined' && window.VstEditorVendorAssets
       jassubWorker: VENDOR_URL + 'jassub-worker.js',
       jassubWasm: VENDOR_URL + 'jassub-worker.wasm',
       jassubFont: VENDOR_URL + 'jassub-default.woff2',
+      jassubCjkFont: VENDOR_URL + 'noto-sans-sc-subset.woff2',
     };
+// 默认字体必须是 CJK 字体：libass 在样式字体缺少字形时只会回退到 family_default，
+// 内置拉丁字体（Liberation Sans）没有汉字，中文字幕会整行渲染成豆腐块。
+const CJK_FONT_FAMILY = 'Noto Sans CJK SC';
+// 本地字体（Local Font Access，Chrome/Edge 103+）：授权后 libass 能按样式里写的字体名
+// 从本机加载，效果与 Aegisub + fontconfig 一致；Firefox/Safari 没有该 API，继续用内置字体。
+// queryLocalFonts 必须在用户手势内调用（否则抛 "User activation is required"）；无手势的
+// 启动（如 ?subs= 自动加载）只是先跳过，等下一次带手势的启动再问，且只问一次。
+let localFontsAsked = false;
+async function ensureLocalFonts() {
+  if (localFontsAsked) return;
+  if (typeof window === 'undefined' || typeof window.queryLocalFonts !== 'function') return;
+  if (!navigator.permissions?.query) return;
+  try {
+    const { state } = await navigator.permissions.query({ name: 'local-fonts' });
+    if (state !== 'prompt') {
+      localFontsAsked = true; // 已授权（直接可用）或已拒绝（不再打扰）
+      return;
+    }
+    if (!navigator.userActivation?.isActive) return; // 等下一次带用户手势的启动
+    localFontsAsked = true;
+    await window.queryLocalFonts(); // 触发授权提示；拒绝/忽略则静默回退内置字体
+  } catch {
+    // 不支持的浏览器或用户拒绝：继续用内置字体
+  }
+}
 const REBUILD_DELAY = 600;
 // 初始化兜底：worker 偶发卡死（headless/软件渲染环境），超时且无绘制即回退
 const INIT_TIMEOUT = 15000;
@@ -115,7 +141,16 @@ export function createAssPreview({ store, player, serialize, onNotice }) {
     player.setAssPreviewActive(false);
     const video = player.video();
     if (!video || store.state.subtitleFormat !== 'ass') return false;
-    const availableFonts = { 'Liberation Sans': ASSETS.jassubFont };
+    // 纯音频媒体没有视频轨（videoWidth/Height 为 0）：libass 按视频尺寸出图，
+    // 无尺寸时画布恒为空白，启动预览只会把文本 overlay 挤掉、字幕整个看不见。
+    if (!video.videoWidth || !video.videoHeight) return false;
+    // 先问本地字体授权再建实例：worker 的字体查找有"查过一次就不再重试"的缓存，
+    // 授权晚到就赶不上了
+    await ensureLocalFonts();
+    const availableFonts = {
+      'Liberation Sans': ASSETS.jassubFont,
+      [CJK_FONT_FAMILY]: ASSETS.jassubCjkFont,
+    };
     try {
       const created = new JASSUB({
         video,
@@ -125,7 +160,7 @@ export function createAssPreview({ store, player, serialize, onNotice }) {
         // SIMD 分支的 wasm 路径；vendor 只保留一份 wasm，两个分支都指向它
         modernWasmUrl: ASSETS.jassubWasm,
         availableFonts,
-        defaultFont: 'Liberation Sans',
+        defaultFont: CJK_FONT_FAMILY,
       });
       if (gen !== generation) {
         destroyWithLimit(created);
@@ -200,9 +235,23 @@ export function createAssPreview({ store, player, serialize, onNotice }) {
     if (hadInstance) player.setAssPreviewActive(false);
   }
 
+  // 换媒体后重新判定可用性：纯音频（无视频轨）关掉预览回退文本，换回视频再启动。
+  // 视频→视频不重建：JASSUB 由 requestVideoFrameCallback 感知尺寸变化自行 resize。
+  async function onMediaChanged() {
+    const video = player.video();
+    const canRender = Boolean(video && video.videoWidth > 0 && video.videoHeight > 0);
+    const wanted = store.state.assPreview && store.state.subtitleFormat === 'ass';
+    if (active && !canRender) {
+      await setEnabled(false);
+      return;
+    }
+    if (!active && canRender && wanted) await start();
+  }
+
   return {
     requestRefresh,
     setEnabled,
+    onMediaChanged,
     get active() {
       return active;
     },

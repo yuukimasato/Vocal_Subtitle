@@ -8,6 +8,7 @@
 //   悬停边缘↔光标、鼠标释放在显示边缘时自动滚屏、滚轮滚动视图（Ctrl+滚轮缩放）；
 // - 音频盒获得焦点时进入 Aegisub「Audio」键位上下文（见 shortcuts.js）。
 import WaveSurfer from '../../vendor/wavesurfer.esm.js';
+import { captureAudioPeaks, isCaptureSupported } from '../audio/capture.js';
 
 const SENSITIVITY_PX = 3; // Audio/Start Drag Sensitivity：边缘抓取半径
 const SNAP_PX = 10; // Audio/Snap/Distance：吸附半径
@@ -226,7 +227,7 @@ export function createWaveform({
       // 换媒体时上一个加载被 abort（DOMException: AbortError）不是解码失败，
       // 忽略以免快速连换媒体时误切降级视图
       if (isAbortError(err)) return;
-      enterFallback(err);
+      handleDecodeFailure(err);
     });
     ws.on('ready', () => {
       if (!fallbackMode) messageEl.textContent = '';
@@ -266,9 +267,22 @@ export function createWaveform({
 
   // 加载序号：快速连换媒体时旧加载的 ready/error 已过期，一律忽略（竞态误降级）
   let loadSeq = 0;
+  let mediaUrl = null; // 当前媒体 URL：采集兜底时可能晚于加载完成才用到
+  // 采集兜底状态：每次媒体加载只尝试一次采集；captureAbortCtl 供取消按钮/换媒体时中止
+  let captureTried = false;
+  let captureAbortCtl = null;
+  let captureRetryArmed = false;
+
+  function cancelCapture() {
+    captureAbortCtl?.abort();
+    captureAbortCtl = null;
+  }
 
   async function loadMedia(url) {
     const seq = ++loadSeq;
+    mediaUrl = url;
+    cancelCapture();
+    captureTried = false;
     exitFallback();
     messageEl.textContent = '正在解码音频…';
     try {
@@ -304,7 +318,7 @@ export function createWaveform({
     } catch (err) {
       // 过期加载的错误与加载中止（换媒体竞态）都不算解码失败
       if (seq !== loadSeq || isAbortError(err)) return;
-      enterFallback(err);
+      await handleDecodeFailure(err);
     }
   }
 
@@ -449,15 +463,21 @@ export function createWaveform({
   }
 
   // ---------- 降级视图 ----------
-  function enterFallback(err) {
+  const FALLBACK_HINT = '已切换为时间刻度视图：点击/中键可定位，拖拽定时请在列表或快捷键中完成。';
+
+  function showFallbackView() {
     if (fallbackMode) return;
     fallbackMode = true;
     containerEl.hidden = true;
     fallbackEl.hidden = false;
-    messageEl.textContent =
-      '无法解码音频波形（该媒体可能没有音轨，或编码不受支持/文件过大），已切换为时间刻度视图：点击/中键可定位，拖拽定时请在列表或快捷键中完成。';
-    console.warn('[waveform] decode failed:', err);
     syncView();
+  }
+
+  function enterFallback(err, reason = '无法解码音频波形（该媒体可能没有音轨，或编码不受支持/文件过大）') {
+    cancelCapture(); // 采集仍在进行时一并停掉，避免完成后覆盖这里的提示
+    showFallbackView();
+    messageEl.textContent = `${reason}，${FALLBACK_HINT}`;
+    console.warn('[waveform] decode failed:', err);
   }
 
   function exitFallback() {
@@ -466,6 +486,83 @@ export function createWaveform({
     containerEl.hidden = false;
     fallbackEl.hidden = true;
     messageEl.textContent = '';
+  }
+
+  // 采集进度提示 + 取消按钮（.wave-msg 为 pointer-events:none，按钮由样式表放行）
+  let captureBtn = null;
+  function showCaptureProgress(fraction) {
+    messageEl.textContent = `正在加速采集音频波形… ${Math.max(1, Math.round(fraction * 100))}%（倍速静默播放中，不影响其他操作）`;
+    if (!captureBtn?.isConnected) {
+      captureBtn = document.createElement('button');
+      captureBtn.type = 'button';
+      captureBtn.className = 'wave-msg-btn';
+      captureBtn.textContent = '取消采集';
+      captureBtn.addEventListener('click', () => captureAbortCtl?.abort());
+      messageEl.append(' ', captureBtn);
+    }
+  }
+
+  // 解码失败兜底：先尝试「加速采集」从可播放的媒体重建波形（wavesurfer 的
+  // decodeAudioData 覆盖不了 MKV/WebM 容器、AC-3 等编码以及 file:// 下的 fetch
+  // 限制，但只要主播放器能播就采得到），采集失败才退回纯时间刻度视图。
+  // 注意同一失败会触发两次（ws 的 error 事件 + loadMedia 的 catch 各一次），
+  // captureTried 后再进入必须静默返回：首次进入者已负责采集与降级，二次进入
+  // 若走 enterFallback 会把在途采集误杀（表现为「已取消波形采集」）。
+  async function handleDecodeFailure(err) {
+    if (!isCaptureSupported()) return enterFallback(err);
+    if (captureTried) return;
+    const seq = loadSeq;
+    const dur = store.state.duration;
+    if (!Number.isFinite(dur) || dur <= 0) return enterFallback(err);
+    captureTried = true;
+    showFallbackView();
+    console.warn('[waveform] decode failed, trying audio capture:', err);
+    captureAbortCtl = new AbortController();
+    try {
+      const { channels, silent } = await captureAudioPeaks({
+        url: mediaUrl,
+        duration: dur,
+        signal: captureAbortCtl.signal,
+        onProgress: showCaptureProgress,
+      });
+      if (seq !== loadSeq) return; // 期间换了媒体：过期结果作废
+      if (silent || !channels[0].length) {
+        enterFallback(err, '未检测到音频（该媒体可能没有音轨或音轨为静音）');
+        return;
+      }
+      exitFallback();
+      messageEl.textContent = '正在渲染波形…';
+      await ws.load(mediaUrl, channels, dur); // 提供 channelData：wavesurfer 跳过自身 fetch+decode
+      if (seq !== loadSeq) return;
+      messageEl.textContent = '';
+    } catch (captureErr) {
+      if (seq !== loadSeq) return;
+      if (isAbortError(captureErr)) return enterFallback(err, '已取消波形采集');
+      console.warn('[waveform] capture failed:', captureErr);
+      const why = captureErr?.message ? `（采集兜底失败：${captureErr.message}）` : '';
+      enterFallback(err, `无法解码音频波形${why}`);
+      armCaptureRetry(); // 无用户手势时采集必败（自动播放策略）：点击音频盒后自愈重试
+    } finally {
+      if (seq === loadSeq) captureAbortCtl = null;
+    }
+  }
+
+  // 采集失败后的自愈：首次点击音频盒时重试一次（此时多半已有用户手势，
+  // AudioContext/媒体元素可正常运行）。换媒体/已恢复波形时作废。
+  function armCaptureRetry() {
+    if (captureRetryArmed) return;
+    captureRetryArmed = true;
+    displayEl.addEventListener(
+      'pointerdown',
+      (event) => {
+        captureRetryArmed = false;
+        if (event.target.closest('.wave-msg-btn')) return; // 取消按钮点击不算重试
+        if (!fallbackMode || captureAbortCtl) return; // 已恢复波形或新一轮采集已在途
+        captureTried = false;
+        handleDecodeFailure(new Error('重试音频采集'));
+      },
+      { once: true },
+    );
   }
 
   function drawFallback() {

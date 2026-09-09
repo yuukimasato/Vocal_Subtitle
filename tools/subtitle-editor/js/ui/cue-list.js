@@ -1,4 +1,4 @@
-// 字幕表格（底部面板）：文本/时间即点即编、防抖自动提交与草稿保存、
+// 字幕表格（底部面板）：单击选中行、双击进入文本/时间编辑（防抖自动提交与草稿保存）、
 // 多选（Ctrl/Shift）与右键行操作菜单、播放高亮与跟随滚动。
 // 渲染采用行级增量更新，编辑中不整表重建，避免打断输入焦点。
 import { formatClock, formatDuration, parseFlexibleTime } from '../format/time.js';
@@ -131,12 +131,58 @@ export function createCueList({
   }
 
   // ---------- 行构建 ----------
+  // 编辑态 = 行上的 .editing（CSS 只在该状态下放行输入框的指针事件）。
+  // 单击只选中行；双击（或 actions.setEditing）才进入编辑，避免输入框抢走焦点后
+  // 把小键盘时间轴键位当成数字输入吞掉。
+  function setEditingRow(id, editing) {
+    rows.get(id)?.tr.classList.toggle('editing', editing);
+  }
+
+  // 双击落点 → 文本偏移（Chrome/WebKit 两套 API；取不到就退回行尾）
+  function caretOffsetFromPoint(el, x, y) {
+    try {
+      if (document.caretPositionFromPoint) {
+        const pos = document.caretPositionFromPoint(x, y);
+        if (pos?.offsetNode && el.contains(pos.offsetNode)) return pos.offset;
+      } else if (document.caretRangeFromPoint) {
+        const range = document.caretRangeFromPoint(x, y);
+        if (range && el.contains(range.startContainer)) return range.startOffset;
+      }
+    } catch {
+      // 落点不可解析：用默认位置
+    }
+    return null;
+  }
+
   function focusText(id) {
     const view = rows.get(id);
     if (!view) return;
+    setEditingRow(id, true);
     view.text.focus();
     const len = view.text.value.length;
     view.text.setSelectionRange(len, len);
+  }
+
+  // 双击进入编辑：文本按落点定位光标，时间整段选中便于直接重打
+  function beginEdit(id, field, event) {
+    const view = rows.get(id);
+    if (!view) return;
+    // 先加 .editing：输入框恢复指针事件后 caretPositionFromPoint 才命中输入框内部
+    setEditingRow(id, true);
+    const isTime = field === 'start' || field === 'end';
+    const input = isTime ? view[field] : view.text;
+    input.focus();
+    if (isTime) {
+      input.select();
+      return;
+    }
+    const offset = caretOffsetFromPoint(view.text, event.clientX, event.clientY);
+    if (offset === null) {
+      const len = view.text.value.length;
+      view.text.setSelectionRange(len, len);
+    } else {
+      view.text.setSelectionRange(offset, offset);
+    }
   }
 
   function playCue(id) {
@@ -156,11 +202,11 @@ export function createCueList({
     tr.className = 'cue-row';
     tr.innerHTML = `
       <td class="num mono"></td>
-      <td class="time"><input class="edit-time mono" data-field="start" title="开始时间（回车或移开焦点提交）"></td>
-      <td class="time"><input class="edit-time mono" data-field="end" title="结束时间（回车或移开焦点提交）"></td>
+      <td class="time" title="开始时间（双击编辑，回车或移开焦点提交）"><input class="edit-time mono" data-field="start"></td>
+      <td class="time" title="结束时间（双击编辑，回车或移开焦点提交）"><input class="edit-time mono" data-field="end"></td>
       <td class="dur mono"></td>
       <td class="style-cell"><select class="edit-style" title="ASS 样式（Aegisub 样式列）"></select></td>
-      <td class="text-cell"><textarea class="edit-text" rows="1" title="字幕文本（修改后自动保存）"></textarea></td>
+      <td class="text-cell" title="字幕文本（双击编辑，修改后自动保存）"><textarea class="edit-text" rows="1"></textarea></td>
       <td class="ops"><button type="button" class="op play" title="播放此句">▶</button></td>`;
     const view = {
       tr,
@@ -174,6 +220,8 @@ export function createCueList({
     };
     view.style.addEventListener('change', () => {
       actions.updateCueStyle([id], view.style.value);
+      // 选完即收回焦点：下拉保持聚焦时，小键盘数字会跳选到同首字符的样式项
+      view.style.blur();
     });
     view.play.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -195,6 +243,8 @@ export function createCueList({
         if (e.key === 'Enter') {
           e.preventDefault();
           input.blur(); // 走 blur 流程统一提交并校验
+        } else if (e.key === 'Escape') {
+          input.blur(); // 退出编辑态，回到小键盘键位上下文
         }
       });
     });
@@ -203,6 +253,9 @@ export function createCueList({
       scheduleCommit(id);
     });
     view.text.addEventListener('blur', () => commitRow(id));
+    view.text.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') view.text.blur(); // 退出编辑态（已输入内容照常提交）
+    });
     tr.addEventListener('click', (e) => {
       if (e.target.closest('button, select')) return;
       const mode = e.shiftKey ? 'range' : (e.ctrlKey || e.metaKey) ? 'toggle' : 'single';
@@ -213,9 +266,11 @@ export function createCueList({
         if (fresh) player.seek(fresh.start);
       }
     });
+    // 双击进入编辑：文本按落点定位、时间整段选中；播放按钮与样式下拉保持单击
     tr.addEventListener('dblclick', (e) => {
-      if (e.target.closest('input, textarea, button, select')) return;
-      focusText(id);
+      if (e.target.closest('button, select')) return;
+      const input = e.target.closest('td')?.querySelector('input, textarea');
+      if (input) beginEdit(id, input.dataset.field ?? 'text', e);
     });
     rows.set(id, view);
     return view;
@@ -367,8 +422,11 @@ export function createCueList({
   tbodyEl.addEventListener('focusin', (event) => {
     focusedId = event.target.closest('tr[data-id]')?.dataset.id ?? null;
   });
-  tbodyEl.addEventListener('focusout', () => {
+  tbodyEl.addEventListener('focusout', (event) => {
     focusedId = null;
+    // 焦点离开本行（含点到行外）即退出编辑态：输入框重新让出指针事件，单击回到只选中行
+    const tr = event.target.closest?.('tr[data-id]');
+    if (tr && !tr.contains(event.relatedTarget)) tr.classList.remove('editing');
   });
 
   // ---------- 右键行操作菜单 ----------
