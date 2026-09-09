@@ -11,7 +11,7 @@ export const DEFAULT_ASS_FIELDS = [
 
 const MINIMAL_HEADER = [
   '[Script Info]',
-  '; Exported by Vocal Subtitle Timing Editor',
+  '; Exported by Subtitle Timing Editor',
   'ScriptType: v4.00+',
   'PlayResX: 1920',
   'PlayResY: 1080',

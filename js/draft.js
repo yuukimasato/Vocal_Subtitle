@@ -4,10 +4,14 @@ const SAVE_DELAY = 800;
 // 草稿结构版本：字段布局变化时递增，load 遇到旧版本草稿直接忽略
 const SCHEMA_VERSION = 1;
 
-export function createDraftStore(store) {
+// namespace：草稿键命名空间（agent 会话用 'agent'，人机同屏互不覆盖，见 docs/开发文档 §4.5）。
+// autoSave：cues 变更后的防抖自动保存；关闭时只在显式 saveNow(true) 落盘（agent 会话默认关）。
+export function createDraftStore(store, { namespace = '', autoSave = true } = {}) {
+  const prefix = namespace ? `${PREFIX}${namespace}:` : PREFIX;
   let timer = null;
 
-  function saveNow() {
+  function saveNow(force = false) {
+    if (!autoSave && !force) return true;
     clearTimeout(timer);
     timer = null;
     const s = store.state;
@@ -16,7 +20,7 @@ export function createDraftStore(store) {
       const key = draftKey(s.subtitleName || s.mediaName);
       if (!key) return true;
       localStorage.setItem(
-        PREFIX + key,
+        prefix + key,
         JSON.stringify({
           version: SCHEMA_VERSION,
           cues: s.cues,
@@ -49,7 +53,7 @@ export function createDraftStore(store) {
         const key = draftKey(name);
         if (!key) continue;
         try {
-          const raw = localStorage.getItem(PREFIX + key);
+          const raw = localStorage.getItem(prefix + key);
           if (!raw) continue;
           const data = JSON.parse(raw);
           // 版本不符（旧结构）的草稿直接忽略
@@ -67,7 +71,7 @@ export function createDraftStore(store) {
         const key = draftKey(name);
         if (!key) continue;
         try {
-          localStorage.removeItem(PREFIX + key);
+          localStorage.removeItem(prefix + key);
         } catch {
           // localStorage 不可用：忽略
         }

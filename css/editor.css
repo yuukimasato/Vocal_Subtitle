@@ -1,4 +1,4 @@
-/* 字幕打轴工作台 —— 自绘深色主题（复用 Vocal Subtitle WebUI 颜色 token） */
+/* 字幕打轴工作台 —— 自绘深色主题（独立配色体系） */
 
 :root {
   --accent: #7c9cff;

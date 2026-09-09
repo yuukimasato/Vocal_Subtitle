@@ -19,3 +19,6 @@ test_*.wav
 test_*.json
 test_*.ass
 test_*.srt
+
+# 冒烟产物（截图为验证证据，按需手动留存）
+.smoke/agent-smoke.png
