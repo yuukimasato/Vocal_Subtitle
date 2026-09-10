@@ -38,41 +38,6 @@ class FunASRPrepareRequest(BaseModel):
     model: str = Field(default="", description="FunASR 模型 ID 或通用模型名")
 
 
-class SubtitleEditRequest(BaseModel):
-    """字幕编辑请求（文本、时间轴或两者）"""
-
-    index: int = Field(..., description="字幕序号")
-    text: Optional[str] = Field(
-        default=None, description="修改后的文本（仅改时间轴时可省略）"
-    )
-    start: Optional[float] = Field(
-        default=None, ge=0, description="新的开始时间（秒），可省略"
-    )
-    end: Optional[float] = Field(
-        default=None, ge=0, description="新的结束时间（秒），可省略"
-    )
-
-
-class SubtitleBatchEditRequest(BaseModel):
-    """批量字幕编辑请求"""
-
-    action: str = Field(..., description="批量操作: speaker 或 merge")
-    indexes: List[int] = Field(..., min_length=1, description="字幕序号列表")
-    speaker_id: Optional[int] = Field(default=None, description="说话人编号")
-    speaker_label: Optional[str] = Field(default=None, description="说话人标签")
-    separator: str = Field(default="newline", description="合并分隔符: newline 或 space")
-
-
-class SubtitleBatchEditRequest(BaseModel):
-    """批量字幕编辑请求"""
-
-    action: str = Field(..., description="批量操作: speaker 或 merge")
-    indexes: List[int] = Field(..., min_length=1, description="字幕序号列表")
-    speaker_id: Optional[int] = Field(default=None, description="说话人编号")
-    speaker_label: Optional[str] = Field(default=None, description="说话人标签")
-    separator: str = Field(default="newline", description="合并分隔符: newline 或 space")
-
-
 # ---------------------------------------------------------------------------
 # 响应模型
 # ---------------------------------------------------------------------------

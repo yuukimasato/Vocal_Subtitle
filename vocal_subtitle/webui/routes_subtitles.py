@@ -10,11 +10,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
-from ..config import ConfigLoader, SubtitleBuildConfig
+from ..config import ConfigLoader
 from ..mapping.time_mapper import SubtitleEvent
-from ..utils.session_manager import OUTPUT_NAMES
-from .models import SubtitleBatchEditRequest, SubtitleEditRequest, SubtitleEventResponse
-from .subtitle_editing import SubtitleBatchEditError, apply_batch_edit, apply_timing_edit
+from .models import SubtitleEventResponse
 from .runtime_state import state
 
 logger = logging.getLogger(__name__)
@@ -99,174 +97,8 @@ def _load_completed_subtitle_task(task_id: str) -> tuple[Dict[str, Any], Dict[st
         raise HTTPException(status_code=400, detail="Task not completed yet")
     result = task.get("result", {})
     if not isinstance(result, dict) or not isinstance(result.get("events"), list):
-        raise HTTPException(status_code=404, detail="Task has no subtitle events")
+        raise HTTPException(status_code=404, detail=f"Task has no subtitle events")
     return task, result
-
-
-def _persist_subtitle_result(task_id: str, task: Dict[str, Any], result: Dict[str, Any]) -> None:
-    """Persist the final event list used by the UI and every subtitle export."""
-    task["status"] = result.get("status", "completed")
-    task["result"] = result
-    state.task_store[task_id] = task
-    state.task_history.update(
-        task_id,
-        status=task["status"],
-        result_json=json.dumps(result, default=str),
-    )
-
-
-def _rewrite_subtitle_files(task_result: Dict[str, Any]) -> List[str]:
-    """将内存中的字幕事件写回磁盘文件
-
-    同时更新主字幕文件和 LLM 字幕文件（如果存在）。
-    """
-    events = task_result.get("events", [])
-    if not events:
-        return []
-
-    errors: List[str] = []
-
-    # 重建 SubtitleEvent 对象
-    from ..mapping.subtitle_builder import SubtitleBuilder, SubtitleRule
-    from ..config import SubtitleBuildConfig
-
-    rebuilt_events = [_subtitle_event_from_payload(e) for e in events]
-
-    # 加载字幕构建规则
-    loader = ConfigLoader()
-    try:
-        config = loader.load_profile("default")
-        sub_cfg = config.subtitle
-    except Exception:
-        sub_cfg = SubtitleBuildConfig()
-
-    builder = SubtitleBuilder(
-        rule=SubtitleRule(
-            min_duration=sub_cfg.min_duration,
-            max_duration=sub_cfg.max_duration,
-            max_chars_cjk=sub_cfg.max_chars_cjk,
-            max_chars_latin=sub_cfg.max_chars_latin,
-            max_lines=sub_cfg.max_lines,
-        )
-    )
-
-    # 写回主字幕文件
-    subtitle_path = task_result.get("subtitle_path")
-    if subtitle_path:
-        try:
-            srt_text = builder.build_to_string(rebuilt_events, fmt="srt")
-            Path(subtitle_path).write_text(srt_text, encoding="utf-8")
-            logger.info("Rewrote subtitle file: %s", subtitle_path)
-        except Exception as e:
-            logger.warning("Failed to rewrite subtitle file: %s", e)
-            errors.append(f"主字幕文件: {e}")
-
-    # 写回 LLM 字幕文件（如果存在）
-    llm_path = task_result.get("llm_subtitle_path")
-    if llm_path:
-        try:
-            llm_text = builder.build_to_string(rebuilt_events, fmt="srt")
-            Path(llm_path).write_text(llm_text, encoding="utf-8")
-            logger.info("Rewrote LLM subtitle file: %s", llm_path)
-        except Exception as e:
-            logger.warning("Failed to rewrite LLM subtitle file: %s", e)
-            errors.append(f"LLM 字幕文件: {e}")
-    return errors
-
-
-@router.put("/subtitle/{task_id}/batch", deprecated=True)
-async def update_subtitles_batch(task_id: str, body: SubtitleBatchEditRequest):
-    """批量修改最终字幕事件并同步历史与导出文件。
-
-    Deprecated（D13）：webui 审核前端退役后编辑走 subtitle-editor；
-    本端点保留一个里程碑，随旧审核前端一并删除。
-    """
-    task, result = _load_completed_subtitle_task(task_id)
-    try:
-        updated_events = apply_batch_edit(
-            result.get("events", []),
-            action=body.action,
-            indexes=body.indexes,
-            speaker_id=body.speaker_id,
-            speaker_label=body.speaker_label,
-            separator=body.separator,
-        )
-    except SubtitleBatchEditError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    # The edited event list is authoritative for the final version.  Keep
-    # intermediate ASR/LLM source files out of this state transition.
-    result["events"] = updated_events
-    result["subtitle_count"] = len(updated_events)
-    stats = result.get("stats")
-    if isinstance(stats, dict):
-        stats["subtitle_count"] = len(updated_events)
-    _persist_subtitle_result(task_id, task, result)
-
-    rewrite_errors = _rewrite_subtitle_files(result)
-    if rewrite_errors:
-        raise HTTPException(
-            status_code=500,
-            detail="字幕事件已更新，但文件写回失败: " + "; ".join(rewrite_errors),
-        )
-    return {
-        "status": "ok",
-        "action": body.action,
-        "events": updated_events,
-        "subtitle_count": len(updated_events),
-    }
-
-
-@router.put("/subtitle/{task_id}/{index}", deprecated=True)
-async def update_subtitle(task_id: str, index: int, body: SubtitleEditRequest):
-    """编辑单条字幕（文本和/或时间轴），并自动保存到磁盘文件
-
-    Deprecated（D13）：webui 审核前端退役后编辑走 subtitle-editor；
-    本端点保留一个里程碑，随旧审核前端一并删除。
-    """
-    task, result = _load_completed_subtitle_task(task_id)
-    events = result.get("events", [])
-
-    if body.text is None and body.start is None and body.end is None:
-        raise HTTPException(status_code=400, detail="至少提供 text、start 或 end 之一")
-
-    updated_events = events
-    if body.start is not None or body.end is not None:
-        try:
-            updated_events = apply_timing_edit(
-                events, index, start=body.start, end=body.end
-            )
-        except SubtitleBatchEditError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        result["events"] = updated_events
-
-    updated_event = None
-    for e in updated_events:
-        if e["index"] == index:
-            updated_event = e
-            break
-    if updated_event is None:
-        raise HTTPException(status_code=404, detail=f"Subtitle {index} not found")
-
-    if body.text is not None:
-        updated_event["text"] = body.text
-        updated_event["original_text"] = None  # 手动编辑后清除原始文本标记
-
-    _persist_subtitle_result(task_id, task, result)
-    # 自动保存到磁盘
-    rewrite_errors = _rewrite_subtitle_files(result)
-    if rewrite_errors:
-        raise HTTPException(
-            status_code=500,
-            detail="字幕事件已更新，但文件写回失败: " + "; ".join(rewrite_errors),
-        )
-    return {
-        "status": "ok",
-        "index": index,
-        "text": updated_event.get("text"),
-        "start": updated_event.get("start"),
-        "end": updated_event.get("end"),
-    }
 
 
 @router.get("/subtitle/{task_id}/export")

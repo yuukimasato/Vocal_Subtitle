@@ -1125,3 +1125,8 @@ body {
   .history-workspace-grid, .quality-two-col { grid-template-columns: 1fr; }
   .review-inspector { order: -1; position: static; }
 }
+
+/* ---- 双界面收敛（2026-09-10）：处理台内联任务详情与质量面板 ---- */
+.task-detail-body { padding: 14px 16px; min-height: 0; }
+.task-detail-panel .quality-report-grid { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px; }
+.quality-meta { margin-top: 10px; font-size: 0.66rem; color: var(--text-tertiary); }

@@ -1,7 +1,9 @@
 (function() {
   'use strict';
 
-  const allowed = new Set(['process', 'review', 'feedback', 'history', 'quality']);
+  // 双界面收敛（2026-09-10）：仅保留 处理 / 反馈档案 两个工作区；
+  // 历史与质量内联进处理工作区，审核与编辑走 subtitle-editor（8631）。
+  const allowed = new Set(['process', 'feedback']);
   const Workspace = {
     current: 'process',
     initialized: false,
@@ -35,18 +37,12 @@
         button.classList.toggle('active', active);
         button.setAttribute('aria-current', active ? 'page' : 'false');
       });
-      if (name === 'review' && window.ReviewUI) ReviewUI.refresh();
       if (name === 'feedback' && window.FeedbackWorkspace) FeedbackWorkspace.refresh();
-      if (name === 'history' && window.HistoryUI) HistoryUI.refresh();
-      if (name === 'quality' && window.QualityUI) QualityUI.refresh();
     },
 
     setTask(taskId) {
       if (!taskId) return;
       if (window.App && App.state) App.state.taskId = taskId;
-      document.querySelectorAll('#review-task-select, #quality-task-select').forEach((select) => {
-        if (Array.from(select.options).some((option) => option.value === taskId)) select.value = taskId;
-      });
       document.dispatchEvent(new CustomEvent('workspace:task-change', { detail: { taskId } }));
     },
 

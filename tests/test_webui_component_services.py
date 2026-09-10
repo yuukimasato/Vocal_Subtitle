@@ -10,8 +10,6 @@ from vocal_subtitle.webui.storage_services import WebUIStorageService
 
 LEGACY_API_NAMES = (
     "get_subtitles",
-    "update_subtitle",
-    "update_subtitles_batch",
     "export_subtitle",
     "run_pipeline",
     "get_task_status",

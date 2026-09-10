@@ -47,8 +47,7 @@ CONTRACT = {
         "HealthScoreDetail", "HealthTrendEntry", "ImpactPredictionInfo",
         "LLM_PROVIDERS", "OUTPUT_NAMES", "PersistenceSettingsModel", "Pipeline",
         "PipelineConfig", "PipelineStats", "ProfileInfo", "RunRequest",
-        "SessionManager", "ShadowModeStatus", "ShadowModeToggleRequest",
-        "SubtitleBatchEditRequest", "SubtitleEditRequest", "SubtitleEvent",
+        "SessionManager", "ShadowModeStatus", "ShadowModeToggleRequest", "SubtitleEvent",
         "SubtitleEventResponse", "TaskHistoryItem", "TaskHistoryManager", "TaskStatus",
         "UPLOAD_DIR", "UserProfileInfo", "apply_persistence", "clear_cache",
         "clear_history", "compute_health", "delete_feedback_profile", "delete_fingerprint",
@@ -64,14 +63,12 @@ CONTRACT = {
         "list_speaker_models", "list_tasks", "prepare_funasr", "preview_impact",
         "record_shadow_run", "resolve_conflict", "rollback_feedback_profile", "run_pipeline",
         "router", "stream_audio", "toggle_shadow_mode", "update_cache_config",
-        "update_persistence_settings", "update_subtitle", "update_subtitles_batch",
         "ensure_funasr_ready",
     },
 }
 
 PRIVATE_HOOKS = {
     "vocal_subtitle.webui.api": {
-        "_load_completed_subtitle_task", "_persist_subtitle_result", "_rewrite_subtitle_files",
         "_run_pipeline_in_thread", "_shadow_evaluators", "_subtitle_event_from_payload",
         "_subtitle_event_to_payload", "_task_history", "_task_store", "_persistence_mgr",
     },

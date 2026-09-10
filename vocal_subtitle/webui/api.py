@@ -58,8 +58,6 @@ from .models import (  # noqa: E402
     RunRequest,
     ShadowModeStatus,
     ShadowModeToggleRequest,
-    SubtitleBatchEditRequest,
-    SubtitleEditRequest,
     SubtitleEventResponse,
     TaskHistoryItem,
     TaskStatus,
@@ -107,8 +105,6 @@ from .routes_subtitles import (
     export_subtitle,
     get_subtitles,
     stream_audio,
-    update_subtitle,
-    update_subtitles_batch,
 )
 from .routes_history import (
     _dir_size_mb,
@@ -164,11 +160,8 @@ async def health_check():
     return {"status": "ok", "version": "0.2.0"}
 
 # Compatibility exports used by integrations and historical tests.
-_rewrite_subtitle_files = subtitles_routes._rewrite_subtitle_files
 _subtitle_event_from_payload = subtitles_routes._subtitle_event_from_payload
 _subtitle_event_to_payload = subtitles_routes._subtitle_event_to_payload
-_load_completed_subtitle_task = subtitles_routes._load_completed_subtitle_task
-_persist_subtitle_result = subtitles_routes._persist_subtitle_result
 
 __all__ = [
     "BatchRunRequest",
@@ -201,8 +194,6 @@ __all__ = [
     "SessionManager",
     "ShadowModeStatus",
     "ShadowModeToggleRequest",
-    "SubtitleBatchEditRequest",
-    "SubtitleEditRequest",
     "SubtitleEvent",
     "SubtitleEventResponse",
     "TaskHistoryItem",
@@ -263,8 +254,6 @@ __all__ = [
     "toggle_shadow_mode",
     "update_cache_config",
     "update_persistence_settings",
-    "update_subtitle",
-    "update_subtitles_batch",
     "ensure_funasr_ready",
     "health_check",
 ]

@@ -74,13 +74,14 @@ def test_input_audio_download_uses_session_input_file(tmp_path, monkeypatch):
     assert "filename" in response.headers.get("content-disposition", "")
 
 
-def test_waveform_workspace_assets_are_served():
+def test_waveform_workspace_assets_are_gone():
+    """双界面收敛（2026-09-10）：波形/审核前端已删，编辑走 subtitle-editor（8631）。"""
     client = TestClient(create_app())
     response = client.get("/")
 
     assert response.status_code == 200
-    assert 'id="waveform-canvas"' in response.text
-    assert "/js/waveform.js" in response.text
-    waveform = client.get("/js/waveform.js")
-    assert waveform.status_code == 200
-    assert "/audio/stream?type=" in waveform.text
+    assert 'id="waveform-canvas"' not in response.text
+    assert "/js/waveform.js" not in response.text
+    assert client.get("/js/waveform.js").status_code == 404
+    assert client.get("/js/ui-review.js").status_code == 404
+    assert client.get("/js/ui-subtitles.js").status_code == 404

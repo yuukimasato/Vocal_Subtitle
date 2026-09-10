@@ -39,35 +39,6 @@ const part = {
         skipSepCb.addEventListener('change', function() { App.saveSettings(); });
       }
 
-      App.ui.initSubtitleBatchControls();
-      if (typeof App.ui.initWaveformBridge === 'function') App.ui.initWaveformBridge();
-      document.addEventListener('keydown', function(event) {
-        App.ui.handleSubtitleKeyboard(event);
-      });
-
-      // Feedback file input handlers
-      var fbRefInput = $('#fb-ref-input');
-      var fbAudioInput = $('#fb-audio-input');
-      if (fbRefInput) {
-        fbRefInput.addEventListener('change', function() {
-          if (this.files && this.files[0]) {
-            App.state._fbRefFile = this.files[0];
-            var statusEl = $('#fb-file-status');
-            if (statusEl) statusEl.textContent = '已选择: ' + this.files[0].name;
-            App.ui._updateFbButtons();
-          }
-        });
-      }
-      if (fbAudioInput) {
-        fbAudioInput.addEventListener('change', function() {
-          if (this.files && this.files[0]) {
-            App.state._fbAudioFile = this.files[0];
-            var statusEl = $('#fb-file-status');
-            if (statusEl) statusEl.textContent = '已选择: ' + this.files[0].name;
-            App.ui._updateFbButtons();
-          }
-        });
-      }
     },
 
     // Upload Zone

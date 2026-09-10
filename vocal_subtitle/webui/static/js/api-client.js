@@ -23,24 +23,6 @@ async _fetch(url, opts) {
         body: JSON.stringify({model: model || ''})
       });
     },
-    async getSubtitles(taskId) { return this._fetch('/api/subtitle/' + taskId); },
-    // payload: {text?, start?, end?}；传字符串时视为纯文本更新（旧用法兼容）
-    async updateSubtitle(taskId, index, payload) {
-      if (typeof payload === 'string') payload = {text: payload};
-      return this._fetch('/api/subtitle/' + taskId + '/' + index, {
-        method: 'PUT', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(Object.assign({index: index}, payload))
-      });
-    },
-    async updateSubtitleTiming(taskId, index, start, end) {
-      return this.updateSubtitle(taskId, index, {start: start, end: end});
-    },
-    async batchEditSubtitles(taskId, payload) {
-      return this._fetch('/api/subtitle/' + taskId + '/batch', {
-        method: 'PUT', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-    },
     async getTaskStatus(taskId) { return this._fetch('/api/tasks/' + taskId); },
 	    async getHistory(limit, offset) {
 	      const params = new URLSearchParams();
@@ -72,22 +54,6 @@ async _fetch(url, opts) {
 	      const qs = stage ? '?stage=' + encodeURIComponent(stage) : '';
 	      return this._fetch('/api/cache' + qs, { method: 'DELETE' });
 	    },
-    // ---- Feedback APIs (Phase 5) ----
-    async feedbackLearn(audioFile, refFile, profile, fbProfile, runFirst, dryRun) {
-      const fd = new FormData();
-      fd.append('audio', audioFile);
-      fd.append('reference', refFile);
-      fd.append('profile', profile);
-      fd.append('feedback_profile', fbProfile);
-      fd.append('run_pipeline_first', runFirst ? 'true' : 'false');
-      fd.append('dry_run', dryRun ? 'true' : 'false');
-      const res = await fetch('/api/feedback/learn', { method: 'POST', body: fd });
-      if (!res.ok) { const t = await res.text(); throw new Error(t); }
-      return res.json();
-    },
-    async feedbackPreview(audioFile, refFile, profile) {
-      return this.feedbackLearn(audioFile, refFile, profile, 'user_default', true, true);
-    },
     async feedbackProfiles() { return this._fetch('/api/feedback/profiles'); },
     async feedbackProfile(name) { return this._fetch('/api/feedback/profile/' + name); },
     async feedbackProfileRollback(name) {

@@ -13,164 +13,6 @@ function formatTime(seconds) {
   return `${m}:${String(s).padStart(4,'0')}`;
 }
 
-/**
- * 计算原始文本和优化后文本的词级差异，返回高亮 HTML。
- * 算法：对 token 序列做 LCS (Longest Common Subsequence)，
- * 回溯分类每个 token 为 same / added，用不同颜色标记。
- * CJK 字符逐字分词，拉丁语言逐词分词。
- */
-function diffAndHighlight(original, optimized) {
-  if (!original || original === optimized) return App.ui.escapeHtml(optimized);
-
-  // 分词：CJK 单字、拉丁单词、空白、标点
-  function tokenize(text) {
-    var tokens = [];
-    var re = /([一-鿿㐀-䶿]|[\w]+|[^\w\s]|\s+)/g;
-    var m;
-    while ((m = re.exec(text)) !== null) {
-      tokens.push({ text: m[1], pos: m.index });
-    }
-    return tokens;
-  }
-
-  var origTokens = tokenize(original);
-  var optTokens = tokenize(optimized);
-  var origWords = origTokens.map(function(t) { return t.text; });
-  var optWords = optTokens.map(function(t) { return t.text; });
-  var m = origWords.length;
-  var n = optWords.length;
-
-  // LCS DP 表
-  var dp = new Array(m + 1);
-  for (var i = 0; i <= m; i++) {
-    dp[i] = new Array(n + 1);
-    for (var j = 0; j <= n; j++) dp[i][j] = 0;
-  }
-  for (var i = 1; i <= m; i++) {
-    for (var j = 1; j <= n; j++) {
-      if (origWords[i - 1] === optWords[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-  // 回溯分类每个 optimized token
-  var tags = new Array(n);
-  for (var k = 0; k < n; k++) tags[k] = 'added';
-  var i = m, j = n;
-  while (i > 0 && j > 0) {
-    if (origWords[i - 1] === optWords[j - 1]) {
-      tags[j - 1] = 'same';
-      i--; j--;
-    } else if (dp[i - 1][j] >= dp[i][j - 1]) {
-      i--;
-    } else {
-      j--;
-    }
-  }
-
-  // 构建高亮 HTML
-  var result = [];
-  for (var k = 0; k < n; k++) {
-    var word = App.ui.escapeHtml(optWords[k]);
-    if (tags[k] === 'same') {
-      result.push(word);
-    } else {
-      result.push('<span class="diff-added">' + word + '</span>');
-    }
-  }
-  return result.join('');
-}
-
-/**
- * 将秒数格式化为 SRT 时间戳 (HH:MM:SS,mmm)
- */
-function formatSRTTime(seconds) {
-  var h = Math.floor(seconds / 3600);
-  var m = Math.floor((seconds % 3600) / 60);
-  var s = Math.floor(seconds % 60);
-  var ms = Math.floor((seconds % 1) * 1000);
-  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + ',' + String(ms).padStart(3, '0');
-}
-
-/**
- * 将秒数格式化为 ASS 时间戳 (H:MM:SS.cc)
- */
-function formatASSTime(seconds) {
-  var h = Math.floor(seconds / 3600);
-  var m = Math.floor((seconds % 3600) / 60);
-  var s = Math.floor(seconds % 60);
-  var cs = Math.floor((seconds % 1) * 100);
-  return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + '.' + String(cs).padStart(2, '0');
-}
-
-/**
- * 将单条字幕事件格式化为 SRT 条目
- */
-function formatEventAsSRT(event) {
-  return event.index + '\n' + formatSRTTime(event.start) + ' --> ' + formatSRTTime(event.end) + '\n' + event.text;
-}
-
-/**
- * 将单条字幕事件格式化为 ASS Dialogue 行
- */
-function formatEventAsASS(event) {
-  return 'Dialogue: 0,' + formatASSTime(event.start) + ',' + formatASSTime(event.end) + ',Default,,0,0,0,,' + event.text;
-}
-
-/**
- * 检测字幕事件是否存在冲突
- *
- * 仅将以下情况视为真正的冲突（需要人工确认）：
- * 1. LLM 将其他条目的内容复制到了当前条目（跨条目内容泄漏）
- * 2. 不同说话人的文本被合并到同一条字幕
- *
- * 普通的 LLM 修正（拼写、标点、语序、语气词去除）不再视为冲突，
- * 最终版本直接使用 LLM 优化后的文本。
- *
- * @param {Object} event - 字幕事件
- * @param {Array} allEvents - 所有字幕事件（用于相邻条目对比）
- * @returns {boolean} 是否存在需要人工确认的冲突
- */
-function hasConflict(event, allEvents) {
-  // 无原始文本 = LLM 未修改 → 无冲突
-  if (!event.original_text) return false;
-  // 文本未变 → 无冲突
-  if (event.original_text === event.text) return false;
-
-  // LLM 做了修改 → 检查是否为跨条目内容泄漏
-  if (allEvents && allEvents.length > 0) {
-    var idx = event.index;
-
-    // 检查前一相邻条目：前一条是否吸收了当前条目的内容
-    var prev = null;
-    for (var i = 0; i < allEvents.length; i++) {
-      if (allEvents[i].index === idx - 1) { prev = allEvents[i]; break; }
-    }
-    if (prev && prev.text && event.text.trim().length >= 3) {
-      if (prev.text.indexOf(event.text.trim()) >= 0) {
-        return true;  // 当前条目的内容被前一条吸收了
-      }
-    }
-
-    // 检查后一相邻条目：当前条目是否吸收了后一条目的内容
-    var next = null;
-    for (var i = 0; i < allEvents.length; i++) {
-      if (allEvents[i].index === idx + 1) { next = allEvents[i]; break; }
-    }
-    if (next && next.text && next.text.trim().length >= 3) {
-      if (event.text.indexOf(next.text.trim()) >= 0) {
-        return true;  // 当前条目吸收了后一条的内容
-      }
-    }
-  }
-
-  // 普通 LLM 修正（拼写、标点、语气词去除等）→ 自动接受
-  return false;
-}
-
 function toast(msg, type) {
   type = type || 'info';
   const container = $('#toast-container');
@@ -205,8 +47,6 @@ const App = {
       return;
     }
 
-    App.state.selectedSubtitleIndexes.clear();
-    App.state.selectionAnchorIndex = null;
     App.state.isRunning = true;
     App.ui.setRunning(true);
 
@@ -268,7 +108,7 @@ const App = {
 
 	  async refreshHistory() {
 	    try {
-	      const data = await App.api.getHistory(20, 0);
+	      const data = await App.api.getHistory(50, 0);
 	      App.ui.renderHistory(data.items || []);
 	    } catch (ex) {
 	      console.error('Failed to load history:', ex);
@@ -280,6 +120,7 @@ const App = {
 	    if (!confirm('删除此历史记录？关联的缓存文件将保留。')) return;
 	    try {
 	      await App.api.deleteHistory(taskId);
+	      if (window.HistoryUI) HistoryUI.resetDetail(taskId);
 	      App.refreshHistory();
 	      toast('历史记录已删除', 'info');
 	    } catch (ex) {
@@ -296,6 +137,7 @@ const App = {
 	      if (resp.uploads_cleaned) msg += '，' + resp.uploads_cleaned + ' 个上传目录';
 	      toast(msg, 'info');
 	      App.refreshHistory();
+	      if (window.HistoryUI) HistoryUI.resetDetail();
 	      App.refreshCacheInfo();
 	    } catch (ex) {
 	      toast('清除失败: ' + ex.message, 'error');
@@ -335,7 +177,7 @@ const App = {
 	    }
 	    // 设置 taskId 以启用导出/下载按钮（在异步加载详情前就设置）
 	    App.state.taskId = item.id;
-	    App.ui.clearSubtitleSelection(false);
+	    Workspace.setTask(item.id);
 
 	    // 先用列表摘要快速显示统计信息
 	    if (item.result_summary && item.result_summary.stats) {
@@ -355,8 +197,8 @@ const App = {
 	      App.ui.updateExportBar(item.result_summary || {});
 	    }
 
-	    // 获取完整详情（含字幕事件 + 音频路径），完善显示
-	    App.api._fetch('/api/history/' + item.id).then(detail => {
+	    // 获取完整详情，完善统计与导出栏，并联动任务详情/质量面板
+	    App.api.getHistoryDetail(item.id).then(detail => {
 	      const summary = detail.result_summary || {};
 	      if (summary.stats) {
 	        App.ui.renderStats(summary.stats);
@@ -364,21 +206,16 @@ const App = {
 	        $('#results-content').style.display = 'block';
 	        App.ui.renderDiagnosticReport({ stats: summary.stats });
 	      }
-      if (detail.events && detail.events.length > 0) {
-        App.state.subtitleEvents = detail.events;
-        App.ui.renderTimeline(detail.events);
-        if (window.WaveformUI) {
-          WaveformUI.setEvents(detail.events);
-          WaveformUI.setTask(App.state.taskId, summary, detail.events);
-        }
-      }
 	      // 使用详情中的完整 result_summary（含 vocals_path / accompaniment_path）更新导出栏
 	      App.ui.updateAudioExportBar(detail.result_summary || {});
 	      App.ui.updateExportBar(detail.result_summary || {});
 	    }).catch(ex => {
 	      console.error('Failed to load history detail:', ex);
 	    });
-    },
+
+	    // 任务详情 + 质量报告内联面板
+	    if (window.HistoryUI) HistoryUI.showDetail(item.id);
+	  },
 
     async exportFormat(fmt) {
     if (!App.state.taskId) { toast('请先完成处理', 'error'); return; }
@@ -453,105 +290,34 @@ const App = {
   // ---- UI Rendering ----
   ui: window.VocalSubtitleUi,
 
-  // ---- Feedback Business Logic (Phase 5) ----
-  _fbRefFile: null,
-  _fbAudioFile: null,
+  // ---- 双界面收敛：深链 subtitle-editor + 任务详情面板 ----
 
-  pickRefFile() {
-    var input = $('#fb-ref-input');
-    if (input) input.click();
+  // subtitle-editor（8631）地址；localStorage 键 vst.editorBase 可覆盖默认值
+  editorBase() {
+    return localStorage.getItem('vst.editorBase') || 'http://127.0.0.1:8631/';
   },
 
-  pickAudioFile() {
-    var input = $('#fb-audio-input');
-    if (input) input.click();
-  },
-
-  async handleFeedbackLearn() {
-    var refFile = App.state._fbRefFile || (App.state._fbRefBlob ? new File([App.state._fbRefBlob], 'edited.srt', {type: 'text/plain'}) : null);
-    var audioFile = App.state._fbAudioFile;
-    if (!refFile || !audioFile) {
-      toast('请先选择修订字幕文件和音频文件', 'error');
-      return;
-    }
-    var learnBtn = $('#fb-learn-btn');
-    if (learnBtn) { learnBtn.disabled = true; learnBtn.textContent = '学习中...'; }
-    try {
-      var report = await App.api.feedbackLearn(audioFile, refFile, App.state.selectedProfile, 'user_default', true, false);
-      App.ui.renderFeedbackReport(report);
-      App.refreshFeedbackConfigs();
-      if (report.status === 'ok') {
-        toast('反馈学习完成！已更新 ' + Object.keys(report.param_adjustments || {}).length + ' 个参数', 'success');
-      } else {
-        toast('学习未完成: ' + (report.message || '未知错误'), 'info');
-      }
-    } catch (ex) {
-      toast('学习失败: ' + ex.message, 'error');
-    } finally {
-      if (learnBtn) { learnBtn.disabled = false; learnBtn.textContent = '📚 开始学习'; }
-    }
-  },
-
-  async handleFeedbackPreview() {
-    var refFile = App.state._fbRefFile;
-    var audioFile = App.state._fbAudioFile;
-    if (!refFile || !audioFile) {
-      toast('请先选择修订字幕文件和音频文件', 'error');
-      return;
-    }
-    var previewBtn = $('#fb-preview-btn');
-    if (previewBtn) { previewBtn.disabled = true; previewBtn.textContent = '分析中...'; }
-    try {
-      var report = await App.api.feedbackPreview(audioFile, refFile, App.state.selectedProfile);
-      App.ui.renderFeedbackReport(report);
-      toast('差异预览完成 — 未实际更新配置', 'info');
-    } catch (ex) {
-      toast('预览失败: ' + ex.message, 'error');
-    } finally {
-      if (previewBtn) { previewBtn.disabled = false; previewBtn.textContent = '🔍 预览差异'; }
-    }
-  },
-
-  async handleFeedbackLearnFromEdits() {
-    var events = App.state.subtitleEvents;
-    if (!events || events.length === 0) {
-      toast('当前没有字幕数据，请先处理音频', 'error');
-      return;
-    }
-    // Build SRT from current subtitle events
-    var srt = '';
-    events.forEach(function(e, i) {
-      srt += (i + 1) + '\n';
-      srt += formatEventAsSRT(e) + '\n\n';
+  openInEditor(taskId) {
+    taskId = taskId || App.state.taskId;
+    if (!taskId) { toast('请先完成处理或从历史选择任务', 'error'); return; }
+    var origin = location.origin;
+    var qs = new URLSearchParams({
+      media: origin + '/api/tasks/' + taskId + '/audio/stream?type=input',
+      subs: origin + '/api/tasks/' + taskId + '/subtitle-file?version=clean',
+      manifest: origin + '/api/tasks/' + taskId + '/manifest'
     });
-    var blob = new Blob([srt], {type: 'text/plain'});
-    App.state._fbRefBlob = blob;
-    App.state._fbRefFile = new File([blob], 'edited.srt', {type: 'text/plain'});
-
-    // Try to get audio from current task
-    if (App.state.taskId) {
-      try {
-        var audioUrl = '/api/tasks/' + App.state.taskId + '/audio?type=input';
-        var resp = await fetch(audioUrl);
-        if (resp.ok) {
-          var audioBlob = await resp.blob();
-          App.state._fbAudioFile = new File([audioBlob], 'audio.bin', {type: audioBlob.type || 'audio/wav'});
-        }
-      } catch(ex) { /* audio download failed, user will need to pick manually */ }
-    }
-
-    var statusEl = $('#fb-file-status');
-    if (statusEl) {
-      statusEl.textContent = '修订字幕: 从 ' + events.length + ' 条当前编辑结果生成' + (App.state._fbAudioFile ? ' | 音频: 已复用' : ' | ⚠️ 请手动选择音频文件');
-    }
-    App.ui._updateFbButtons();
-
-    if (!App.state._fbAudioFile) {
-      toast('修订字幕已就绪！请再选择音频文件后点击"开始学习"', 'info');
-    } else {
-      toast('修订字幕和音频已就绪！点击"开始学习"提交', 'success');
-    }
+    window.open(App.editorBase() + '?' + qs.toString(), '_blank');
   },
+
+  showTaskDetail() {
+    var panel = document.getElementById('task-detail-panel');
+    if (!panel) return;
+    panel.hidden = false;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (App.state.taskId && window.HistoryUI) HistoryUI.showDetail(App.state.taskId);
+  },
+
+  // ---- 反馈档案治理（学习入口在 8631 编辑器） ----
 
   async refreshFeedbackConfigs() {
     try {
@@ -621,7 +387,6 @@ const App = {
   },
 
   renderFeedbackConflicts(conflicts) {
-    var reportEl = $('#feedback-report');
     if (!conflicts || !conflicts.conflicts || conflicts.conflicts.length === 0) return;
     var activeConflicts = conflicts.conflicts.filter(function(c) { return c.is_oscillating; });
     if (activeConflicts.length === 0) return;
@@ -642,7 +407,6 @@ const App = {
       html += '</div>';
     });
     html += '</div>';
-    // Append to report or config area
     var configEl = $('#feedback-config-mgmt');
     if (configEl) {
       configEl.innerHTML = html + (configEl.innerHTML || '');
@@ -659,27 +423,10 @@ const App = {
     }
   },
 
-  // ---- 波形打轴：时间轴保存 ----
-  async saveWaveformTiming(index, start, end) {
-    if (!App.state.taskId) throw new Error('当前没有已加载的任务');
-    await App.api.updateSubtitleTiming(App.state.taskId, index, start, end);
-    var event = App.state.subtitleEvents.find(function(e) { return Number(e.index) === Number(index); });
-    if (event) {
-      event.start = start;
-      event.end = end;
-      if (App.ui.updateTimelineRowTimes) App.ui.updateTimelineRowTimes(event);
-    }
-  },
-
   // ---- Init ----
   init() {
     document.addEventListener('DOMContentLoaded', () => {
       App.ui.init();
-      if (window.WaveformUI) {
-        WaveformUI.onTimingChange = function(index, start, end) {
-          return App.saveWaveformTiming(index, start, end);
-        };
-      }
     });
   }
 };
@@ -693,12 +440,6 @@ window.App = App;
 window.$ = $;
 window.$$ = $$;
 window.formatTime = formatTime;
-window.formatSRTTime = formatSRTTime;
-window.formatASSTime = formatASSTime;
-window.formatEventAsSRT = formatEventAsSRT;
-window.formatEventAsASS = formatEventAsASS;
-window.diffAndHighlight = diffAndHighlight;
-window.hasConflict = hasConflict;
 window.toast = toast;
 
 App.init();

@@ -131,17 +131,10 @@ const part = {
       App.ui.clearPipelineError();
 
       const stats = result.stats;
-      App.state.subtitleEvents = result.events || [];
-      if (window.WaveformUI) {
-        WaveformUI.setEvents(App.state.subtitleEvents);
-        WaveformUI.setTask(App.state.taskId, result, App.state.subtitleEvents);
-      }
+      const eventCount = (result.events || []).length;
 
       // Show stats
       App.ui.renderStats(stats);
-
-      // Render subtitle timeline
-      App.ui.renderTimeline(App.state.subtitleEvents);
 
       // Render diagnostic report if available
       App.ui.renderDiagnosticReport(result);
@@ -166,14 +159,13 @@ const part = {
         ? '字幕生成完成'
         : '字幕已生成，但质量状态为 ' + qualityStatus;
       const statusMessage = runtimeStatus === 'degraded' || runtimeStatus === 'degraded_completed' ? '，运行状态为降级完成' : '';
-      toast(qualityMessage + statusMessage + '，共 ' + App.state.subtitleEvents.length + ' 条', runtimeStatus === 'completed' && qualityStatus === 'pass' ? 'success' : 'warning');
+      toast(qualityMessage + statusMessage + '，共 ' + eventCount + ' 条', runtimeStatus === 'completed' && qualityStatus === 'pass' ? 'success' : 'warning');
 
       // Refresh history and cache info
       App.refreshHistory();
       App.refreshCacheInfo();
 
-      // Show feedback learning entry
-      App.ui.showFeedbackEntry(result);
+      // 刷新反馈档案治理数据（学习入口在 subtitle-editor 8631）
       App.refreshFeedbackConfigs();
 
       // Display LLM stage if enabled
@@ -216,6 +208,9 @@ const part = {
       // Show/hide audio + subtitle export bars based on result
       App.ui.updateAudioExportBar(result);
       App.ui.updateExportBar(result);
+
+      // 任务详情 + 质量报告内联面板（双界面收敛：历史/质量并入处理台）
+      if (window.HistoryUI) HistoryUI.showDetail(App.state.taskId);
     },
 
     pipelineError(message) {
@@ -291,7 +286,37 @@ const part = {
       }
     },
 
-    // Subtitle batch editing
+    // 从已删除的 ui-subtitles.js 迁入：仅保留导出栏控制（表格/波形已随双界面收敛移除）
+
+    updateAudioExportBar(result) {
+      var bar = document.getElementById('audio-export-bar');
+      if (!bar) return;
+      var hasVocals = !!(result && result.vocals_path);
+      var hasAccomp = !!(result && result.accompaniment_path);
+      if (hasVocals || hasAccomp) {
+        bar.style.display = 'flex';
+        // 如果没有人声或伴奏，隐藏对应按钮
+        var btns = bar.querySelectorAll('.btn-export');
+        if (btns[0]) btns[0].style.display = hasVocals ? '' : 'none';
+        if (btns[1]) btns[1].style.display = hasAccomp ? '' : 'none';
+      } else {
+        bar.style.display = 'none';
+      }
+    },
+
+    // 根据 LLM 优化是否生效，调整字幕下载栏的按钮布局
+    // - LLM 启用时：隐藏主按钮，显示「干净版」+「LLM 优化版」
+    // - LLM 未启用时：只显示主按钮「字幕文件」
+    updateExportBar(result) {
+      var mainBtn = document.getElementById('btn-srt-main');
+      var cleanBtn = document.getElementById('btn-clean-srt');
+      var llmBtn = document.getElementById('btn-llm-srt');
+      var hasLLM = !!(result && result.llm_subtitle_path);
+
+      if (mainBtn) mainBtn.style.display = hasLLM ? 'none' : '';
+      if (cleanBtn) cleanBtn.style.display = hasLLM ? '' : 'none';
+      if (llmBtn) llmBtn.style.display = hasLLM ? '' : 'none';
+    },
 };
 window.VocalSubtitleUi = Object.assign(window.VocalSubtitleUi || {}, part);
 })();

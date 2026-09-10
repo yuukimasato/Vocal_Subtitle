@@ -11,17 +11,9 @@
         skipSeparation: false,
         taskId: null,
         isRunning: false,
-        subtitleEvents: [],
         historyItems: [],
-        subtitleViewMode: 'auto',
-        subtitleFinalFormat: 'srt',
         funasrPreparing: false,
-        selectedSubtitleIndexes: new Set(),
-        selectionAnchorIndex: null,
-        rowClickTimer: null,
-        ws: null,
-        _audioPlayer: null,
-        _audioTaskId: null
+        ws: null
       };
     }
   };
