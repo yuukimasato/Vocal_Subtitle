@@ -26,9 +26,15 @@ router = APIRouter()
 
 JOURNAL_SCHEMA = "edit-journal-v1"
 
-# 事件必填字段（schema 校验）；diff 允许为空数组（无变化的 commit 不应出现，宽容处理）
-_EVENT_REQUIRED_FIELDS = {"schema", "type", "session_id", "seq", "command"}
+# 事件必填字段（schema 校验）；diff 允许为空数组（无变化的 commit 不应出现，宽容处理）。
+# session_id 为契约字段；早期编辑器导出用 session，读取时双读（journal_ingest.event_session_id 同语义）。
+_EVENT_REQUIRED_FIELDS = {"schema", "type", "seq", "command"}
 _SAFE_SESSION_ID = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _event_session_id(record: Dict[str, Any]) -> Optional[str]:
+    value = record.get("session_id") or record.get("session")
+    return str(value) if value else None
 
 
 def _sink_dir() -> Path:
@@ -115,7 +121,7 @@ def _validate(records: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], int]
         if record.get("type") == "header":
             valid.append(record)
             continue
-        if record.get("type") == "event" and _EVENT_REQUIRED_FIELDS <= set(record):
+        if record.get("type") == "event" and _EVENT_REQUIRED_FIELDS <= set(record) and _event_session_id(record):
             valid.append(record)
             continue
         rejected += 1
@@ -152,7 +158,7 @@ async def journal_sink(request: Request):
     # 按 session 分组落盘；header 记录到对应会话文件首部（仅首次）
     by_session: Dict[str, List[Dict[str, Any]]] = {}
     for record in valid:
-        session_id = str(record.get("session_id") or record.get("id") or "unknown-session")
+        session_id = _event_session_id(record) or "unknown-session"
         by_session.setdefault(session_id, []).append(record)
 
     accepted = 0

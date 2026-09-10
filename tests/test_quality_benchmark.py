@@ -58,7 +58,11 @@ def test_reference_content_coverage_detects_missing_content():
 
 def test_quality_manifest_contains_existing_fixture_pairs():
     root = Path(__file__).resolve().parents[1]
-    scenes = load_manifest(root / "test/quality_manifest.yaml", root)
+    manifest_path = root / "test/quality_manifest.yaml"
+    if not manifest_path.exists():
+        # 真实素材清单被 .gitignore 排除（本地 fixture），无素材的环境跳过而非失败
+        pytest.skip("本地质量基准 fixture 缺失（test/quality_manifest.yaml，见 .gitignore）")
+    scenes = load_manifest(manifest_path, root)
 
     assert len(scenes) == 10
     assert {scene["category"] for scene in scenes} == {

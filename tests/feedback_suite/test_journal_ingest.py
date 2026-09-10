@@ -66,6 +66,28 @@ class TestParse:
         assert files[0].events[0]["seq"] == 3
         assert [e["seq"] for e in files[1].events] == [4]  # 跨文件去重
 
+    def test_legacy_session_field_alias_accepted(self):
+        """早期编辑器导出以 session 命名会话字段（session_id 契约化前的旧名），摄取端双读"""
+        text = _ndjson([
+            {"schema": "edit-journal-v1", "type": "header", "session": "s-legacy"},
+            {"schema": "edit-journal-v1", "type": "event", "session": "s-legacy", "seq": 0,
+             "ts": "2026-09-10T00:00:00Z", "actor": "human", "command": "updateCueTimes", "diff": []},
+        ])
+        header, events, rejected = parse_journal_text(text)
+        assert header["session"] == "s-legacy"
+        assert len(events) == 1
+        assert rejected == 0
+
+    def test_dedupe_treats_session_alias_as_same_key(self, tmp_path):
+        """同一会话以 session 与 session_id 两种拼写重复导出时按 (会话, seq) 去重"""
+        legacy = {"schema": "edit-journal-v1", "type": "event", "session": "s-1", "seq": 5,
+                  "command": "updateCueTimes", "diff": []}
+        modern = _event(seq=5)
+        (tmp_path / "old.journal.jsonl").write_text(_ndjson([legacy]), encoding="utf-8")
+        (tmp_path / "new.journal.jsonl").write_text(_ndjson([modern, _event(seq=6)]), encoding="utf-8")
+        files = load_journal_files([tmp_path / "old.journal.jsonl", tmp_path / "new.journal.jsonl"])
+        assert [e["seq"] for e in files[1].events] == [6]  # seq=5 为同一事件（别名同键）
+
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(JournalIngestError):
             load_journal_files([tmp_path / "nope.jsonl"])

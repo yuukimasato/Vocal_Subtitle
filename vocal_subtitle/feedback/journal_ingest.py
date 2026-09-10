@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 JOURNAL_SCHEMA = "edit-journal-v1"
 
-# 事件必填字段
-_EVENT_REQUIRED_FIELDS = {"schema", "type", "session_id", "seq", "command"}
+# 事件必填字段（session_id 为契约字段；早期编辑器导出用 session，读取时双读）
+_EVENT_REQUIRED_FIELDS = {"schema", "type", "seq", "command"}
 
 # 重放时 id 与原始事件的时间匹配容差（秒）：cue 初值与原事件 start 的最大距离
 _MATCH_TOLERANCE_SECONDS = 1.0
@@ -38,6 +38,12 @@ _SYSTEMATIC_SHIFT_THRESHOLD = 0.03
 
 class JournalIngestError(ValueError):
     """日志文件解析或校验失败"""
+
+
+def event_session_id(record: Dict[str, Any]) -> Optional[str]:
+    """事件/头部的会话 ID：session_id 为契约字段，session 为早期字段名（双读）"""
+    value = record.get("session_id") or record.get("session")
+    return str(value) if value else None
 
 
 @dataclass
@@ -125,7 +131,7 @@ def parse_journal_text(text: str, source: Path | None = None) -> Tuple[Optional[
         if record.get("type") == "header":
             header = record
             continue
-        if record.get("type") == "event" and _EVENT_REQUIRED_FIELDS <= set(record):
+        if record.get("type") == "event" and _EVENT_REQUIRED_FIELDS <= set(record) and event_session_id(record):
             events.append(record)
             continue
         rejected += 1
@@ -144,7 +150,7 @@ def load_journal_files(paths: Iterable[Path | str]) -> List[JournalFile]:
         header, events, rejected = parse_journal_text(text, source=path)
         deduped: List[Dict[str, Any]] = []
         for event in events:
-            key = (str(event.get("session_id")), int(event.get("seq", -1)))
+            key = (event_session_id(event) or "unknown-session", int(event.get("seq", -1)))
             if key in seen:
                 continue
             seen.add(key)
@@ -507,6 +513,7 @@ __all__ = [
     "ReplayResult",
     "check_v3_trigger",
     "derive_editor_preferences",
+    "event_session_id",
     "find_original_subtitle",
     "journal_original_stem",
     "journal_statistics",
