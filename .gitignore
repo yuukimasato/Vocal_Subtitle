@@ -119,3 +119,11 @@ gh.tar.gz
 # 基准运行产物（体积大且含本机路径，可用 scripts/run_offline_golden_production.py 复现）
 /docs/superpowers/reports/*.json
 /docs/superpowers/reports/subtitles/
+.scratch/
+
+# 会话级诊断草稿与临时产物(定稿内容已归档 docs/ 或 scripts/)
+.scratch/
+
+# 面板组件源依赖(floating-panel-kit 仅入库源码)
+tools/floating-panel-kit/node_modules/
+tools/floating-panel-kit/无标题文档
