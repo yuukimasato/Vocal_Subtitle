@@ -393,18 +393,13 @@ const part = {
               <span><strong>${model.name}</strong><br><small style="color:var(--text-tertiary);">${model.kind} · ${model.model_ref}</small></span>
               <span style="display:flex;gap:6px;flex-shrink:0;">
                 <button class="btn-secondary" type="button" data-model-id="${model.model_id}" data-action="download" ${model.cached?'disabled':''}>${model.cached?'已缓存':'下载'}</button>
-                <button class="btn-secondary" type="button" data-model-id="${model.model_id}" data-action="check">检查缓存</button>
               </span>
             </div>
-            <div style="font-size:0.72rem;color:var(--text-tertiary);margin-top:4px;">${model.license}${model.requires_token?' · 需要 HF Token':''}</div>
+            <div style="font-size:0.76rem;color:var(--text-tertiary);margin-top:4px;">${model.license}${model.requires_token?' · 需要 HF Token':''}</div>
           </div>`).join('');
         target.querySelectorAll('button[data-model-id]').forEach(button => {
           button.addEventListener('click', () => {
-            if (button.dataset.action === 'check') {
-              this.checkSpeakerModelCache(button.dataset.modelId, button);
-            } else {
-              this.downloadSpeakerModel(button.dataset.modelId, button);
-            }
+            this.downloadSpeakerModel(button.dataset.modelId, button);
           });
         });
       } catch (error) {
@@ -428,28 +423,6 @@ const part = {
       } catch (error) {
         toast('模型下载失败：' + error.message, 'error');
       } finally {
-        this.renderSpeakerModelOptions();
-      }
-    },
-
-    async checkSpeakerModelCache(modelId, button) {
-      const originalText = button.textContent;
-      button.disabled = true;
-      button.textContent = '检查中...';
-      try {
-        const response = await fetch('/api/speaker-models/' + encodeURIComponent(modelId) + '/status');
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload.detail || 'cache check failed');
-        if (payload.cached) {
-          toast('模型缓存完整，可直接使用', 'success');
-        } else {
-          toast('未检测到完整模型缓存，请下载模型', 'error');
-        }
-      } catch (error) {
-        toast('缓存检查失败：' + error.message, 'error');
-      } finally {
-        button.disabled = false;
-        button.textContent = originalText;
         this.renderSpeakerModelOptions();
       }
     },
@@ -757,7 +730,7 @@ const part = {
       const llmMax = saved.merge_llm_max_gap !== undefined ? saved.merge_llm_max_gap : (md.llm_decision_max_gap || 1.20);
       const hardGap = saved.merge_hard_split_gap !== undefined ? saved.merge_hard_split_gap : (md.hard_split_min_gap || 1.20);
       $('#opts-merge-decision').innerHTML =
-        '<div class="option-help">Fast-Slow Path 分流: 间隔 < 快合并阈值 → 规则合并, 在中间 → LLM 裁决, > 强制不合并</div>' +
+        '<div class="option-help">按片段间隔自动分流：间隔很短直接合并，中间区间交给 LLM 判断，间隔过大则保留为两条</div>' +
         '<div class="option-row"><label>快路径合并阈值</label><input type="range" data-key="merge_fast_gap" min="0.05" max="0.5" step="0.05" value="' + fastGap + '"><span class="value-display">' + fastGap.toFixed(2) + 's</span></div>' +
         '<div class="option-row"><label>LLM 裁决下限</label><input type="range" data-key="merge_llm_min_gap" min="0.1" max="0.6" step="0.05" value="' + llmMin + '"><span class="value-display">' + llmMin.toFixed(2) + 's</span></div>' +
         '<div class="option-row"><label>LLM 裁决上限</label><input type="range" data-key="merge_llm_max_gap" min="0.6" max="2.0" step="0.1" value="' + llmMax + '"><span class="value-display">' + llmMax.toFixed(2) + 's</span></div>' +
@@ -772,7 +745,7 @@ const part = {
       const maxShrink = saved.boundary_refine_max_shrink || br.max_shrink_ms || 200;
       $('#opts-boundary-refine').innerHTML =
         '<div class="option-row"><label>启用 ASR 边界精修</label><input type="checkbox" data-key="boundary_refine_enabled" ' + (enabled ? 'checked' : '') + '></div>' +
-        '<div class="option-help">用 ASR 词级时间戳回修语音段边界，三帧能量斜率校验保护辅音 Attack/Release</div>' +
+        '<div class="option-help">用词级时间戳修正字幕起止边界，减少吞字与带入杂音</div>' +
         '<div class="option-row"><label>最大收缩量</label><input type="range" data-key="boundary_refine_max_shrink" min="50" max="500" step="50" value="' + maxShrink + '"><span class="value-display">' + maxShrink + 'ms</span></div>';
     },
 
@@ -786,9 +759,9 @@ const part = {
       const skeletonMode = (saved.acoustic_skeleton_mode !== undefined) ? saved.acoustic_skeleton_mode : (av.skeleton_mode !== false && config.acoustic_skeleton_mode !== false);
       $('#opts-acoustic-val').innerHTML =
         '<div class="option-row"><label>启用声学校验</label><input type="checkbox" data-key="acoustic_enabled" ' + (enabled ? 'checked' : '') + '></div>' +
-        '<div class="option-help">ffmpeg 声学标尺兜底校验，消除字幕切尾（模式 A 错误），输出诊断报告</div>' +
+        '<div class="option-help">用 ffmpeg 声学标尺校验字幕切点，自动修正切尾问题，并输出健康度报告</div>' +
         '<div class="option-row"><label>🧩 骨架分段模式</label><input type="checkbox" data-key="acoustic_skeleton_mode" ' + (skeletonMode ? 'checked' : '') + '></div>' +
-        '<div class="option-help"><b>推荐开启。</b>按 ffmpeg 声学骨架逐段独立处理再拼接，消除跨段时间戳漂移。每个骨架段是物理隔离的连续语音，段间不会互相干扰。健康度可从 ~77% 提升到 ~100%。</div>' +
+        '<div class="option-help"><b>推荐开启。</b>按声学骨架分段独立处理再拼接，消除长音频的时间戳漂移，健康度可显著提升</div>' +
         '<div class="option-row"><label>最大吸附距离</label><input type="range" data-key="acoustic_max_snap" min="0.05" max="0.3" step="0.01" value="' + maxSnap + '"><span class="value-display">' + maxSnap.toFixed(2) + 's</span></div>' +
         '<div class="option-row"><label>输出诊断报告</label><input type="checkbox" data-key="acoustic_generate_report" ' + (genReport ? 'checked' : '') + '></div>';
     },

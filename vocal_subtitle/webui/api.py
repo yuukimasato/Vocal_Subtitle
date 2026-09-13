@@ -66,6 +66,7 @@ from .models import (  # noqa: E402
 
 from . import routes_subtitles as subtitles_routes
 from .routes_feedback import router as feedback_router
+from .routes_dataset import router as dataset_router
 from .routes_feedback_learning import (
     feedback_learn,
     feedback_preview,
@@ -115,6 +116,7 @@ from .routes_history import (
     clear_history,
     delete_history,
     delete_persisted_files,
+    find_history_by_hash,
     get_cache_info,
     get_history_detail,
     get_persisted_files,
@@ -146,6 +148,7 @@ router = APIRouter()
 router.include_router(llm_router)
 router.include_router(feedback_learning_router)
 router.include_router(feedback_router)
+router.include_router(dataset_router)
 router.include_router(models_router)
 router.include_router(history_router)
 router.include_router(quality_router)
@@ -220,6 +223,7 @@ __all__ = [
     "feedback_learn",
     "feedback_preview",
     "fetch_llm_models",
+    "find_history_by_hash",
     "funasr_status",
     "get_cache_info",
     "get_device_info",

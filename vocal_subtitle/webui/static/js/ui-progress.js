@@ -107,20 +107,14 @@ const part = {
 
     renderStats(stats) {
       stats = stats || {};
+      // 核心指标 6 卡；引擎/回退等诊断细节在"任务详情与质量"面板查看
       $('#stats-grid').innerHTML = `
         <div class="stat-card"><div class="stat-value">${(stats.total_time || 0).toFixed(1)}s</div><div class="stat-label">总耗时</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.segment_count || 0}</div><div class="stat-label">语音片段</div></div>
         <div class="stat-card"><div class="stat-value">${stats.subtitle_count || 0}</div><div class="stat-label">字幕条数</div></div>
         <div class="stat-card"><div class="stat-value">${stats.duration_seconds ? (stats.duration_seconds/60).toFixed(1)+'min' : '—'}</div><div class="stat-label">音频时长</div></div>
         <div class="stat-card"><div class="stat-value">${stats.speaker_count || 0}</div><div class="stat-label">说话人数</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.local_speaker_split_count || 0}</div><div class="stat-label">局部换人切分</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.speaker_conflict_count || 0}</div><div class="stat-label">说话人冲突</div></div>
-        <div class="stat-card"><div class="stat-value">${stats.unknown_speaker_count || 0}</div><div class="stat-label">未确认</div></div>
-        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.status || 'completed')}</div><div class="stat-label">运行状态</div></div>
-        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.quality_status || 'pass')}</div><div class="stat-label">质量状态</div></div>
-        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml((stats.final_engine || stats.selected_engine || '—'))}</div><div class="stat-label">最终引擎</div></div>
-        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.detected_language || 'unknown')}</div><div class="stat-label">检测语言</div></div>
-        <div class="stat-card"><div class="stat-value" title="${App.ui._escapeAttr(stats.fallback_reason || '')}">${App.ui.escapeHtml(stats.fallback_reason ? '已回退' : '—')}</div><div class="stat-label">回退原因</div></div>
+        <div class="stat-card"><div class="stat-value">${App.ui.escapeHtml(stats.detected_language || '—')}</div><div class="stat-label">检测语言</div></div>
+        <div class="stat-card"><div class="stat-value" data-status="${App.ui._escapeAttr(stats.quality_status || 'pass')}">${App.ui.escapeHtml(stats.quality_status || 'pass')}</div><div class="stat-label">质量状态</div></div>
       `;
     },
 
@@ -277,31 +271,31 @@ const part = {
         // Hide diagnostic report during processing
         var diagPanel = document.getElementById('diagnostic-panel');
         if (diagPanel) diagPanel.style.display = 'none';
-        // Hide audio export bar during processing
-        var audioBar = document.getElementById('audio-export-bar');
-        if (audioBar) audioBar.style.display = 'none';
+        // Hide audio export controls during processing
+        ['audio-export-divider','audio-export-label','btn-audio-vocals','btn-audio-accomp'].forEach(function(id) {
+          var el = document.getElementById(id);
+          if (el) el.style.display = 'none';
+        });
       } else {
         btn.classList.remove('running');
         btn.disabled = !App.state.selectedFile;
       }
     },
 
-    // 从已删除的 ui-subtitles.js 迁入：仅保留导出栏控制（表格/波形已随双界面收敛移除）
+    // 从已删除的 ui-subtitles.js 迁入：合并后的导出栏控制（表格/波形已随双界面收敛移除）
 
     updateAudioExportBar(result) {
-      var bar = document.getElementById('audio-export-bar');
-      if (!bar) return;
       var hasVocals = !!(result && result.vocals_path);
       var hasAccomp = !!(result && result.accompaniment_path);
-      if (hasVocals || hasAccomp) {
-        bar.style.display = 'flex';
-        // 如果没有人声或伴奏，隐藏对应按钮
-        var btns = bar.querySelectorAll('.btn-export');
-        if (btns[0]) btns[0].style.display = hasVocals ? '' : 'none';
-        if (btns[1]) btns[1].style.display = hasAccomp ? '' : 'none';
-      } else {
-        bar.style.display = 'none';
-      }
+      var showGroup = hasVocals || hasAccomp;
+      var setVisible = function(id, visible) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = visible ? '' : 'none';
+      };
+      setVisible('audio-export-divider', showGroup);
+      setVisible('audio-export-label', showGroup);
+      setVisible('btn-audio-vocals', hasVocals);
+      setVisible('btn-audio-accomp', hasAccomp);
     },
 
     // 根据 LLM 优化是否生效，调整字幕下载栏的按钮布局

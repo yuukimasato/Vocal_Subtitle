@@ -59,6 +59,8 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # 编辑台(8631)跨源 fetch 字幕文件时需读取下载文件名
+        expose_headers=["Content-Disposition"],
     )
 
     # 注册路由

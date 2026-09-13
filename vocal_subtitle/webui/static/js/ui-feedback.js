@@ -116,7 +116,7 @@ const part = {
         return;
       }
 
-      var html = '<div style="font-size:0.72rem;font-weight:600;color:var(--text-primary);margin-bottom:4px;">用户配置</div>';
+      var html = '<div style="font-size:0.78rem;font-weight:600;color:var(--text-primary);margin-bottom:4px;">用户配置</div>';
       html += '<div class="feedback-btn-row" style="margin-bottom:4px;">';
       html += '<button class="feedback-mini-btn" onclick="App.refreshFeedbackConfigs()">🔄 刷新</button>';
       html += '</div>';

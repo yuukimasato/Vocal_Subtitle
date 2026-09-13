@@ -40,6 +40,11 @@ async _fetch(url, opts) {
 	      return this._fetch('/api/history' + (qs ? '?' + qs : ''));
 	    },
 	    async getHistoryDetail(taskId) { return this._fetch('/api/history/' + encodeURIComponent(taskId)); },
+	    async getHistoryByHash(hash, limit) {
+	      // 按输入文件内容哈希查询可复用任务（V2 上传学习绑定来源任务，D26）
+	      const qs = limit ? '?limit=' + encodeURIComponent(limit) : '';
+	      return this._fetch('/api/history/by-hash/' + encodeURIComponent(hash) + qs);
+	    },
 	    async getQualityReport(taskId) {
 	      return this._fetch('/api/quality/report/' + encodeURIComponent(taskId));
 	    },
@@ -55,6 +60,19 @@ async _fetch(url, opts) {
 	      return this._fetch('/api/cache' + qs, { method: 'DELETE' });
 	    },
     async feedbackProfiles() { return this._fetch('/api/feedback/profiles'); },
+    async feedbackLearn(formData) {
+      // multipart 调用 /api/feedback/learn（task_id + scenario + reference 等）
+      const res = await fetch('/api/feedback/learn', { method: 'POST', body: formData });
+      if (!res.ok) { const t = await res.text(); throw new Error(t); }
+      return res.json();
+    },
+    async feedbackOverridesApply() { return this._fetch('/api/feedback/overrides-apply'); },
+    async feedbackOverridesApplyToggle(enabled) {
+      return this._fetch('/api/feedback/overrides-apply', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled: enabled})
+      });
+    },
     async feedbackProfile(name) { return this._fetch('/api/feedback/profile/' + name); },
     async feedbackProfileRollback(name) {
       return this._fetch('/api/feedback/profile/' + name + '/rollback', { method: 'POST' });
@@ -110,6 +128,22 @@ async _fetch(url, opts) {
     async feedbackImpactPreview(profileName) {
       const qs = profileName ? '?profile_name=' + encodeURIComponent(profileName) : '';
       return this._fetch('/api/feedback/impact/preview' + qs, { method: 'POST' });
+    },
+    async datasetPreview(scenarios, outDir, datasetName) {
+      // 数据集导出统计预览（与导出同一服务层过滤器，预览数字 = 导出条目数）
+      const params = new URLSearchParams();
+      if (scenarios && scenarios.length) params.set('scenarios', scenarios.join(','));
+      if (datasetName) params.set('dataset_name', datasetName);
+      if (outDir) params.set('out_dir', outDir);
+      const qs = params.toString();
+      return this._fetch('/api/feedback/dataset/preview' + (qs ? '?' + qs : ''));
+    },
+    async datasetExport(payload) {
+      // 执行导出（许可必选）：{license, scenarios, out_dir, bundle_audio, dataset_name}
+      return this._fetch('/api/feedback/dataset/export', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
     },
 };
 })();

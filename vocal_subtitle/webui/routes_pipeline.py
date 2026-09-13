@@ -109,6 +109,10 @@ async def get_task_status(task_id: str):
         diagnostics_complete=result.get("diagnostics_complete"),
         artifacts=result.get("artifacts"),
         diagnostics=result.get("diagnostics"),
+        # "学习"标记与场景标签（内部学习任务，D28）；普通任务为 None
+        task_type=task.get("task_type"),
+        scenario=task.get("scenario"),
+        learn_report=task.get("learn_report"),
     )
 
 
@@ -146,6 +150,9 @@ async def list_tasks():
             "status": task["status"],
             "run_id": task.get("run_id") or (task.get("result") or {}).get("run_id"),
             "error": task.get("error"),
+            # "学习"标记与场景标签（内部学习任务，D28/D27）；普通任务为空串
+            "task_type": task.get("task_type") or "",
+            "scenario": task.get("scenario") or "",
         }
         for task in state.task_store.values()
     ]

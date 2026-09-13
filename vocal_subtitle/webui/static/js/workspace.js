@@ -1,9 +1,9 @@
 (function() {
   'use strict';
 
-  // 双界面收敛（2026-09-10）：仅保留 处理 / 反馈档案 两个工作区；
+  // 双界面收敛（2026-09-10）：处理 / 反馈档案 / 数据集 三个工作区；
   // 历史与质量内联进处理工作区，审核与编辑走 subtitle-editor（8631）。
-  const allowed = new Set(['process', 'feedback']);
+  const allowed = new Set(['process', 'feedback', 'dataset']);
   const Workspace = {
     current: 'process',
     initialized: false,
@@ -38,6 +38,8 @@
         button.setAttribute('aria-current', active ? 'page' : 'false');
       });
       if (name === 'feedback' && window.FeedbackWorkspace) FeedbackWorkspace.refresh();
+      // 数据集工作区（D35）：统计预览随工作区进入自动刷新
+      if (name === 'dataset' && window.DatasetWorkspace) DatasetWorkspace.refresh();
     },
 
     setTask(taskId) {

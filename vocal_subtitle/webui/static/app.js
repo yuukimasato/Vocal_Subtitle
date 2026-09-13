@@ -179,15 +179,14 @@ const App = {
 	    App.state.taskId = item.id;
 	    Workspace.setTask(item.id);
 
-	    // 先用列表摘要快速显示统计信息
-	    if (item.result_summary && item.result_summary.stats) {
-	      const stats = item.result_summary.stats;
-	      $('#stats-grid').innerHTML = `
-	        <div class="stat-card"><div class="stat-value">${stats.total_time ? stats.total_time.toFixed(1)+'s' : '缓存'}</div><div class="stat-label">总耗时</div></div>
-	        <div class="stat-card"><div class="stat-value">${item.result_summary.segment_count || 0}</div><div class="stat-label">语音片段</div></div>
-	        <div class="stat-card"><div class="stat-value">${item.result_summary.subtitle_count || 0}</div><div class="stat-label">字幕条数</div></div>
-	        <div class="stat-card"><div class="stat-value">${item.total_duration_seconds ? (item.total_duration_seconds/60).toFixed(1)+'min' : '—'}</div><div class="stat-label">音频时长</div></div>
-	      `;
+    // 先用列表摘要快速显示统计信息（与 renderStats 保持同一组核心指标）
+    if (item.result_summary && item.result_summary.stats) {
+      const stats = item.result_summary.stats;
+      $('#stats-grid').innerHTML = `
+        <div class="stat-card"><div class="stat-value">${stats.total_time ? stats.total_time.toFixed(1)+'s' : '缓存'}</div><div class="stat-label">总耗时</div></div>
+        <div class="stat-card"><div class="stat-value">${item.result_summary.subtitle_count || 0}</div><div class="stat-label">字幕条数</div></div>
+        <div class="stat-card"><div class="stat-value">${item.total_duration_seconds ? (item.total_duration_seconds/60).toFixed(1)+'min' : '—'}</div><div class="stat-label">音频时长</div></div>
+      `;
 	      $('#empty-state').style.display = 'none';
 	      $('#results-content').style.display = 'block';
 
@@ -310,6 +309,7 @@ const App = {
   },
 
   showTaskDetail() {
+    // 任务详情面板在完成/选择历史时自动展示；保留空实现避免旧调用报错
     var panel = document.getElementById('task-detail-panel');
     if (!panel) return;
     panel.hidden = false;
@@ -340,10 +340,10 @@ const App = {
       var profile = await App.api.feedbackProfile(name);
       var mgmtEl = $('#feedback-config-mgmt');
       if (!mgmtEl) return;
-      var html = '<div style="font-size:0.72rem;font-weight:600;color:var(--text-primary);margin-top:4px;">' + App.ui.escapeHtml(name) + '</div>';
-      html += '<div style="font-size:0.65rem;color:var(--text-tertiary);">学习次数: ' + (profile.feedback_count || 0) + ' | Few-shot: ' + (profile.few_shot_examples_count || 0) + '</div>';
+      var html = '<div style="font-size:0.78rem;font-weight:600;color:var(--text-primary);margin-top:4px;">' + App.ui.escapeHtml(name) + '</div>';
+      html += '<div style="font-size:0.74rem;color:var(--text-tertiary);">学习次数: ' + (profile.feedback_count || 0) + ' | Few-shot: ' + (profile.few_shot_examples_count || 0) + '</div>';
       if (profile.overrides && Object.keys(profile.overrides).length > 0) {
-        html += '<div style="font-size:0.66rem;color:var(--text-secondary);margin-top:2px;">参数覆盖:</div>';
+        html += '<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:2px;">参数覆盖:</div>';
         Object.entries(profile.overrides).forEach(function(e) {
           html += '<div class="feedback-metric-row"><span class="fm-label" style="font-family:var(--font-mono);font-size:0.62rem;">' + App.ui.escapeHtml(e[0]) + '</span><span class="fm-value">' + (typeof e[1] === 'number' ? e[1].toFixed(3) : e[1]) + '</span></div>';
         });
@@ -396,7 +396,7 @@ const App = {
     activeConflicts.forEach(function(c) {
       html += '<div class="feedback-conflict-warn">';
       html += '<div class="fc-header">' + App.ui.escapeHtml(c.param_path) + ' (' + c.severity + ')</div>';
-      html += '<div style="font-size:0.62rem;color:var(--text-secondary);">震荡 ' + c.oscillation_count + ' 次 · 建议: ' + (c.recommended_action || 'review') + '</div>';
+      html += '<div style="font-size:0.72rem;color:var(--text-secondary);">震荡 ' + c.oscillation_count + ' 次 · 建议: ' + (c.recommended_action || 'review') + '</div>';
       if (c.suggested_actions && c.suggested_actions.length > 0) {
         html += '<div class="feedback-btn-row" style="margin-top:2px;">';
         c.suggested_actions.forEach(function(a) {

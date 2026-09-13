@@ -66,6 +66,10 @@ class TaskStatus(BaseModel):
     diagnostics_complete: Optional[bool] = None
     artifacts: Optional[Dict[str, Any]] = None
     diagnostics: Optional[Dict[str, Any]] = None
+    # "学习"标记与场景标签（内部学习任务，D28/D27）；普通任务为 None
+    task_type: Optional[str] = None
+    scenario: Optional[str] = None
+    learn_report: Optional[Dict[str, Any]] = None
 
 
 class SubtitleEventResponse(BaseModel):
@@ -308,6 +312,12 @@ class ShadowModeToggleRequest(BaseModel):
     """影子模式开关请求"""
 
     enabled: bool = True
+
+
+class ApplyOverridesToggleRequest(BaseModel):
+    """应用学习参数开关请求（D38：overrides 接线）"""
+
+    enabled: bool = False
 
 
 # ---------------------------------------------------------------------------

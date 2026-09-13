@@ -48,6 +48,18 @@ def _find_input_file(session_dir_str: str) -> Optional[str]:
     return None
 
 
+def _input_path_from_result(result: dict) -> Optional[str]:
+    """Return the original input audio path recorded by an offline (CLI) run.
+
+    CLI 任务不经过 WebUI 上传，没有 session 目录可查，只能依赖
+    result_json 中记录的 input_path 定位原始音频。
+    """
+    raw = result.get("input_path")
+    if raw and Path(raw).is_file():
+        return str(raw)
+    return None
+
+
 @router.get("/subtitle/{task_id}", response_model=List[SubtitleEventResponse])
 async def get_subtitles(task_id: str):
     """获取任务的字幕事件列表"""
@@ -223,6 +235,8 @@ async def download_separated_audio(
                     file_path = _find_input_file(session_dir)
                     if not file_path:
                         file_path = _find_input_file(str(state.upload_dir / task_id))
+                    if not file_path:
+                        file_path = _input_path_from_result(r)
                 else:
                     file_path = r.get(f"{type}_path")
             except (json.JSONDecodeError, TypeError):
@@ -308,6 +322,9 @@ async def stream_audio(
                             file_path = _find_input_file(inferred_dir)
                     if not file_path:
                         file_path = _find_input_file(str(state.upload_dir / task_id))
+                    # 回退：CLI 任务直接记录了原始音频路径
+                    if not file_path:
+                        file_path = _input_path_from_result(r)
                 else:
                     file_path = r.get(f"{type}_path")
             except (json.JSONDecodeError, TypeError):
@@ -327,6 +344,8 @@ async def stream_audio(
                     inferred_dir = str(Path(sp).parent) if sp else ""
                     if inferred_dir:
                         file_path = _find_input_file(inferred_dir)
+                    if not file_path:
+                        file_path = _input_path_from_result(r)
                 except (json.JSONDecodeError, TypeError):
                     pass
         if not file_path:

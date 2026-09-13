@@ -31,6 +31,8 @@ def result_summary(result_json: str | None, *, detail: bool = False) -> Dict[str
             "input_path": result.get("input_path"),
             "vocals_path": result.get("vocals_path"),
             "accompaniment_path": result.get("accompaniment_path"),
+            # 内部学习任务的学习报告（冷重跑完成后挂载，D28）；普通任务为 None
+            "learn_report": result.get("learn_report"),
         }
     return {
         "contract_version": result.get("contract_version"),
@@ -56,6 +58,9 @@ def history_item(task: Dict[str, Any]) -> Dict[str, Any]:
         "input_file_size": task.get("input_file_size", 0),
         "profile": task.get("profile", "default"),
         "status": task["status"],
+        # "学习"标记与场景标签（内部学习任务，D28/D27）；普通任务为空串
+        "task_type": task.get("task_type") or "",
+        "scenario": task.get("scenario") or "",
         "error": task.get("error"),
         "total_duration_seconds": task.get("total_duration_seconds", 0),
         "created_at": task.get("created_at", ""),

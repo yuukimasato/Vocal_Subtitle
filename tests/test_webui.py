@@ -264,7 +264,8 @@ class TestStaticFiles:
         assert '/js/ui-subtitles.js' not in resp.text
         assert '<button type="button" class="btn-run" id="btn-run"' in resp.text
         assert 'id="process-error"' in resp.text
-        assert 'data-action="check"' in resp.text
+        # 2026-09-11 UX 精简：模型行仅保留下载按钮（检查缓存按钮已移除）
+        assert 'data-action="download"' in resp.text
         assert "'speaker_embedding_hf_token'," not in resp.text
         assert "'speaker_embedding_hf_token': 'speaker_embedding_token'" not in resp.text
 

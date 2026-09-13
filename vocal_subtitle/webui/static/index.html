@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vocal Subtitle — 人声分离 + 字幕生成</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-<link rel="stylesheet" href="/styles/app.css?v=20260905-ab1">
+<link rel="stylesheet" href="/styles/app.css?v=20260911-ui3">
 <!-- Static contract markers; interactive UI and API client live in /app.js. -->
-<!-- data-action="check" -->
+<!-- data-action="download" -->
 <!-- id="llm-api-key" name="llm-api-key" type="text" class="credential-mask" -->
 <!-- data-key="speaker_embedding_hf_token" name="speaker-embedding-token" type="text" class="credential-mask" -->
 <!-- autocomplete="off" data-form-type="other" -->
@@ -33,6 +33,7 @@
     <!-- 字幕审核/任务历史/质量报告入口已下线（双界面收敛，2026-09-10）：
          审核与编辑走 subtitle-editor（8631），历史与质量内联进处理工作区 -->
     <button type="button" class="workspace-nav-item" data-workspace="feedback" title="反馈档案">反馈档案</button>
+    <button type="button" class="workspace-nav-item" data-workspace="dataset" title="数据集">数据集</button>
   </nav>
   <div class="header-spacer"></div>
   <div class="header-badge" id="device-badge">
@@ -127,28 +128,28 @@
       <!-- Macro Chunking -->
       <div class="option-group" data-group="macro_chunk">
         <div class="option-group-header" onclick="this.parentElement.classList.toggle('open')">
-          <span>✂️ 宏观切块 (方案〇)</span><span class="og-arrow">▼</span>
+          <span>✂️ 长音频切块</span><span class="og-arrow">▼</span>
         </div>
         <div class="option-group-body" id="opts-macro-chunk"></div>
       </div>
       <!-- Merge Decision -->
       <div class="option-group" data-group="merge_decision">
         <div class="option-group-header" onclick="this.parentElement.classList.toggle('open')">
-          <span>🔗 合并决策 (方案五)</span><span class="og-arrow">▼</span>
+          <span>🔗 片段合并策略</span><span class="og-arrow">▼</span>
         </div>
         <div class="option-group-body" id="opts-merge-decision"></div>
       </div>
       <!-- Boundary Refinement -->
       <div class="option-group" data-group="boundary_refine">
         <div class="option-group-header" onclick="this.parentElement.classList.toggle('open')">
-          <span>🔍 边界精修 (方案四)</span><span class="og-arrow">▼</span>
+          <span>🔍 边界精修</span><span class="og-arrow">▼</span>
         </div>
         <div class="option-group-body" id="opts-boundary-refine"></div>
       </div>
       <!-- Acoustic Validation -->
       <div class="option-group" data-group="acoustic_val">
         <div class="option-group-header" onclick="this.parentElement.classList.toggle('open')">
-          <span>📐 声学校验 (方案七)</span><span class="og-arrow">▼</span>
+          <span>📐 声学校验</span><span class="og-arrow">▼</span>
         </div>
         <div class="option-group-body" id="opts-acoustic-val"></div>
       </div>
@@ -192,10 +193,7 @@
     <!-- Cache Section -->
     <div class="cache-section" id="cache-section">
       <span>💾 缓存: <span id="cache-size">—</span></span>
-      <span>
-        <span class="c-link" onclick="App.refreshCacheInfo()">刷新</span>
-        <span class="c-link danger" onclick="App.clearCache()">清除缓存</span>
-      </span>
+      <span><span class="c-link danger" onclick="App.clearCache()">清除缓存</span></span>
     </div>
   </aside>
 
@@ -292,7 +290,6 @@
           <div><span>质量门禁</span><strong>已启用</strong></div>
         </div>
         <div class="insight-actions">
-          <button type="button" class="workspace-button" id="btn-show-task-detail" onclick="App.showTaskDetail()">任务详情与质量</button>
           <button type="button" class="workspace-button primary" id="btn-open-in-editor" onclick="App.openInEditor()" title="带音频/字幕/评审清单直达 subtitle-editor">在编辑器中打开</button>
         </div>
       </div>
@@ -341,45 +338,18 @@
           <div class="diagnostic-detail" id="diagnostic-detail" style="display:none;"></div>
         </div>
 
-        <!-- Export Bar: SRT 格式（主要） -->
-        <div class="export-bar" id="export-bar-srt">
-          <span class="export-label">下载字幕 (SRT)：</span>
-          <button class="btn-export" id="btn-srt-main" onclick="App.exportFormat('srt')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            字幕文件
-          </button>
-          <button class="btn-export" id="btn-clean-srt" style="display:none;" onclick="App.downloadSubtitleFile('clean')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            干净版 (ASR)
-          </button>
-          <button class="btn-export" id="btn-llm-srt" style="display:none;" onclick="App.downloadSubtitleFile('llm')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            LLM 优化版
-          </button>
-        </div>
-        <div class="export-bar" id="export-bar-other">
-          <span class="export-label">其他格式：</span>
-          <button class="btn-export" onclick="App.exportFormat('vtt')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            VTT
-          </button>
-          <button class="btn-export" onclick="App.exportFormat('ass')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            ASS
-          </button>
-        </div>
-
-        <!-- Audio Export Bar (hidden when no separation) -->
-        <div class="export-bar" id="audio-export-bar" style="display:none;">
-          <span class="export-label">下载分离音频：</span>
-          <button class="btn-export" onclick="App.downloadAudio('vocals')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            人声 (Vocals)
-          </button>
-          <button class="btn-export" onclick="App.downloadAudio('accompaniment')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            背景声 (Accompaniment)
-          </button>
+        <!-- Export Bar: 字幕 + 分离音频（音频在分离完成后出现） -->
+        <div class="export-bar" id="export-bar">
+          <span class="export-label">字幕</span>
+          <button class="btn-export" id="btn-srt-main" onclick="App.exportFormat('srt')">SRT</button>
+          <button class="btn-export" id="btn-clean-srt" style="display:none;" onclick="App.downloadSubtitleFile('clean')">干净版 (ASR)</button>
+          <button class="btn-export" id="btn-llm-srt" style="display:none;" onclick="App.downloadSubtitleFile('llm')">LLM 优化版</button>
+          <button class="btn-export" onclick="App.exportFormat('vtt')">VTT</button>
+          <button class="btn-export" onclick="App.exportFormat('ass')">ASS</button>
+          <span class="export-divider" id="audio-export-divider" style="display:none;"></span>
+          <span class="export-label" id="audio-export-label" style="display:none;">音频</span>
+          <button class="btn-export" id="btn-audio-vocals" style="display:none;" onclick="App.downloadAudio('vocals')">人声</button>
+          <button class="btn-export" id="btn-audio-accomp" style="display:none;" onclick="App.downloadAudio('accompaniment')">背景声</button>
         </div>
       </div>
     </div>
@@ -391,21 +361,103 @@
          ========================================================= -->
     <section class="workspace-view" id="workspace-feedback" hidden>
       <div class="workspace-heading">
-        <div><div class="workspace-eyebrow">LEARNING</div><h1>反馈档案</h1><div class="workspace-subline">学习入口在 subtitle-editor（8631）"学习"面板；此处管理档案健康与复审</div></div>
-        <div class="workspace-actions"><select id="feedback-workspace-profile" aria-label="反馈配置"><option value="user_default">user_default</option></select><button type="button" class="icon-btn" id="feedback-workspace-refresh" title="刷新反馈数据" aria-label="刷新反馈数据">↻</button></div>
+        <div><div class="workspace-eyebrow">LEARNING</div><h1>反馈档案</h1><div class="workspace-subline">用校对后的字幕反哺系统：上传修正稿即可学习；这里管理学习档案、健康趋势与待审核样本</div></div>
+        <div class="workspace-actions"><select id="feedback-workspace-profile" aria-label="反馈配置"><option value="user_default">user_default</option></select></div>
       </div>
+      <!-- ★ 上传学习窗口（V2 external-correction，四场景定案 D20/D23/D26）：
+           外部工具（Aegisub 等）修正字幕后仅上传字幕文件即可学习，
+           基线引用服务端已存任务产物，全程不需要上传音频/视频 -->
+      <section class="workspace-panel" id="upload-learn-panel">
+        <div class="workspace-panel-header">
+          <div class="panel-title">⬆ 上传学习（外部修正字幕）</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
+          <div>
+            <div class="section-label">1 · 选择来源任务（也可拖入原片自动定位）</div>
+            <div class="history-panel" id="upload-learn-task-list" style="max-height:180px;">
+              <div class="workspace-empty">加载中...</div>
+            </div>
+            <div class="upload-zone" id="upload-learn-drop" style="margin-top:8px;padding:14px 12px;">
+              <div class="upload-title" style="font-size:0.8rem;">拖入当时的原片文件，自动定位任务</div>
+              <div class="upload-hint">按文件内容逐字节匹配；文件转码过则匹配不到，请从上方列表手动选择</div>
+              <div class="upload-filename" id="upload-learn-drop-name"></div>
+              <input type="file" id="upload-learn-drop-input" accept="audio/*,video/*,.mp3,.wav,.flac,.m4a,.ogg,.mp4,.mkv,.mov,.avi,.webm">
+            </div>
+          </div>
+          <div>
+            <div class="section-label">2 · 上传修正字幕（.srt / .ass）</div>
+            <div class="upload-zone" id="upload-learn-sub-zone" style="padding:14px 12px;">
+              <div class="upload-title" style="font-size:0.8rem;">点击选择或拖入校对稿</div>
+              <div class="upload-hint">与自动字幕对不上的行不计入学习；对齐率过低会提醒</div>
+              <div class="upload-filename" id="upload-learn-sub-name"></div>
+              <input type="file" id="upload-learn-sub-input" accept=".srt,.ass">
+            </div>
+            <div class="feedback-btn-row" style="margin-top:10px;">
+              <button type="button" class="workspace-button" id="btn-upload-learn-preview">预览对齐报告</button>
+              <button type="button" class="workspace-button primary" id="btn-upload-learn-run">确认学习</button>
+            </div>
+            <div class="workspace-error" id="upload-learn-error" role="alert" aria-live="assertive" hidden></div>
+            <div id="upload-learn-report" style="margin-top:10px;"></div>
+          </div>
+        </div>
+      </section>
       <div class="feedback-lower-grid">
         <section class="workspace-panel"><div class="workspace-panel-header"><div class="panel-title">健康趋势</div></div><div id="feedback-health-chart" class="health-chart"><div class="workspace-empty">暂无趋势数据</div></div></section>
-        <section class="workspace-panel"><div class="workspace-panel-header"><div class="panel-title">审核队列</div><button type="button" class="icon-btn" id="feedback-queue-refresh" title="刷新审核队列" aria-label="刷新审核队列">↻</button></div><div id="feedback-review-queue"><div class="workspace-empty">暂无待审核样本</div></div></section>
+        <section class="workspace-panel"><div class="workspace-panel-header"><div class="panel-title">审核队列</div></div><div id="feedback-review-queue"><div class="workspace-empty">暂无待审核样本</div></div></section>
       </div>
       <!-- ★ 参数自适应学习 (Phase 5, 自处理页侧栏移入) -->
       <section class="workspace-panel" id="feedback-adaptive-panel">
         <div class="workspace-panel-header"><div class="panel-title">📚 参数自适应学习</div></div>
         <div class="feedback-section">
+          <div class="apply-overrides-toggle" style="display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;">
+            <input type="checkbox" id="feedback-apply-overrides-cb" style="width:16px;height:16px;accent-color:var(--accent);">
+            <label for="feedback-apply-overrides-cb" style="color:var(--text-primary);font-size:13px;cursor:pointer;">
+              应用学习参数
+              <span style="font-weight:400;font-size:0.7rem;color:var(--text-tertiary);">开启后新任务在提交时合并反馈档案的学习参数（默认关）</span>
+            </label>
+          </div>
           <div class="feedback-empty" id="feedback-empty-state">
-            提交修订进行学习请使用 subtitle-editor（8631）的"学习"面板
+            学习字幕修订请使用编辑台（8631）的「学习」面板
           </div>
           <div id="feedback-config-mgmt" style="display:block;"></div>
+        </div>
+      </section>
+    </section>
+
+    <!-- ★ 数据集工作区（dataset-v1 导出，定案 D31/D32/D33/D35）：CLI export-dataset 为核，
+         此处为图形套壳——统计预览（与导出同一过滤器）→ 许可必选 → 导出 → 路径与告警展示；
+         8631 不提供导出（治理操作归处理台），git 推送由用户手动完成 -->
+    <section class="workspace-view" id="workspace-dataset" hidden>
+      <div class="workspace-heading">
+        <div><div class="workspace-eyebrow">DATASET</div><h1>数据集</h1><div class="workspace-subline">把审核通过的样本导出为可发布的数据集（dataset-v1）；导出后请手动推送 git</div></div>
+      </div>
+      <section class="workspace-panel" id="dataset-panel">
+        <div class="workspace-panel-header">
+          <div class="panel-title">📦 数据集导出</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
+          <div>
+            <div class="section-label">1 · 场景过滤（不勾选 = 全部场景）</div>
+            <div id="dataset-scenario-filter" style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"></div>
+            <div class="section-label" style="margin-top:12px;">2 · 许可（必选，记入数据集说明）</div>
+            <select id="dataset-license" aria-label="数据集许可（必选）" style="width:100%;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);"></select>
+            <div class="section-label" style="margin-top:12px;">3 · 数据集名称与输出目录（留空 = 用户数据目录 datasets/&lt;名称&gt;）</div>
+            <input type="text" id="dataset-name" value="subtitle-feedback" aria-label="数据集名称" style="width:100%;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);margin-bottom:8px;">
+            <input type="text" id="dataset-out-dir" placeholder="" aria-label="输出目录（留空使用默认）" style="width:100%;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);">
+            <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;font-size:0.78rem;color:var(--text-primary);">
+              <input type="checkbox" id="dataset-bundle-audio" style="width:14px;height:14px;accent-color:var(--accent);">
+              打包音频实体进 audio/（仅本地使用，不建议推 git）
+            </label>
+            <div class="feedback-btn-row" style="margin-top:10px;">
+              <button type="button" class="workspace-button primary" id="btn-dataset-export">导出数据集</button>
+            </div>
+            <div class="workspace-error" id="dataset-error" role="alert" aria-live="assertive" hidden></div>
+          </div>
+          <div>
+            <div class="section-label">统计预览（与导出口径一致）</div>
+            <div id="dataset-preview-stats"><div class="workspace-empty">进入本工作区时自动加载</div></div>
+            <div id="dataset-export-result" style="margin-top:12px;"></div>
+          </div>
         </div>
       </section>
     </section>
@@ -419,17 +471,19 @@
 <!-- ============================================================
      JAVASCRIPT — Application Logic
      ============================================================ -->
-<script src="/js/ui-config.js?v=20260910-ui2"></script>
-<script src="/js/ui-progress.js?v=20260910-ui2"></script>
-<script src="/js/ui-feedback.js?v=20260910-ui2"></script>
-<script src="/js/api-client.js?v=20260910-ui2"></script>
-<script src="/js/workspace.js?v=20260910-ui2"></script>
-<script src="/js/ui-history.js?v=20260910-ui2"></script>
-<script src="/js/ui-quality.js?v=20260910-ui2"></script>
-<script src="/js/ui-feedback-workspace.js?v=20260910-ui2"></script>
-<script src="/js/websocket.js?v=20260910-ui2"></script>
-<script src="/js/state.js?v=20260910-ui2"></script>
-<script src="/js/settings.js?v=20260910-ui2"></script>
-<script src="/app.js?v=20260910-ui2"></script>
+<script src="/js/ui-config.js?v=20260911-ui3"></script>
+<script src="/js/ui-progress.js?v=20260911-ui3"></script>
+<script src="/js/ui-feedback.js?v=20260911-ui3"></script>
+<script src="/js/api-client.js?v=20260911-ui3"></script>
+<script src="/js/workspace.js?v=20260911-ui3"></script>
+<script src="/js/ui-history.js?v=20260911-ui3"></script>
+<script src="/js/ui-quality.js?v=20260911-ui3"></script>
+<script src="/js/ui-feedback-workspace.js?v=20260911-ui3"></script>
+<script src="/js/ui-upload-learn.js?v=20260911-ui3"></script>
+<script src="/js/ui-dataset-workspace.js?v=20260911-ui3"></script>
+<script src="/js/websocket.js?v=20260911-ui3"></script>
+<script src="/js/state.js?v=20260911-ui3"></script>
+<script src="/js/settings.js?v=20260911-ui3"></script>
+<script src="/app.js?v=20260911-ui3"></script>
 </body>
 </html>
