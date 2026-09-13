@@ -4,6 +4,7 @@
 """
 
 import json
+import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -234,12 +235,79 @@ class TestTaskHistoryManager:
         assert len(tasks) >= 2
 
     def test_fixup_stale_running_tasks(self, mgr):
-        """残留 running 状态修复为 failed"""
+        """归属进程已死亡的残留 running 任务修复为 failed"""
+        import os
+        import subprocess
+        import sys
+
         mgr.create("task-stale", "test.wav", "sha256:abc", 1024, "default", _FakeConfig())
         mgr.update("task-stale", status="preflight")
         mgr.update("task-stale", status="running")
-        # 模拟残留
+        # 将归属进程改写为一个已退出的 PID，模拟进程中断后的残留任务
+        p = subprocess.Popen([sys.executable, "-c", "pass"])
+        p.wait()
+        with mgr._lock:
+            conn = mgr._get_conn()
+            try:
+                conn.execute(
+                    "UPDATE task_history SET owner_pid = ? WHERE id = 'task-stale'",
+                    (p.pid,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        # 修复后应为 failed
         mgr.fixup_stale_running_tasks()
         task = mgr.get("task-stale")
-        # 修复后应为 failed
         assert task["status"] == "failed"
+
+    def test_fixup_spares_running_task_of_live_process(self, mgr):
+        """存活进程（如正在执行的 CLI）拥有的 running 任务不被误标为 failed"""
+        mgr.create("task-live", "test.wav", "sha256:abc", 1024, "default", _FakeConfig())
+        mgr.update("task-live", status="preflight")
+        mgr.update("task-live", status="running")
+        with mgr._lock:
+            conn = mgr._get_conn()
+            try:
+                conn.execute(
+                    "UPDATE task_history SET owner_pid = ? WHERE id = 'task-live'",
+                    (os.getpid(),),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        assert mgr.fixup_stale_running_tasks() == 0
+        task = mgr.get("task-live")
+        assert task["status"] == "running"
+
+    def test_fixup_marks_legacy_rows_without_owner(self, mgr):
+        """无归属进程（owner_pid=0，旧版本遗留）的 running 任务仍被修复"""
+        mgr.create("task-legacy", "test.wav", "sha256:abc", 1024, "default", _FakeConfig())
+        mgr.update("task-legacy", status="running")
+        with mgr._lock:
+            conn = mgr._get_conn()
+            try:
+                conn.execute(
+                    "UPDATE task_history SET owner_pid = 0 WHERE id = 'task-legacy'"
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        assert mgr.fixup_stale_running_tasks() == 1
+        assert mgr.get("task-legacy")["status"] == "failed"
+
+    def test_completed_task_clears_stale_error(self, mgr):
+        """completed 状态不应残留 error（如重启 fixup 误标后任务仍正常完成）"""
+        mgr.create("task-cleared", "test.wav", "sha256:abc", 1024, "default", _FakeConfig())
+        mgr.update("task-cleared", status="running")
+        # 模拟重启 fixup 误标
+        mgr.update("task-cleared", status="failed",
+                   error="Server restarted during task execution",
+                   error_category="unrecoverable_failure")
+        # 任务实际完成（外部进程继续执行到完成）
+        mgr.update("task-cleared", status="completed",
+                   result_json=json.dumps({"subtitle_count": 3}))
+        task = mgr.get("task-cleared")
+        assert task["status"] == "completed"
+        assert not task["error"]
+        assert not task["error_category"]

@@ -11,11 +11,12 @@
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,11 @@ class TaskHistoryManager:
                 # Schema 迁移：添加旧表缺失的列
                 self._migrate_add_column(conn, "task_history", "run_id", "TEXT NOT NULL DEFAULT ''")
                 self._migrate_add_column(conn, "task_history", "error_category", "TEXT NOT NULL DEFAULT ''")
+                # 内部学习任务标记与场景标签（冷重跑异步化，D28/D27）：空串=普通管线任务
+                self._migrate_add_column(conn, "task_history", "task_type", "TEXT NOT NULL DEFAULT ''")
+                self._migrate_add_column(conn, "task_history", "scenario", "TEXT NOT NULL DEFAULT ''")
+                # 任务归属进程：CLI 与 WebUI 共享本库，fixup 需按存活进程区分孤儿任务
+                self._migrate_add_column(conn, "task_history", "owner_pid", "INTEGER NOT NULL DEFAULT 0")
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_history_status
                         ON task_history(status)
@@ -209,6 +215,9 @@ class TaskHistoryManager:
         config,
         *,
         run_id: str = "",
+        task_type: str = "",
+        scenario: str = "",
+        config_hash: str = "",
     ) -> None:
         """创建新任务记录（状态初始为 pending）
 
@@ -220,6 +229,10 @@ class TaskHistoryManager:
             profile: 使用的场景模板名称
             config: PipelineConfig 对象
             run_id: 运行 ID（可选，运行开始时关联）
+            task_type: 任务类型标记（"learn"=内部学习任务，D28；空串=普通管线任务）
+            scenario: 场景标签（D27，仅学习任务携带）
+            config_hash: 配置哈希覆盖值（可选；学习任务的幂等键在配置哈希中
+                追加参考字幕与场景维度，空串则按 config 计算）
         """
         from dataclasses import asdict
 
@@ -227,7 +240,8 @@ class TaskHistoryManager:
 
         config_dict = asdict(config)
         config_json = json.dumps(config_dict, sort_keys=True, default=str)
-        config_hash = compute_config_hash(config)
+        if not config_hash:
+            config_hash = compute_config_hash(config)
         now = datetime.now().isoformat()
 
         with self._lock:
@@ -238,12 +252,14 @@ class TaskHistoryManager:
                     INSERT INTO task_history
                         (id, run_id, input_file_name, input_file_hash, input_file_size,
                          profile, config_json, config_hash, status,
+                         task_type, scenario, owner_pid,
                          created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
                     """,
                     (
                         task_id, run_id, file_name, file_hash, file_size,
-                        profile, config_json, config_hash, now,
+                        profile, config_json, config_hash,
+                        task_type, scenario, os.getpid(), now,
                     ),
                 )
                 conn.commit()
@@ -265,7 +281,7 @@ class TaskHistoryManager:
         allowed = {
             "status", "run_id", "progress_json", "result_json", "error",
             "error_category", "total_duration_seconds", "completed_at",
-            "input_file_hash",
+            "input_file_hash", "owner_pid",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
@@ -291,6 +307,11 @@ class TaskHistoryManager:
             # 终态自动记录完成时间
             if new_status in TERMINAL_STATUSES and "completed_at" not in updates:
                 updates["completed_at"] = datetime.now().isoformat()
+
+            # 成功完成的任务不应残留任何 error（如重启 fixup 的误标）
+            if updates["status"] == "completed" and "error" not in updates:
+                updates["error"] = ""
+                updates["error_category"] = ""
 
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [task_id]
@@ -348,8 +369,12 @@ class TaskHistoryManager:
         self.transition_status(task_id, "preflight")
 
     def set_running(self, task_id: str, run_id: str = "") -> None:
-        """preflight → running"""
-        self.transition_status(task_id, "running", run_id=run_id)
+        """preflight → running
+
+        进入 running 时刷新归属进程：同文件重跑会复用已有任务行，
+        其 owner_pid 可能残留旧值或为 0（旧版本行），以当前进程为准。
+        """
+        self.update(task_id, status="running", run_id=run_id, owner_pid=os.getpid())
 
     def set_completed(self, task_id: str) -> None:
         """running → completed"""
@@ -446,11 +471,16 @@ class TaskHistoryManager:
             finally:
                 conn.close()
 
-    def clear(self, older_than_days: Optional[int] = None) -> int:
+    def clear(
+        self,
+        older_than_days: Optional[int] = None,
+        exclude_ids: Optional[Iterable[str]] = None,
+    ) -> int:
         """清除历史记录
 
         Args:
             older_than_days: 只删除 N 天前的记录，None 则清除全部
+            exclude_ids: 全量清除时跳过的任务 ID（执行中的任务不属于历史）
 
         Returns:
             删除的记录数
@@ -463,6 +493,13 @@ class TaskHistoryManager:
                     cursor = conn.execute(
                         "DELETE FROM task_history WHERE created_at < ?",
                         (cutoff,),
+                    )
+                elif exclude_ids:
+                    excluded = tuple(exclude_ids)
+                    placeholders = ", ".join("?" for _ in excluded)
+                    cursor = conn.execute(
+                        f"DELETE FROM task_history WHERE id NOT IN ({placeholders})",
+                        excluded,
                     )
                 else:
                     cursor = conn.execute("DELETE FROM task_history")
@@ -502,6 +539,7 @@ class TaskHistoryManager:
         self,
         file_hash: str,
         config_hash: str,
+        task_type: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """通过文件哈希 + 配置哈希查找已完成的任务（缓存命中）
 
@@ -510,6 +548,8 @@ class TaskHistoryManager:
         Args:
             file_hash: 输入文件 SHA256
             config_hash: 配置 SHA256
+            task_type: 任务类型过滤（None=不过滤，保持既有行为；
+                "learn"=仅匹配内部学习任务，用于学习请求幂等去重，D28）
 
         Returns:
             匹配的任务记录或 None
@@ -519,18 +559,68 @@ class TaskHistoryManager:
 
         conn = self._get_conn()
         try:
-            row = conn.execute(
+            if task_type is None:
+                row = conn.execute(
+                    """
+                    SELECT * FROM task_history
+                    WHERE input_file_hash = ?
+                      AND config_hash = ?
+                      AND status IN ('completed', 'degraded_completed')
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (file_hash, config_hash),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT * FROM task_history
+                    WHERE input_file_hash = ?
+                      AND config_hash = ?
+                      AND task_type = ?
+                      AND status IN ('completed', 'degraded_completed')
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (file_hash, config_hash, task_type),
+                ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def find_by_file_hash(
+        self,
+        file_hash: str,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """通过输入文件哈希查找已完成的任务（V2 上传学习绑定来源任务，D26）
+
+        仅字节级同文件命中：input_file_hash 为管线的实际输入 sha256
+        （视频输入时为提取音轨后的哈希）。只返回成功记录，按创建时间倒序。
+
+        Args:
+            file_hash: 输入文件 SHA256（64 位十六进制）
+            limit: 最多返回条数
+
+        Returns:
+            匹配的任务记录列表（可能为空）
+        """
+        if not file_hash:
+            return []
+
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
                 """
                 SELECT * FROM task_history
                 WHERE input_file_hash = ?
-                  AND config_hash = ?
                   AND status IN ('completed', 'degraded_completed')
                 ORDER BY created_at DESC
-                LIMIT 1
+                LIMIT ?
                 """,
-                (file_hash, config_hash),
-            ).fetchone()
-            return dict(row) if row else None
+                (file_hash, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 
@@ -581,17 +671,45 @@ class TaskHistoryManager:
         服务器重启后，任何处于 'running' 或 'preflight' 状态的任务实际已中断，
         继续保留该状态会导致前端永远显示"处理中"。
 
+        CLI 与 WebUI 共享同一历史库：若任务仍归属存活进程（owner_pid 可存活），
+        说明该任务正在其它进程（如 CLI）中执行，不能误标为失败。
+
         Returns:
             被修复的任务数量
         """
+
+        def _pid_alive(pid: int) -> bool:
+            if pid <= 0:
+                return False
+            try:
+                os.kill(pid, 0)
+                return True
+            except PermissionError:
+                return True  # 进程存在但属于其他用户
+            except OSError:
+                return False
+
         with self._lock:
             conn = self._get_conn()
             try:
+                rows = conn.execute(
+                    "SELECT id, owner_pid FROM task_history "
+                    "WHERE status IN ('running', 'preflight')"
+                ).fetchall()
+                stale_ids = [
+                    row["id"]
+                    for row in rows
+                    if not _pid_alive(int(row["owner_pid"] or 0))
+                ]
+                if not stale_ids:
+                    return 0
+                placeholders = ", ".join("?" for _ in stale_ids)
                 cursor = conn.execute(
                     "UPDATE task_history SET status = 'failed', "
                     "error = 'Server restarted during task execution', "
                     "error_category = 'unrecoverable_failure' "
-                    "WHERE status IN ('running', 'preflight')"
+                    f"WHERE id IN ({placeholders})",
+                    stale_ids,
                 )
                 conn.commit()
                 return cursor.rowcount

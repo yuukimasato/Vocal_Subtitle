@@ -4,6 +4,7 @@
 支持 CRUD、自动备份、回滚、置信度衰减。
 """
 
+import json
 import logging
 import os
 import shutil
@@ -61,6 +62,45 @@ def get_param_half_life(param_path: str) -> Optional[int]:
         if fnmatch.fnmatch(param_path, pattern):
             return days
     return DEFAULT_HALF_LIFE_DAYS
+
+
+# ---------------------------------------------------------------------------
+# "应用学习参数"运行时开关（D38：overrides 接线）
+# ---------------------------------------------------------------------------
+
+# 开关状态持久化文件（位于用户配置目录下，与 *.yaml 档案互不干扰）
+APPLY_OVERRIDES_TOGGLE_FILE = "apply_overrides_on_run.json"
+
+
+def load_apply_overrides_on_run(feedback_config: Optional[FeedbackConfig] = None) -> bool:
+    """读取用户级"应用学习参数"开关状态
+
+    开关由 8613 反馈档案工作区写入，持久化在用户配置目录下的
+    apply_overrides_on_run.json。文件缺失或损坏时返回 False（默认关）。
+    """
+    config = feedback_config or FeedbackConfig()
+    path = Path(os.path.expanduser(config.user_profile_dir)) / APPLY_OVERRIDES_TOGGLE_FILE
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return bool(data.get("apply_overrides_on_run", False))
+
+
+def save_apply_overrides_on_run(
+    enabled: bool,
+    feedback_config: Optional[FeedbackConfig] = None,
+) -> bool:
+    """写入用户级"应用学习参数"开关状态，返回最终状态"""
+    config = feedback_config or FeedbackConfig()
+    profile_dir = Path(os.path.expanduser(config.user_profile_dir))
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    path = profile_dir / APPLY_OVERRIDES_TOGGLE_FILE
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"apply_overrides_on_run": bool(enabled)}, f, ensure_ascii=False)
+    logger.info("Apply-overrides-on-run toggled: %s", bool(enabled))
+    return bool(enabled)
 
 
 class UserProfileManager:
@@ -129,7 +169,8 @@ class UserProfileManager:
         if path.exists():
             path.unlink()
             deleted = True
-        for i in range(1, MAX_BACKUPS + 1):
+        # bak.0 由 rollback 产出，同样纳入清理范围，避免残留污染用户目录
+        for i in range(0, MAX_BACKUPS + 1):
             bak = self._backup_path(profile_name, i)
             if bak.exists():
                 bak.unlink()

@@ -83,6 +83,7 @@ class JournalStats:
     cps_p90: Optional[float] = None
     boundary_snap_rate: Optional[float] = None  # 终点微调贴近最近语音边界的比例
     provenance_coverage: float = 0.0            # 带 manifest 出处的事件占比
+    by_scenario: Dict[str, "JournalStats"] = field(default_factory=dict)  # 按场景分层（D27）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -99,6 +100,7 @@ class JournalStats:
             "cps_p90": self.cps_p90,
             "boundary_snap_rate": self.boundary_snap_rate,
             "provenance_coverage": self.provenance_coverage,
+            "by_scenario": {name: sub.to_dict() for name, sub in self.by_scenario.items()},
         }
 
 
@@ -353,8 +355,14 @@ _STRUCTURAL_COMMANDS = {
 }
 
 
-def journal_statistics(files: List[JournalFile]) -> JournalStats:
-    """汇总 V1 统计：命令分布、时间偏移、留白、CPS、边界吸附、出处覆盖。"""
+def journal_scenario(journal: JournalFile) -> str:
+    """日志会话的场景标签（D27）：header 可选 scenario 字段，旧日志无此字段返回空串"""
+    header = journal.header or {}
+    return str(header.get("scenario") or "")
+
+
+def _aggregate_journal_stats(files: List[JournalFile]) -> JournalStats:
+    """聚合单层统计：命令分布、时间偏移、留白、CPS、边界吸附、出处覆盖。"""
     stats = JournalStats(session_count=len(files))
     start_deltas: List[float] = []
     end_deltas: List[float] = []
@@ -411,6 +419,23 @@ def journal_statistics(files: List[JournalFile]) -> JournalStats:
     stats.cps_p90 = _percentile(cps_values, 0.9)
     stats.boundary_snap_rate = (boundary_hits / boundary_total) if boundary_total else None
     stats.provenance_coverage = with_provenance / stats.event_count if stats.event_count else 0.0
+    return stats
+
+
+def journal_statistics(files: List[JournalFile]) -> JournalStats:
+    """汇总 V1 统计：命令分布、时间偏移、留白、CPS、边界吸附、出处覆盖。
+
+    header 携带可选 scenario（D27）时按场景分层（by_scenario）；
+    无该字段的旧日志照常计入总体统计，不产生场景分层条目。
+    """
+    stats = _aggregate_journal_stats(files)
+    grouped: Dict[str, List[JournalFile]] = {}
+    for journal in files:
+        scenario = journal_scenario(journal)
+        if scenario:
+            grouped.setdefault(scenario, []).append(journal)
+    for scenario, scenario_files in sorted(grouped.items()):
+        stats.by_scenario[scenario] = _aggregate_journal_stats(scenario_files)
     return stats
 
 
@@ -516,6 +541,7 @@ __all__ = [
     "event_session_id",
     "find_original_subtitle",
     "journal_original_stem",
+    "journal_scenario",
     "journal_statistics",
     "journal_to_text_sample",
     "load_journal_files",

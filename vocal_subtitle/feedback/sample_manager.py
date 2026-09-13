@@ -49,6 +49,10 @@ class FeedbackSample:
     audio_duration_seconds: float = 0.0
     audio_condition: str = ""
     speaker_count: int = 0
+    # 出处引用（dataset-v1 音频引用依据；旧样本无这些字段，读取时用 .get）
+    task_id: str = ""
+    audio_sha256: str = ""
+    run_id: str = ""
 
     original: dict = field(default_factory=dict)
     automatic_subtitle: dict = field(default_factory=dict)
@@ -70,6 +74,9 @@ class FeedbackSample:
             "audio_duration_seconds": self.audio_duration_seconds,
             "audio_condition": self.audio_condition,
             "speaker_count": self.speaker_count,
+            "task_id": self.task_id,
+            "audio_sha256": self.audio_sha256,
+            "run_id": self.run_id,
             "original": self.original,
             "automatic_subtitle": self.automatic_subtitle,
             "human_revision": self.human_revision,
@@ -98,6 +105,21 @@ class FeedbackSampleManager:
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._index_path = self._storage_dir / "sample_index.json"
         self._index: dict[str, dict] = self._load_index()
+
+    @property
+    def storage_dir(self) -> Path:
+        """样本库落盘目录（只读视图，供导出等治理操作定位）。"""
+        return self._storage_dir
+
+    # ---- 只读遍历（导出等治理操作使用，不改动样本库）----
+
+    def list_sample_ids(self, status: Optional[str] = None) -> list[str]:
+        """按审核状态列出样本 ID（只读；status 缺省返回全部）。"""
+        return [
+            sample_id
+            for sample_id, entry in self._index.items()
+            if status is None or entry.get("status") == status
+        ]
 
     # ---- 索引持久化 ----
 
@@ -148,6 +170,9 @@ class FeedbackSampleManager:
         speaker_count: int = 0,
         original_config: dict | None = None,
         edit_types: dict | None = None,
+        task_id: str = "",
+        audio_sha256: str = "",
+        run_id: str = "",
     ) -> Optional[FeedbackSample]:
         """将反馈提交入库。
 
@@ -193,17 +218,23 @@ class FeedbackSampleManager:
             audio_duration_seconds=round(audio_duration, 2),
             audio_condition=audio_condition or "unknown",
             speaker_count=speaker_count,
+            task_id=task_id,
+            audio_sha256=audio_sha256,
+            run_id=run_id,
             original=original_config or {},
             automatic_subtitle={
                 "version": "auto-v1",
                 "subtitle_hash": hashlib.sha256(auto_subtitle.encode()).hexdigest()[:16],
                 "event_count": auto_subtitle.count("\n\n") + 1,
+                # 字幕全文：数据集导出（dataset-v1）与人工复核需要文本对
+                "text": auto_subtitle,
             },
             human_revision={
                 "version": "human-v1",
                 "subtitle_hash": hashlib.sha256(human_revision.encode()).hexdigest()[:16],
                 "event_count": human_revision.count("\n\n") + 1,
                 "edit_types": edit_types or {},
+                "text": human_revision,
             },
             alignment=alignment,
             review={"reviewer": "", "result": "pending", "timestamp": ""},

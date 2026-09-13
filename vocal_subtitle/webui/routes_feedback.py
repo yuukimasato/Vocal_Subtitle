@@ -16,6 +16,16 @@ from .runtime_state import state
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
+def _toggle_config(config_loader_cls, feedback_config_cls):
+    """全局开关的配置源：default 模板解析（与运行时 pipeline_tasks._global_toggle_config 同源），
+    保证开关端点与任务构建路径读写同一目录；载入失败回退内置默认。"""
+    try:
+        return config_loader_cls().load_profile("default").feedback
+    except Exception:
+        return feedback_config_cls()
+
+
 @router.get("/feedback/profiles")
 async def list_feedback_profiles():
     """列出所有用户配置及其学习统计"""
@@ -102,6 +112,34 @@ async def delete_feedback_profile(name: str):
     if not ok:
         raise HTTPException(status_code=404, detail=f"Profile not found: {name}")
     return {"status": "ok", "deleted": name}
+
+
+# ---------------------------------------------------------------------------
+# "应用学习参数"开关 (D38：overrides 接线，默认关)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/feedback/overrides-apply")
+async def get_overrides_apply():
+    """获取"应用学习参数"开关状态（持久化在用户配置目录）"""
+    from ..config import ConfigLoader, FeedbackConfig
+    from ..feedback.user_profile import load_apply_overrides_on_run
+
+    return {"apply_overrides_on_run": load_apply_overrides_on_run(_toggle_config(ConfigLoader, FeedbackConfig))}
+
+
+@router.post("/feedback/overrides-apply")
+async def set_overrides_apply(body: ApplyOverridesToggleRequest):
+    """设置"应用学习参数"开关状态，开启后新任务合并 active_profile overrides"""
+    from ..config import ConfigLoader, FeedbackConfig
+    from ..feedback.user_profile import save_apply_overrides_on_run
+
+    enabled = save_apply_overrides_on_run(body.enabled, _toggle_config(ConfigLoader, FeedbackConfig))
+    return {
+        "status": "ok",
+        "apply_overrides_on_run": enabled,
+        "message": "新任务将合并反馈档案的学习参数" if enabled else "新任务保持默认参数，不合并学习参数",
+    }
 
 
 # ---------------------------------------------------------------------------

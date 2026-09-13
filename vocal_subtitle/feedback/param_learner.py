@@ -257,8 +257,11 @@ class ParamLearner:
                 "Feedback count=%d ≤ 2 — recording observation only, no param update",
                 feedback_count,
             )
-            # 仅记录，不更新参数
+            # 仅记录，不更新参数。必须落盘：否则 feedback_count 永远停在 0，
+            # 冷启动阶段无法跨过 ≤2 的学习率门槛（观测不持久 = 永远是第 1 次）
+            profile["feedback_count"] = feedback_count
             self._record_observation(profile, diff_report, feedback_count, {})
+            self._profile_mgr.save(profile)
             return current_config_overrides
 
         # 应用每个参数调整

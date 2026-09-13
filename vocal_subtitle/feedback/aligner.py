@@ -325,18 +325,25 @@ class SubtitleAligner:
         self,
         auto_events: List[SubtitleEvent],
         manual_events: List[SubtitleEvent],
+        *,
+        on_low_coverage: str = "raise",
     ) -> List[AlignmentPair]:
         """对齐自动版与修订版字幕
 
         Args:
             auto_events: 自动生成的字幕事件
             manual_events: 用户修订的字幕事件
+            on_low_coverage: 覆盖率低于 min_coverage 时的行为 —
+                "raise"（默认，抛出 AlignmentError）或
+                "warn"（D20：V2 外部修正上传，警告但放行；
+                未匹配行保持 INSERT/DELETE 标记即"重构行"，
+                DiffAnalyzer 不将其计入时间轴/文本维度学习）
 
         Returns:
             AlignmentPair 列表
 
         Raises:
-            AlignmentError: 对齐覆盖率 < self.min_coverage
+            AlignmentError: 对齐覆盖率 < self.min_coverage 且 on_low_coverage="raise"
         """
         if not auto_events or not manual_events:
             raise AlignmentError("Empty events list: cannot align")
@@ -360,21 +367,38 @@ class SubtitleAligner:
         # ---- Layer 3: 残差匹配 ----
         pairs = self._residual_match(pairs, auto_events, manual_events)
 
+        # ---- 证据门控（D20）：零证据强制配对拆回 INSERT/DELETE ----
+        # DTW 的单调性约束会把完全无对应关系的行（无时间重叠且文本/语义
+        # 相似度全为 0）强制分组为 1:1/1:N/N:1，虚增覆盖率；这些行按设计
+        # 应标"重构行"（DELETE），自动侧多出行标 INSERT，不参与时间轴学习
+        pairs = self._demote_unsupported_pairs(pairs)
+
         # ---- 质量门控 ----
         matched = [p for p in pairs if p.is_matched]
         coverage = len(matched) / max(n_auto, n_manual)
         if coverage < self.min_coverage:
-            raise AlignmentError(
+            message = (
                 f"Alignment coverage too low: {coverage:.1%} "
                 f"(threshold: {self.min_coverage:.0%}). "
                 f"Auto: {n_auto} events, Manual: {n_manual} events, "
                 f"Matched: {len(matched)} pairs. "
-                f"Check if reference file matches the same audio.",
-                coverage=coverage,
-                n_auto=n_auto,
-                n_manual=n_manual,
-                n_matched=len(matched),
+                f"Check if reference file matches the same audio."
             )
+            if on_low_coverage == "warn":
+                logger.warning(
+                    "%s Continuing in warn mode (D20): unmatched lines stay "
+                    "marked as INSERT/DELETE and are excluded from "
+                    "timeline-dimension learning.",
+                    message,
+                )
+            else:
+                raise AlignmentError(
+                    message,
+                    coverage=coverage,
+                    n_auto=n_auto,
+                    n_manual=n_manual,
+                    n_matched=len(matched),
+                )
 
         # 语义相似度中位数检查
         semantic_sims = [p.semantic_similarity for p in matched if p.semantic_similarity > 0]
@@ -755,6 +779,35 @@ class SubtitleAligner:
     # ------------------------------------------------------------------
     # 辅助
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _demote_unsupported_pairs(pairs: List[AlignmentPair]) -> List[AlignmentPair]:
+        """将零证据配对（时间 IoU / 文本 / 语义相似度全为 0）拆回 INSERT/DELETE
+
+        DTW 的单调性约束会把无任何对应关系的行强制纳入配对路径（分组为
+        1:1/1:N/N:1），这些配对没有时间重叠也没有文本/语义相似度，属零证据
+        强制配对。按 D20 设计拆为：人工侧行标 DELETE（重构行）、自动侧行标
+        INSERT，使其不计入对齐覆盖率、不参与时间轴维度学习。
+        """
+        demoted: List[AlignmentPair] = []
+        for pair in pairs:
+            if (
+                pair.match_type in ("1:1", "1:N", "N:1", "N:M")
+                and pair.time_iou <= 0.0
+                and pair.text_similarity <= 0.0
+                and pair.semantic_similarity <= 0.0
+            ):
+                for event in pair.auto_events:
+                    demoted.append(AlignmentPair(
+                        auto_events=[event], manual_events=[], match_type="INSERT",
+                    ))
+                for event in pair.manual_events:
+                    demoted.append(AlignmentPair(
+                        auto_events=[], manual_events=[event], match_type="DELETE",
+                    ))
+            else:
+                demoted.append(pair)
+        return demoted
 
     @staticmethod
     def _dedup_pairs(pairs: List[AlignmentPair]) -> List[AlignmentPair]:

@@ -70,6 +70,71 @@ class TestFeedbackIntegration:
         # Cleanup
         mgr.delete("__test_integration__")
 
+    def test_learn_cold_start_persists_feedback_count(self):
+        """冷启动回归：不预置 feedback_count，从 0 开始连续学习
+
+        回归背景：learn_from_diff 的 observation-only 分支（feedback_count ≤ 2）
+        此前只改内存不落盘，导致 feedback_count 永远停在 0，每次学习都被当作
+        第 1 次反馈，参数覆盖永远无法跨过预热期写入。
+        """
+        from vocal_subtitle.feedback import (
+            DiffAnalyzer,
+            ParamLearner,
+            SubtitleAligner,
+            UserProfileManager,
+        )
+
+        auto = _make_events([
+            (0.0, 2.0, "今天天气不错"),
+            (2.5, 5.0, "我们去看电影"),
+            (5.5, 8.0, "你觉得怎么样"),
+            (8.5, 10.5, "我觉得很不错"),
+            (11.0, 13.0, "那就这样决定了"),
+        ])
+        manual = _make_events([
+            (0.0, 2.15, "今天天气不错"),
+            (2.5, 5.15, "我们去看电影"),
+            (5.5, 8.15, "你觉得怎么样"),
+            (8.5, 13.0, "我觉得很不错那就这样决定了"),
+        ])
+
+        aligner = SubtitleAligner(semantic_enabled=False)
+        pairs = aligner.align(auto, manual)
+        report = DiffAnalyzer(param_isolation_enabled=True).analyze(pairs)
+
+        mgr = UserProfileManager()
+        learner = ParamLearner(mgr)
+        name = "__test_cold_start__"
+        try:
+            assert not mgr._profile_path(name).exists()
+
+            overrides = {}
+            for expected_count in (1, 2):
+                overrides = learner.learn_from_diff(
+                    diff_report=report,
+                    current_config_overrides=overrides,
+                    profile_name=name,
+                )
+                # 关键断言：观测分支必须落盘，计数必须累加（修复前两次均停在 0）
+                loaded = mgr.load(name)
+                assert loaded["feedback_count"] == expected_count
+                assert len(loaded["history"]) == expected_count
+
+            # 第 3 次跨过预热期：若本轮确有归因，应开始写入参数覆盖
+            overrides = learner.learn_from_diff(
+                diff_report=report,
+                current_config_overrides=overrides,
+                profile_name=name,
+            )
+            loaded = mgr.load(name)
+            assert loaded["feedback_count"] == 3
+            if report.attribution:
+                assert loaded["overrides"], "跨过预热期后应产生参数覆盖"
+                assert overrides == loaded["overrides"]
+        finally:
+            mgr.delete(name)
+            assert not mgr._profile_path(name).exists()
+
     def test_subtitle_parsing_srt(self):
         """SRT 文件解析"""
         import tempfile

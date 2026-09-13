@@ -125,9 +125,16 @@ def learn(audio: str, reference: str, profile: str, feedback_profile: str,
             current_config_overrides=stored_profile.get("overrides", {}),
             profile_name=feedback_profile,
         )
-        click.echo(f"   已学习 {len(updated)} 个参数覆盖")
-        for key, value in sorted(updated.items()):
-            click.echo(f"   {key}: {value}")
+        if updated:
+            click.echo(f"   已学习 {len(updated)} 个参数覆盖")
+            for key, value in sorted(updated.items()):
+                click.echo(f"   {key}: {value}")
+        else:
+            learned_count = profile_mgr.load(feedback_profile).get("feedback_count", 0)
+            remaining = max(3 - learned_count, 0)
+            click.echo(f"   已记录第 {learned_count} 次反馈观测（学习率预热期，暂不修改参数）")
+            if remaining:
+                click.echo(f"   再积累 {remaining} 次反馈后开始应用参数覆盖")
         if feedback_cfg.few_shot_enabled:
             few_shot = FewShotBuilder(max_examples=feedback_cfg.few_shot_max_examples)
             few_shot.load_cache(feedback_profile)
@@ -162,12 +169,68 @@ def learn(audio: str, reference: str, profile: str, feedback_profile: str,
                     click.echo(f"   ⚠️ 指纹提取失败: {exc}")
         _ingest_d2_sample(auto_events, manual_events, diff_report.alignment_coverage,
                           consent, diff_report, feedback_cfg, audio_path)
-        click.echo("\n✓ 学习完成！下次运行将自动应用学习到的参数偏好。")
+        try:
+            from ..feedback.user_profile import load_apply_overrides_on_run
+
+            apply_enabled = load_apply_overrides_on_run(feedback_cfg) if updated else True
+        except Exception:
+            apply_enabled = True
+        if updated and apply_enabled:
+            click.echo("\n✓ 学习完成！下次运行将自动应用学习到的参数偏好。")
+        elif updated:
+            click.echo("\n✓ 学习完成（参数覆盖已保存）。")
+            click.echo(
+                "  ⚠️ 运行时开关 apply_overrides_on_run 当前为关："
+                "学习到的参数不会在管线运行时生效，可在 8613 处理台「反馈档案」区开启"
+            )
+        else:
+            click.echo("\n✓ 学习完成（观测已记录）。")
         click.echo(f"  使用 --feedback-profile {feedback_profile} 指定此配置")
     else:
         _ingest_d2_sample(auto_events, manual_events, diff_report.alignment_coverage,
                           consent, diff_report, feedback_cfg, audio_path)
         click.echo("\n✓ 无参数变更。")
+
+
+def _default_sink_dir() -> Path:
+    """journal sink 目录（与 webui routes_journal 的推导同源：cache/journal_sink）。"""
+    try:
+        from ..webui.runtime_state import state
+
+        return state.upload_dir.parent / "journal_sink"
+    except Exception:
+        return Path(__file__).resolve().parent.parent.parent / "cache" / "journal_sink"
+
+
+def _load_feedback_config():
+    """从场景模板 YAML 读 feedback 配置（D30 保留策略/TTL 的权威来源）；载入失败回退默认值。"""
+    try:
+        from ..config import ConfigLoader
+
+        return ConfigLoader().load_profile("default").feedback
+    except Exception:
+        from ..config import FeedbackConfig
+
+        return FeedbackConfig()
+
+
+def _apply_sink_retention(journal_paths, feedback_cfg) -> None:
+    """ingest 成功后对 sink 目录内的源文件执行保留策略（D30）；失败不影响摄取主流程。"""
+    try:
+        from ..feedback.journal_retention import apply_retention
+
+        policy = feedback_cfg.journal_sink_retention
+        sink_dir = _default_sink_dir()
+        for path in journal_paths:
+            outcome = apply_retention(path, policy=policy, sink_dir=sink_dir)
+            if outcome.action == "archived":
+                click.echo(f"🗄️  已归档已消费日志: {outcome.path.name} → {outcome.detail}")
+            elif outcome.action == "deleted":
+                click.echo(f"🗑️  已删除已消费日志: {outcome.path.name}")
+            elif outcome.reason == "outside-sink":
+                click.echo(f"ℹ️  {outcome.path.name} 不在 journal sink 目录，保留原文件")
+    except Exception as exc:
+        logger.warning("Journal sink retention failed (non-fatal): %s", exc)
 
 
 def _health_report(diff_report, pairs, verbose: bool):
@@ -326,7 +389,7 @@ def ingest_journal(files: tuple, original: str | None, feedback_profile: str, co
     """
     from ..config import FeedbackConfig
     from ..feedback import (UserProfileManager, check_v3_trigger, derive_editor_preferences,
-                            journal_statistics, load_journal_files, replay_journal)
+                            journal_scenario, journal_statistics, load_journal_files, replay_journal)
     from ..feedback.diff_analyzer import analyze_journal_events
     from ..feedback.journal_ingest import find_original_subtitle, load_original_events, journal_to_text_sample
     from ..feedback.sample_manager import FeedbackSampleManager
@@ -407,10 +470,16 @@ def ingest_journal(files: tuple, original: str | None, feedback_profile: str, co
 
     # ---- D2 候选样本入库（每个日志文件一份，重放终态 = 人工终审）----
     sample_manager = FeedbackSampleManager()
+    journal_by_name = {journal.path.name: journal for journal in journal_files}
+    consumed_journal_paths: list[Path] = []
     ingested = 0
     for journal_name, original_path, result in replay_summary:
         if not result.final_events:
             continue
+        # 重放成功产出终态 = 已消费（样本库去重跳过也算已消费），纳入保留策略
+        journal = journal_by_name.get(journal_name)
+        if journal is not None:
+            consumed_journal_paths.append(journal.path)
         original_events = load_original_events(original_path)
         auto_text, final_text = journal_to_text_sample(original_events, result.final_events)
         edit_types = {}
@@ -418,13 +487,18 @@ def ingest_journal(files: tuple, original: str | None, feedback_profile: str, co
             edit_types["structural_rewrite"] = 1
         if stats.start_delta_median is not None or stats.end_delta_median is not None:
             edit_types["time_adjustment"] = len(all_events)
+        journal = journal_by_name.get(journal_name)
+        header = (journal.header if journal else None) or {}
         sample = sample_manager.ingest(
             auto_subtitle=auto_text,
             human_revision=final_text,
             alignment={"method": "journal-replay", "coverage_ratio": 1.0 if result.exact else 0.8,
                        "confidence": 0.9 if result.exact else 0.7},
             consent_level=consent,
+            scene=journal_scenario(journal) if journal else "",
             edit_types=edit_types,
+            task_id=str(header.get("task_id") or ""),
+            run_id=str(header.get("run_id") or ""),
         )
         if sample:
             ingested += 1
@@ -461,7 +535,118 @@ def ingest_journal(files: tuple, original: str | None, feedback_profile: str, co
         click.echo(f"\n🚀 V3 触发提示: {message}")
     else:
         click.echo(f"\nℹ️  V3: {message}")
+
+    # ---- sink 保留策略（D30）：仅对成功消费（已入库）的日志执行；重放跳过/入库失败的文件不动 ----
+    _apply_sink_retention(consumed_journal_paths, _load_feedback_config())
+    if len(consumed_journal_paths) < len(journal_paths):
+        click.echo(f"ℹ️  {len(journal_paths) - len(consumed_journal_paths)} 个日志未成功消费，保留策略不作用于它们")
+
     click.echo("\n✓ 日志摄取完成。")
+
+
+@feedback.command("cleanup-journal-sink")
+@click.option("--sink-dir", "sink_dir_opt", type=click.Path(file_okay=False, path_type=Path), default=None,
+              help="journal sink 目录（缺省自动推导 cache/journal_sink）")
+@click.option("--ttl-days", type=int, default=None,
+              help="覆盖配置的 TTL 天数（缺省读 feedback.journal_sink_ttl_days，<=0 禁用清理）")
+def cleanup_journal_sink(sink_dir_opt: Path | None, ttl_days: int | None):
+    """TTL 兜底清理：删除从未被消费且超过 TTL 的 sink 文件（D30）。
+
+    只清 sink 顶层 *.jsonl；已归档到 consumed/ 的文件不受影响；重复运行幂等。
+    """
+    from ..config import FeedbackConfig
+    from ..feedback.journal_retention import consumed_dir, cleanup_expired
+
+    directory = sink_dir_opt or _default_sink_dir()
+    days = ttl_days if ttl_days is not None else _load_feedback_config().journal_sink_ttl_days
+    if days <= 0:
+        click.echo(f"⏭️  journal_sink_ttl_days={days}，TTL 清理已禁用（{directory}）")
+        return
+    removed = cleanup_expired(directory, ttl_days=days)
+    if removed:
+        click.echo(f"🧹 已清理 {len(removed)} 个超期未消费的 sink 文件（TTL {days} 天）:")
+        for path in removed:
+            click.echo(f"   - {path.name}")
+    else:
+        click.echo(f"✓ 无超期未消费的 sink 文件（TTL {days} 天）")
+    archived_dir = consumed_dir(directory)
+    if archived_dir.is_dir():
+        archived = len(list(archived_dir.glob("*.jsonl")))
+        click.echo(f"ℹ️  已消费归档保留于 {archived_dir}（{archived} 份，不参与 TTL 清理）")
+
+
+@feedback.command("export-dataset")
+@click.option("--out", "-o", "out_dir", required=True, type=click.Path(file_okay=False, path_type=Path),
+              help="数据集输出目录（重复导出到同一目录即追加式新增分片，不改写已存在分片）")
+@click.option("--scenarios", "-s", default="",
+              help="场景过滤，逗号分隔（inline-review / external-correction / existing-subtitle / from-scratch-timing；缺省导出全部）")
+@click.option("--license", "license_name", default=None,
+              help="数据集许可（如 CC-BY-4.0 / CC0-1.0）；未指定且为交互终端时会询问，非交互环境拒绝执行")
+@click.option("--bundle-audio", is_flag=True, default=False,
+              help="把音频实体复制进数据集 audio/ 目录（仅本地使用，不建议推 git；默认不打包）")
+@click.option("--shard-size", default=500, show_default=True, type=int, help="单个 jsonl 分片的最大样本数")
+@click.option("--name", "dataset_name", default="subtitle-feedback", show_default=True, help="数据集名称（写入卡片）")
+def export_dataset(out_dir: Path, scenarios: str, license_name: str | None,
+                   bundle_audio: bool, shard_size: int, dataset_name: str):
+    """把已接受（accepted）的 D2 样本物化为 dataset-v1 数据集（D31/D32/D33）。
+
+    只导审核队列接受的样本；pending/rejected 不出门。产物为 git-ready 目录
+    （README 卡片 + data/*.jsonl 分片 + manifest 清单），推送由用户手动完成。
+    """
+    import sys
+
+    from ..feedback.dataset_export import SCENARIOS, LicenseRequiredError, export_dataset
+    from ..feedback.sample_manager import FeedbackSampleManager
+
+    wanted = [item.strip() for item in (scenarios or "").split(",") if item.strip()]
+    invalid = [item for item in wanted if item not in SCENARIOS]
+    if invalid:
+        click.echo(f"✗ 未知场景标签: {', '.join(invalid)}；可选值: {', '.join(SCENARIOS)}", err=True)
+        raise SystemExit(1)
+
+    # 许可门禁（D33）：显式参数优先；交互终端才询问；非交互且未传参必须拒绝，不能卡住等输入
+    if not license_name:
+        if sys.stdin.isatty():
+            license_name = click.prompt("请输入数据集许可（例如 CC-BY-4.0 / CC0-1.0）", type=str)
+        else:
+            click.echo("✗ 未指定许可且当前为非交互环境：dataset-v1 导出强制显式选择许可，请用 --license 指定", err=True)
+            raise SystemExit(1)
+
+    try:
+        outcome = export_dataset(
+            FeedbackSampleManager(),
+            out_dir,
+            license=license_name,
+            scenarios=wanted,
+            bundle_audio=bundle_audio,
+            shard_size=shard_size,
+            dataset_name=dataset_name,
+        )
+    except LicenseRequiredError as exc:
+        click.echo(f"✗ {exc}", err=True)
+        raise SystemExit(1)
+    except ValueError as exc:
+        click.echo(f"✗ {exc}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"📦 dataset-v1 导出完成 → {outcome.out_dir}")
+    click.echo(f"   accepted 样本（过滤后）: {outcome.accepted_total}，本次新增: {outcome.exported_count}")
+    if outcome.skipped_missing_text:
+        click.echo(f"   ⚠️  {len(outcome.skipped_missing_text)} 个样本缺少字幕全文（旧版样本库入库），已跳过: "
+                   f"{', '.join(outcome.skipped_missing_text)}")
+    for shard in outcome.shards:
+        click.echo(f"   📄 {shard}")
+    if not outcome.shards:
+        click.echo("   ℹ️  无新增样本，未写入新分片")
+    if bundle_audio:
+        if outcome.bundled_audio:
+            click.echo(f"   🔊 音频实体已打包 {len(outcome.bundled_audio)} 个会话 → audio/")
+        if outcome.missing_audio:
+            click.echo(f"   ⚠️  {len(outcome.missing_audio)} 个音频引用找不到实体文件（引用照写）: "
+                       f"{', '.join(outcome.missing_audio)}")
+        click.echo("   ⚠️  不建议把 audio/ 目录推送到 git 远程（体积大且含原始音频）")
+    click.echo(f"   许可: {outcome.license}（已记入 README 数据集卡片）")
+    click.echo("   提示: 目录为 git-ready，推送请手动执行；建议以 git tag 标记发行版本")
 
 
 @feedback.group("sample")
