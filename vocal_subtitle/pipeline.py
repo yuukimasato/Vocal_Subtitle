@@ -104,6 +104,11 @@ class Pipeline(PipelineASRPathMixin, PipelinePhysicalPathMixin, PipelineStageMix
         self._global_evidence_attempted: bool = False
         self._global_evidence_diagnostics: Dict[str, Any] = {}
 
+        # [层1] 说话人身份主干（early_turns）：全局 pass 结果与骨架×turns
+        # 跨度，由 run() 在分离之后填充；未启用时保持 None/空。
+        self._early_turns_state = None
+        self._early_turn_spans: List[Any] = []
+
     # Direct full-audio ASR is intentionally bounded until the existing
     # GlobalTranscriber windowing path is promoted to the main route.
     GLOBAL_ASR_MAX_DURATION_SECONDS = 180.0

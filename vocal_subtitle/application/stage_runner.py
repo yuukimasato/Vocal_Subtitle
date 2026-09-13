@@ -145,6 +145,7 @@ class PipelineStageMixin:
         try:
             from ..vad.ffmpeg_vad import unified_ffmpeg_pass
             from ..config import AcousticValidationConfig
+            from ..acoustic.skeleton import adaptive_silence_threshold_db
 
             acoustic_cfg = self.config.acoustic_validation
             noise_db = (
@@ -156,6 +157,14 @@ class PipelineStageMixin:
                 acoustic_cfg.skeleton_min_silence
                 if isinstance(acoustic_cfg, AcousticValidationConfig)
                 else AcousticValidationConfig().skeleton_min_silence
+            )
+            # 与骨架路径同源自适应阈值：噪声底+余量，失败回退固定值
+            noise_db = adaptive_silence_threshold_db(
+                getattr(ctx, "audio", None),
+                getattr(ctx, "sample_rate", 16000),
+                enabled=getattr(acoustic_cfg, "skeleton_adaptive_noise_db", True),
+                fallback_db=noise_db,
+                margin_db=getattr(acoustic_cfg, "skeleton_noise_margin_db", 10.0),
             )
 
             ctx.ffmpeg_unified_result = unified_ffmpeg_pass(
@@ -536,7 +545,7 @@ class PipelineStageMixin:
         )
 
     @staticmethod
-    def _build_safe_optimizer(llm_cfg):
+    def _build_safe_optimizer(llm_cfg, update_callback=None):
         """Build a SubtitleOptimizer with min_similarity / max_length_ratio validation.
 
         The external ``llm_subtitle_optimizer`` library does not expose
@@ -588,6 +597,7 @@ class PipelineStageMixin:
             temperature=llm_cfg.temperature,
             base_url=llm_cfg.base_url,
             api_key=llm_cfg.api_key,
+            update_callback=update_callback,
         )
 
     @staticmethod

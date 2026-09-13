@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from ..application.pipeline_result import PipelineStats
 from ..application.run_finalizer import finalize_task_state
@@ -33,9 +33,14 @@ class PipelineRunMixin(PipelineLifecycleMixin):
             skip_separation=skip_separation,
         )
 
-    def _finalize_task_state(self, stats: "PipelineStats") -> None:
+    def _finalize_task_state(
+        self,
+        stats: "PipelineStats",
+        *,
+        result_payload: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Compatibility wrapper for task-history finalization."""
-        finalize_task_state(self, stats)
+        finalize_task_state(self, stats, result_payload=result_payload)
 
     def _generate_run_report(
         self,

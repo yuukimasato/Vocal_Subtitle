@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from ..utils.text_utils import smart_join_texts
 from . import merge_constraints, merge_policy
 from .llm_decider import LLMMergeDecider
 from .local_decider import LocalMergeDecider
@@ -172,8 +173,8 @@ class MergeDecisionConfig:
     """合并决策分流配置"""
 
     # Fast-Slow Path 分流阈值
-    fast_merge_max_gap: float = 0.20      # <200ms: 规则强制合并
-    llm_decision_min_gap: float = 0.20    # 200-1200ms: LLM裁决
+    fast_merge_max_gap: float = 0.30      # <300ms: 规则强制合并（同说话人+短间隔）
+    llm_decision_min_gap: float = 0.30    # 300-1200ms: LLM裁决
     llm_decision_max_gap: float = 1.20
     hard_split_min_gap: float = 1.20      # >1200ms: 强制不合并
 
@@ -183,7 +184,7 @@ class MergeDecisionConfig:
 
     # LLM 降本策略
     llm_tier: str = "cascading"           # "cascading" | "all_llm" | "rule_only"
-    local_nlp_gap_range: Tuple[float, float] = (0.15, 0.60)  # 本地NLP优先的间隙范围
+    local_nlp_gap_range: Tuple[float, float] = (0.30, 0.60)  # 本地NLP优先的间隙范围
 
     # LLM API 配置
     llm_model: str = "deepseek-v4-pro"
@@ -388,7 +389,7 @@ class LLMMergeEngine:
                 last_of_group = fragments[j - 1]
                 frag["start"] = first_of_group.get("start", frag.get("start", 0))
                 frag["end"] = last_of_group.get("end", frag.get("end", 0))
-                frag["text"] = " ".join(merged_texts)
+                frag["text"] = smart_join_texts(merged_texts)
                 frag["_merged_ids"] = merged_ids
                 frag["_fast_merged"] = True
 
@@ -528,7 +529,7 @@ class LLMMergeEngine:
                         texts.append(t)
                     accepted_ids.append(mid)
 
-            combined_text = " ".join(texts)
+            combined_text = smart_join_texts(texts)
 
             # ★ 选择合并组的说话人：优先使用第一个非 "unknown" 的标签
             merged_speaker = first.get("speaker", "unknown")

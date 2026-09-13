@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Iterable, Sequence
 
 from .allocator import WordAllocation
 from .subtitle_bins import PhysicalSubtitleBin
+
+# 换人边界与空洞的相交判定容差:turn 边界标称精度 ±100~200ms
+# (说话人身份主干定案 §0),空洞边缘贴近换人点即视为可能被吞话轮。
+SPEAKER_HOLE_TOLERANCE_SECONDS = 0.2
 
 
 @dataclass(frozen=True)
@@ -17,6 +21,9 @@ class PhysicalCoverageRange:
     end: float
     bin_ids: tuple[str, ...]
     physical_clip_id: str | None = None
+    # 时间轴仲裁层 R3(2026-09-11 定案):空洞区间与 turns 换人边界相交时,
+    # 提示该空洞可能是 B 话轮被 A 事件吞掉(诊断标记,不改变恢复行为)。
+    possible_speaker_hole: bool = False
 
     @property
     def duration(self) -> float:
@@ -29,6 +36,7 @@ class PhysicalCoverageRange:
             "duration": self.duration,
             "bin_ids": list(self.bin_ids),
             "physical_clip_id": self.physical_clip_id,
+            "possible_speaker_hole": self.possible_speaker_hole,
         }
 
 
@@ -49,6 +57,8 @@ class PhysicalCoverageReport:
     over_allocated_segments: int = 0
     under_allocated_segments: int = 0
     alerts: tuple[str, ...] = ()
+    # v1.2: 时间轴仲裁层 R3——空洞 × turns 换人边界联动的诊断明细
+    possible_speaker_holes: tuple[dict[str, Any], ...] = ()
 
     @property
     def complete(self) -> bool:
@@ -69,7 +79,64 @@ class PhysicalCoverageReport:
             "over_allocated_segments": self.over_allocated_segments,
             "under_allocated_segments": self.under_allocated_segments,
             "alerts": list(self.alerts),
+            "possible_speaker_holes": list(self.possible_speaker_holes),
         }
+
+
+def speaker_change_boundaries(turns: Sequence[Any] | None) -> list[float]:
+    """提取 turns 序列的换人边界点(相邻 turn 交接处)。
+
+    turn 接受带 ``start``/``end``(/``speaker_id``) 属性的对象、映射或
+    ``(start, end[, speaker])`` 序列。两侧都带 speaker_id 时仅在不同
+    说话人之间产边界;重叠 turn 不产边界(定案:两人重叠不强判归属);
+    speaker 信息缺失时保守地把相邻交接都视为潜在换人(诊断用途,宁多勿漏)。
+    """
+    normalized: list[tuple[float, float, Any]] = []
+    for turn in turns or ():
+        if isinstance(turn, dict):
+            start = turn.get("start")
+            end = turn.get("end")
+            speaker = turn.get("speaker_id")
+        elif isinstance(turn, (tuple, list)):
+            if len(turn) < 2:
+                continue
+            start, end = turn[0], turn[1]
+            speaker = turn[2] if len(turn) > 2 else None
+        else:
+            start = getattr(turn, "start", None)
+            end = getattr(turn, "end", None)
+            speaker = getattr(turn, "speaker_id", None)
+        if start is None or end is None:
+            continue
+        normalized.append((float(start), float(end), speaker))
+    normalized.sort(key=lambda item: (item[0], item[1]))
+
+    boundaries: list[float] = []
+    for (_, end, speaker), (next_start, _, next_speaker) in zip(
+        normalized, normalized[1:]
+    ):
+        if next_start < end:
+            continue
+        if (
+            speaker is not None
+            and next_speaker is not None
+            and speaker == next_speaker
+        ):
+            continue
+        boundaries.append((end + next_start) / 2.0)
+    return boundaries
+
+
+def hole_intersects_speaker_change(
+    start: float,
+    end: float,
+    boundaries: Sequence[float],
+    tolerance: float = SPEAKER_HOLE_TOLERANCE_SECONDS,
+) -> bool:
+    """空洞区间是否与换人边界相交(±tolerance,turn 标称精度 ±100~200ms)。"""
+    if tolerance < 0:
+        raise ValueError("tolerance must be non-negative")
+    return any(start - tolerance <= point <= end + tolerance for point in boundaries)
 
 
 def audit_physical_coverage(
@@ -80,6 +147,10 @@ def audit_physical_coverage(
     # Recovery requests must remain inside one physical speech run.  A gap at
     # or above 400 ms is a hard-silence boundary in the offline contract.
     merge_gap: float = 0.4,
+    # 时间轴仲裁层 R3(2026-09-11 定案):可选的全局说话人 turns。提供时,
+    # 与换人边界相交的空洞区间标 possible_speaker_hole;None 时行为与
+    # 现状一致——R3 不依赖说话人层(P1/P2)即可独立回退。
+    turns: Sequence[Any] | None = None,
 ) -> PhysicalCoverageReport:
     """Report physical bins that have no accepted word overlap.
 
@@ -139,6 +210,23 @@ def audit_physical_coverage(
         _merge_ranges(recovery_bins, merge_gap=merge_gap)
     )
 
+    # 时间轴仲裁层 R3:空洞区间与 turns 换人边界相交 → possible_speaker_hole
+    # (提示空洞可能是 B 话轮被 A 事件吞掉;turns=None 时完全跳过,现状不变)
+    speaker_holes: list[dict[str, Any]] = []
+    boundaries = speaker_change_boundaries(turns)
+    if boundaries:
+        marked_ranges: list[PhysicalCoverageRange] = []
+        for recovery_range in recovery_ranges:
+            if hole_intersects_speaker_change(
+                recovery_range.start, recovery_range.end, boundaries,
+            ):
+                recovery_range = replace(
+                    recovery_range, possible_speaker_hole=True,
+                )
+                speaker_holes.append(recovery_range.to_dict())
+            marked_ranges.append(recovery_range)
+        recovery_ranges = tuple(marked_ranges)
+
     # 计算覆盖率、过分配/欠分配和告警条件 (CONTRACTS §5)
     total_duration = sum(
         float(bin_item.end) - float(bin_item.start) for bin_item in ordered_bins
@@ -175,6 +263,8 @@ def audit_physical_coverage(
         alerts.append(f"over_allocated:{over_allocated}")
     if under_allocated > 0:
         alerts.append(f"under_allocated:{under_allocated}")
+    if speaker_holes:
+        alerts.append(f"possible_speaker_hole:{len(speaker_holes)}")
 
     return PhysicalCoverageReport(
         physical_bin_count=len(ordered_bins),
@@ -189,6 +279,7 @@ def audit_physical_coverage(
         over_allocated_segments=over_allocated,
         under_allocated_segments=under_allocated,
         alerts=tuple(alerts),
+        possible_speaker_holes=tuple(speaker_holes),
     )
 
 

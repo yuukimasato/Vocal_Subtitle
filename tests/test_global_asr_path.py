@@ -481,3 +481,111 @@ def test_finalize_events_uses_pipeline_subtitle_config():
     assert diagnostics["split_long_event_count"] > 0
     assert diagnostics["input_event_count"] > 1
     assert stats.subtitle_count == len(result)
+
+
+def test_grouped_window_events_are_reprojected_to_physical_members(
+    monkeypatch, tmp_path,
+):
+    """聚合窗口成功后，事件端点必须钳制到骨架成员包络；
+    句内微停顿（间隙 < member_split_min_gap）不拆分文本。"""
+    pipeline = Pipeline(PipelineConfig())
+    pipeline._progress = SimpleNamespace(
+        start_stage=lambda *args, **kwargs: None,
+        finish_stage=lambda *args, **kwargs: None,
+    )
+    pipeline.config.acoustic_validation.skeleton_min_speech = 0.1
+
+    def process_chunk(**kwargs):
+        # 窗口输入 [0, 1.45]：一条字幕跨越两个物理成员段 (0, 0.5)/(0.7, 1.2)，
+        # end 被 padding 推到窗口尾。
+        event = SubtitleEvent(
+            index=1,
+            start=0.0,
+            end=1.45,
+            text="你好吗",
+            words=[
+                WordTimestamp(word="你", start=0.10, end=0.30, confidence=0.9),
+                WordTimestamp(word="好", start=0.35, end=0.45, confidence=0.9),
+                WordTimestamp(word="吗", start=0.80, end=1.00, confidence=0.9),
+            ],
+        )
+        return ([event], 1, None)
+
+    pipeline._process_chunk_pipeline = process_chunk
+    monkeypatch.setattr(
+        "vocal_subtitle.vad.ffmpeg_vad.unified_ffmpeg_pass",
+        lambda *args, **kwargs: {"skeleton": [(0.0, 0.5), (0.7, 1.2)]},
+    )
+    monkeypatch.setattr(AudioUtils, "save_audio", lambda *args, **kwargs: None)
+
+    audio = np.zeros(2 * 16000, dtype=np.float32)
+    events, segment_count, _ = pipeline._process_skeleton_segmented(
+        audio,
+        16000,
+        tmp_path / "input.wav",
+    )
+
+    assert segment_count == 1
+    # 0.2s 的成员间隙属于句内微停顿：文本保持整行，端点钳制到成员包络。
+    assert [event.text for event in events] == ["你好吗"]
+    first = events[0]
+    assert first.start == pytest.approx(0.0)
+    assert first.end == pytest.approx(1.2)
+    assert first.end <= 1.2
+    assert first.hard_split_before is False
+    assert all(event.time_offset_trace for event in events)
+
+    # 阈值归零恢复逐成员拆分：配置从 acoustic_validation 一路传入重投影。
+    pipeline.config.acoustic_validation.member_split_min_gap = 0.0
+    split_events, _count, _ = pipeline._process_skeleton_segmented(
+        audio,
+        16000,
+        tmp_path / "input.wav",
+    )
+    assert [event.text for event in split_events] == ["你好", "吗"]
+    head, tail = split_events
+    assert head.end == pytest.approx(0.45)
+    assert head.end <= 0.5
+    assert tail.start == pytest.approx(0.80)
+    assert tail.start >= 0.7
+    assert tail.end == pytest.approx(1.00)
+
+
+def test_grouped_window_reprojection_can_be_disabled(monkeypatch, tmp_path):
+    pipeline = Pipeline(PipelineConfig())
+    pipeline._progress = SimpleNamespace(
+        start_stage=lambda *args, **kwargs: None,
+        finish_stage=lambda *args, **kwargs: None,
+    )
+    pipeline.config.acoustic_validation.skeleton_min_speech = 0.1
+    pipeline.config.acoustic_validation.reproject_grouped_windows = False
+
+    def process_chunk(**kwargs):
+        event = SubtitleEvent(
+            index=1,
+            start=0.0,
+            end=1.45,
+            text="你好吗",
+            words=[
+                WordTimestamp(word="你", start=0.10, end=0.30, confidence=0.9),
+                WordTimestamp(word="好", start=0.35, end=0.45, confidence=0.9),
+                WordTimestamp(word="吗", start=0.80, end=1.00, confidence=0.9),
+            ],
+        )
+        return ([event], 1, None)
+
+    pipeline._process_chunk_pipeline = process_chunk
+    monkeypatch.setattr(
+        "vocal_subtitle.vad.ffmpeg_vad.unified_ffmpeg_pass",
+        lambda *args, **kwargs: {"skeleton": [(0.0, 0.5), (0.7, 1.2)]},
+    )
+    monkeypatch.setattr(AudioUtils, "save_audio", lambda *args, **kwargs: None)
+
+    events, _, _ = pipeline._process_skeleton_segmented(
+        np.zeros(2 * 16000, dtype=np.float32),
+        16000,
+        tmp_path / "input.wav",
+    )
+
+    assert len(events) == 1
+    assert events[0].end == pytest.approx(1.45)

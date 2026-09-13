@@ -257,6 +257,14 @@ class PipelineLifecycleMixin:
         if "audio" not in locals() or "sample_rate" not in locals():
             audio, sample_rate = AudioUtils.load_audio(vocals_path)
             stats.duration_seconds = len(audio) / sample_rate
+        # ---- [层1] 身份主干 P1:全局 diarization 前置（early_turns） ----
+        # 分离之后、chunk 处理之前对完整人声音频跑一次全局 pass，
+        # turns 贯通 chunk_runner（合并硬约束）与 postprocess_runner
+        # （事件标签来源）。early_turns=false 时此处仅记 disabled，
+        # 后续行为与现状完全一致（后处理事件级聚类照常运行）。
+        self._early_turns_state = None
+        self._early_turn_spans: List[Any] = []
+        self._run_early_global_turns(audio, sample_rate, stats)
         requested_asr_path = self._resolve_asr_path()
         stats.asr_path = requested_asr_path
         global_completed = False
@@ -554,6 +562,9 @@ class PipelineLifecycleMixin:
             total_segments = 0
             speaker_offset = 0
             max_speaker_per_chunk = 0
+            # [层1] early_turns 生效时标签来自全局 turns（全局唯一），
+            # 无需跨块偏移；关闭时保持跨块 speaker_offset 累加补丁。
+            early_turns_active = self._early_turns_active()
             for idx, chunk in enumerate(macro_chunks):
                 chunk_audio = chunk.audio
                 chunk_sr = sample_rate
@@ -576,14 +587,16 @@ class PipelineLifecycleMixin:
                         vocals_path=tmp_path,
                         chunk_label=f"Chunk {idx+1}/{len(macro_chunks)}",
                         parallel_vad=False,  # 多块嵌套线程，避免 PyTorch 死锁
+                        time_offset=chunk.start,
                     )
                 finally:
                     tmp_path.unlink(missing_ok=True)
+                # ★ 跨块 speaker_id 偏移（段级聚类遗留；early_turns 生效时跳过）
                 chunk_speakers = set()
                 for evt in chunk_events:
                     if evt.speaker_id is not None:
                         chunk_speakers.add(evt.speaker_id)
-                if chunk_speakers:
+                if chunk_speakers and not early_turns_active:
                     max_speaker_per_chunk = max(chunk_speakers)
                     if speaker_offset > 0:
                         for evt in chunk_events:
@@ -759,6 +772,34 @@ class PipelineLifecycleMixin:
             )
             stats.stage_timings["llm"] = self._progress.finish_stage()
         events = self._finalize_events(events, stats, stats.duration_seconds)
+        # ---- 显示 cue 能量对齐（2026-09-13 诊断定案） ----
+        # finalize 的显示拆行以词起点/文本宽度为准，句内停顿处偏早的
+        # 行首会把静音吞进行首；骨架路径的合并事件无词表，校验阶段无法
+        # 修正。这里在拆行之后、导出之前对最终 cue 做一次能量对齐：
+        # start 后向吸附到真实语音起点，end 在连续语音骨架段内延长。
+        if self.config.acoustic_validation.enabled:
+            try:
+                from ..acoustic import AcousticValidator
+                from ..merging.fragment_absorber import resolve_speech_skeleton
+
+                _validator = AcousticValidator(
+                    self.config.acoustic_validation
+                )
+                _skeleton = resolve_speech_skeleton(
+                    vocals_path, None,
+                    self.config.acoustic_validation, audio, sample_rate,
+                )
+                if _skeleton:
+                    events, _align_report = _validator._physical_snap_validation(
+                        events, _skeleton, audio=audio, sample_rate=sample_rate,
+                    )
+                    stats.quality_diagnostics["display_energy_alignment"] = {
+                        "snapped_starts": _align_report["snapped_starts"],
+                        "ends_extended": _align_report.get("ends_extended", 0),
+                        "snapped_ends": _align_report["snapped_ends"],
+                    }
+            except Exception as e:
+                logger.warning("Display energy alignment failed: %s", e)
         export_label = "llm" if self.config.llm_optimize.enabled else "asr"
         final_paths = self._export_subtitles_multi_format(
             builder, events, output_path, output_format, session_dir, label=export_label
@@ -839,7 +880,20 @@ class PipelineLifecycleMixin:
             )
         if stats.fallback_reason and stats.status == "completed":
             stats.status = "degraded_completed"
-        self._finalize_task_state(stats)
+        from .run_finalizer import build_result_payload
+
+        result_payload = build_result_payload(
+            task_id=getattr(self, "_effective_task_id", None) or stats.task_id or task_id or "",
+            stats=stats,
+            events=events,
+            input_path=input_path,
+            subtitle_path=final_subtitle_path,
+            clean_subtitle_path=clean_subtitle_path,
+            llm_subtitle_path=llm_subtitle_path,
+            vocals_path=vocals_result,
+            accompaniment_path=accomp_result,
+        )
+        self._finalize_task_state(stats, result_payload=result_payload)
         self._generate_run_report(
             input_path, stats, task_id,
             sample_rate=sample_rate if "sample_rate" in dir() else 0,

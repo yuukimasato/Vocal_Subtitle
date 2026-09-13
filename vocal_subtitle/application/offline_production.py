@@ -253,19 +253,26 @@ class OfflineProductionCoordinator:
         )
 
         try:
-            recovery_requests = [
-                LocalRecoveryRequest(
-                    start=float(item["start"]),
-                    end=float(item["end"]),
-                    reasons=("uncovered",),
-                    metadata={
-                        "bin_ids": list(item.get("bin_ids") or ()),
-                        "physical_clip_id": item.get("physical_clip_id"),
-                    },
+            recovery_requests = []
+            for item in ranges:
+                if float(item.get("end", 0.0)) <= float(item.get("start", 0.0)):
+                    continue
+                metadata = {
+                    "bin_ids": list(item.get("bin_ids") or ()),
+                    "physical_clip_id": item.get("physical_clip_id"),
+                }
+                # 时间轴仲裁层 R3:审计侧空洞 × turns 换人边界联动的诊断
+                # 标记(turns=None 时审计不产出该标记,行为不变)
+                if item.get("possible_speaker_hole"):
+                    metadata["possible_speaker_hole"] = True
+                recovery_requests.append(
+                    LocalRecoveryRequest(
+                        start=float(item["start"]),
+                        end=float(item["end"]),
+                        reasons=("uncovered",),
+                        metadata=metadata,
+                    )
                 )
-                for item in ranges
-                if float(item.get("end", 0.0)) > float(item.get("start", 0.0))
-            ]
             results = LocalRecoveryEngine(
                 request.recovery_engine,
                 config=self._recovery_config(config),

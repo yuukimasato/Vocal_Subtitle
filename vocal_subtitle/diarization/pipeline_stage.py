@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 import numpy as np
 
 if TYPE_CHECKING:
+    from ..application.pipeline_result import PipelineStats
     from ..asr.base import TranscriptionSegment
     from ..mapping.time_mapper import SubtitleEvent
     from ..vad.base import SpeechSegment
@@ -87,6 +88,42 @@ class PipelineDiarizationMixin:
         )
         logger.info("Role labeling: %d speakers named", len(role_names))
         return role_names
+
+    def _run_early_global_turns(
+        self,
+        audio: np.ndarray,
+        sample_rate: int,
+        stats: "PipelineStats",
+    ) -> None:
+        """[层1] 身份主干 P1:全局 diarization 前置（early_turns）。
+
+        分离之后、chunk 处理之前对完整人声音频只跑一次全局 pass
+        （复用 speaker_fusion 的引擎加载与模型选择逻辑，模型缓存沿用
+        现有机制），turns 归一到全局时间轴后保存在
+        ``self._early_turns_state``。pyannote 不可用时状态非 ok，
+        后处理自动回退到事件级聚类（降级链 global→embedding→MFCC→
+        unknown 不变），日志记录回退原因。
+        """
+        from ..diarization.early_turns import run_early_global_pass
+
+        self._early_turns_state = run_early_global_pass(
+            audio, sample_rate, self.config,
+            duration=len(audio) / max(sample_rate, 1),
+        )
+        state = self._early_turns_state
+        if state.attempted:
+            stats.quality_diagnostics["early_turns"] = {
+                "status": state.status,
+                "turn_count": len(state.turns),
+                "speaker_count": state.speaker_count,
+                "model": state.model_ref,
+                "single_speaker": state.single_speaker,
+            }
+
+    def _early_turns_active(self) -> bool:
+        """[层1] 前置全局 turns 是否可用（early_turns 开启且全局 pass 成功）。"""
+        state = getattr(self, "_early_turns_state", None)
+        return bool(state is not None and state.active)
 
     def _get_embedding_engine(self):
         """获取说话人嵌入引擎（惰性初始化 + 缓存）

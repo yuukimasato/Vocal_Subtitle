@@ -204,7 +204,7 @@ class TestAcousticValidator:
         assert report["snapped_starts"] == 1
 
     def test_high_confidence_word_boundary_is_preserved(self, validator):
-        """可靠词级时间戳优先于物理吸附"""
+        """end 侧可靠词级时间戳优先于回缩吸附；start 侧只看能量不看置信度"""
         skeleton = [(0.0, 1.0), (1.3, 2.0)]
         event = SubtitleEvent(
             index=1,
@@ -218,9 +218,14 @@ class TestAcousticValidator:
         result, report = validator._physical_snap_validation(
             [event], skeleton, audio=None, sample_rate=16000,
         )
-        assert result[0].start == pytest.approx(1.15)
+        # end: 高置信词尾仍然豁免回缩
         assert result[0].end == pytest.approx(1.25)
-        assert report["skipped_high_confidence"] == 2
+        # start: 后向吸附只裁静音、不移动语音，无音频时仅允许 ≤30ms 的
+        # 结构性吸附；0.15s 差距无能量确认不吸附（2026-09-13 契约变更：
+        # start 侧不再做 reliable-boundary 豁免，ASR 词起点在换人/换句
+        # 边界普遍偏早，文本置信度不能为时间戳背书）
+        assert result[0].start == pytest.approx(1.15)
+        assert report["skipped_high_confidence"] == 1
 
     def test_end_shorten_requires_audio_confirmation(self, validator):
         """结束回缩需要局部静音证据"""
@@ -238,18 +243,80 @@ class TestAcousticValidator:
         assert result[0].end == pytest.approx(0.99, abs=0.01)
         assert report["snapped_ends"] == 1
 
-    def test_end_inside_speech_is_flagged_without_extension(self, validator):
-        """连续语音内部的疑似截尾只诊断，不自动延长"""
+    def test_end_inside_speech_is_extended_to_speech_end(self, validator):
+        """连续语音内部的截尾延长到该骨架段语音终点（2026-09-13 契约）"""
+        event = SubtitleEvent(index=1, start=0.2, end=0.9, text="Possible tail")
+        result, report = validator._physical_snap_validation(
+            [event], [(0.0, 1.0)], audio=None, sample_rate=16000,
+        )
+        assert result[0].end == pytest.approx(0.99)
+        assert report["ends_extended"] == 1
+        assert report["snapped_ends"] == 0
+
+    def test_end_inside_speech_extension_disabled(self):
+        """allow_end_extend=false 时退回旧行为：只标记不延长"""
+        validator = AcousticValidator(AcousticValidationConfig(
+            enabled=True,
+            allow_end_extend=False,
+            max_snap_distance=0.15,
+        ))
         event = SubtitleEvent(index=1, start=0.2, end=0.9, text="Possible tail")
         result, report = validator._physical_snap_validation(
             [event], [(0.0, 1.0)], audio=None, sample_rate=16000,
         )
         assert result[0].end == pytest.approx(0.9)
-        assert report["snapped_ends"] == 0
+        assert report["ends_extended"] == 0
         assert any(
             item["issue"] == "possible_truncation"
             for item in report["events_flagged"]
         )
+
+    def test_end_extension_clamped_by_next_event(self, validator):
+        """延长绝不吞下一句：候选终点钳制到下一事件 start 之前"""
+        a = SubtitleEvent(index=1, start=0.2, end=0.9, text="A")
+        b = SubtitleEvent(index=2, start=0.96, end=0.98, text="B")
+        result, report = validator._physical_snap_validation(
+            [a, b], [(0.0, 1.0)], audio=None, sample_rate=16000,
+        )
+        # a: candidate = min(1.0-0.01, 0.96-0.02) = 0.94 → 延长到 0.94
+        assert result[0].end == pytest.approx(0.94)
+        # b: end 离语音终点仅 20ms ≤ 最小修正门槛 20ms，不延长
+        assert result[1].end == pytest.approx(0.98)
+        assert report["ends_extended"] == 1
+
+    def test_start_snaps_forward_over_swallowed_silence(self, validator):
+        """start 吞并静音时后向吸附到真实语音起点（能量确认，2026-09-13 契约）"""
+        sample_rate = 16000
+        audio = np.zeros(sample_rate * 3, dtype=np.float32)
+        t = np.arange(sample_rate, dtype=np.float32) / sample_rate
+        audio[:sample_rate] = np.sin(2 * np.pi * 440 * t) * 0.5
+        audio[int(1.9 * sample_rate):int(2.5 * sample_rate)] = (
+            np.sin(2 * np.pi * 440 * t[:int(0.6 * sample_rate)]) * 0.5
+        )
+        event = SubtitleEvent(index=1, start=1.7, end=2.3, text="Late")
+        result, report = validator._physical_snap_validation(
+            [event], [(0.0, 1.0), (1.9, 2.5)], audio, sample_rate,
+        )
+        assert result[0].start == pytest.approx(1.92)
+        assert report["snapped_starts"] == 1
+
+    def test_start_snaps_forward_from_shared_boundary(self, validator):
+        """帧级衔接把 start 顶进上一句语音尾巴时，按能量判断仍后移"""
+        sample_rate = 16000
+        audio = np.zeros(sample_rate * 3, dtype=np.float32)
+        t = np.arange(sample_rate, dtype=np.float32) / sample_rate
+        audio[:sample_rate] = np.sin(2 * np.pi * 440 * t) * 0.5
+        audio[int(1.25 * sample_rate):int(2.0 * sample_rate)] = (
+            np.sin(2 * np.pi * 440 * t[:int(0.75 * sample_rate)]) * 0.5
+        )
+        # start=0.99 骑在上一句语音尾巴上（帧级无缝衔接的产物），
+        # 真实语音起点 1.25，吞并 260ms 静音
+        event = SubtitleEvent(index=1, start=0.99, end=1.9, text="Next")
+        result, report = validator._physical_snap_validation(
+            [event], [(0.0, 1.0), (1.25, 2.0)], audio, sample_rate,
+        )
+        assert result[0].start == pytest.approx(1.27)
+        assert report["snapped_starts"] == 1
 
     def test_physical_snap_end_truncation(self, validator, loud_audio):
         """切尾应被修正"""

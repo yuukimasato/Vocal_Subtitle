@@ -84,6 +84,57 @@ def normalize_event_text(
     return result
 
 
+def repair_cross_boundary_fragments(
+    events: Sequence[SubtitleEvent],
+    *,
+    max_fragment_chars: int = 4,
+    max_gap: float = 2.0,
+) -> tuple[list[SubtitleEvent], dict[str, Any]]:
+    """Move a trailing mid-sentence fragment to the head of the next event.
+
+    ASR/物理段边界可能切在一句活的话中间：上一条在最后一个句末标点之后
+    残留下一句的开头（"……打颤。 得" + "了吧。"）。该片段物理上属于
+    下一段语音，把它移回下一条开头（"……打颤。" + "得了吧。"），说话人
+    标注保持下一条自己的值不受影响。只移动文本，不改时间与条数；幂等：
+    移动后让渡条以句末标点收尾，重复运行不再触发。
+
+    整条都是残句（全文无句末标点）的情况刻意不处理——那需要声学证据，
+    纯文本启发式无法区分真正的短句（"好"）与残句。
+    """
+    result = list(events)
+    diagnostics: dict[str, Any] = {
+        "moved_fragment_count": 0,
+        "moved_fragments": [],
+    }
+    for index in range(len(result) - 1):
+        donor = result[index]
+        following = result[index + 1]
+        text = str(getattr(donor, "text", "") or "").strip()
+        cut = max(text.rfind(mark) for mark in ".!?！？。")
+        if cut < 0:
+            continue
+        fragment = text[cut + 1 :].strip()
+        if not fragment or not _has_content(fragment):
+            continue
+        if len(fragment.replace(" ", "")) > max_fragment_chars:
+            continue
+        # 片段内部含标点 → 它自身已是完整表达，不是下一句被截断的开头
+        if any(char in _PUNCTUATION for char in fragment):
+            continue
+        gap = float(getattr(following, "start", 0.0)) - float(
+            getattr(donor, "end", 0.0)
+        )
+        if gap < -0.03 or gap > max_gap:
+            continue
+        donor.text = text[: cut + 1].strip()
+        following.text = _append_text(
+            fragment, str(getattr(following, "text", "") or "")
+        )
+        diagnostics["moved_fragment_count"] += 1
+        diagnostics["moved_fragments"].append(fragment)
+    return result, diagnostics
+
+
 def repair_short_unknown_fragments(
     events: Sequence[SubtitleEvent],
     *,

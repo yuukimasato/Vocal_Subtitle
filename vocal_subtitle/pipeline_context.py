@@ -105,6 +105,13 @@ class PipelineContext:
     acoustic_skeleton: List[Tuple[float, float]] = field(default_factory=list)
     validation_report: dict = field(default_factory=dict)
 
+    # === [层1] 说话人身份主干(early_turns,2026-09-11 定案)产出 ===
+    # 全局 diarization 前置的全局时间轴 turns / 骨架×turns 原子跨度;
+    # early_turns=false(或全局 pass 失败)时保持为空,行为不变。
+    early_turns: List[Any] = field(default_factory=list)
+    early_turn_spans: List[Any] = field(default_factory=list)
+    early_turns_window_offset: float = 0.0
+
     # === 元信息 ===
     ffmpeg_unified_result: Optional[dict] = None
     diagnostics: List[str] = field(default_factory=list)

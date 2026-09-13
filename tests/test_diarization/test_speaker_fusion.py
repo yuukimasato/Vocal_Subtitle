@@ -198,3 +198,121 @@ def test_silent_embedding_windows_are_skipped():
 
     assert result.diagnostics["embedding_status"] == "failed"
     assert engine.calls == 0
+
+
+def test_fallback_cluster_assigns_speakers_when_embedding_unavailable():
+    """嵌入引擎缺失（未装 speechbrain）时回退 MFCC+音高聚类，不再全部 unknown。"""
+    audio = (
+        0.3 * np.sin(2 * np.pi * 220.0 * np.arange(3 * 16000) / 16000)
+    ).astype(np.float32)
+    events = [
+        SubtitleEvent(i + 1, i * 1.0, i * 1.0 + 0.9, f"第{i + 1}句")
+        for i in range(3)
+    ]
+    config = _config()
+    config.diarization.distance_threshold = 0.5
+    config.diarization.min_speakers = 1
+    config.diarization.max_speakers = 10
+
+    result = speaker_fusion.run_speaker_fusion(
+        events, audio, 16000, config,
+        embedding_engine=None, language="zh",
+    )
+
+    assert result.backend == "agglomerative"
+    assert result.status == "ok"
+    assert all(event.speaker_id == 0 for event in result.events)
+    assert all(event.speaker_label == "说话人A" for event in result.events)
+
+
+def test_fallback_label_defaults_to_english_without_language():
+    audio = (
+        0.3 * np.sin(2 * np.pi * 220.0 * np.arange(2 * 16000) / 16000)
+    ).astype(np.float32)
+    events = [SubtitleEvent(1, 0.0, 0.9, "hello")]
+
+    result = speaker_fusion.run_speaker_fusion(
+        events, audio, 16000, _config(), embedding_engine=None,
+    )
+
+    assert result.backend == "agglomerative"
+    assert result.events[0].speaker_label == "Speaker A"
+
+
+def test_fallback_skipped_on_silent_audio():
+    """全静音音频没有任何声学证据，回退不应凭空分配说话人。"""
+    events = [SubtitleEvent(1, 0.0, 1.0, "甲"), SubtitleEvent(2, 1.2, 2.0, "乙")]
+    config = _config()
+    config.speaker_embedding.enabled = False
+
+    result = speaker_fusion.run_speaker_fusion(
+        events, np.zeros(32000, dtype=np.float32), 16000, config,
+    )
+
+    assert result.backend == "unknown"
+    assert [item.speaker_id for item in result.events] == [None, None]
+
+
+def test_speaker_evidence_conflict_falls_back_to_global(monkeypatch):
+    """两线归属冲突时择优回退到全局线，不再置空（2026-09-13 契约）。
+
+    嵌入线是 3s 粗窗口聚类，短事件/跨 turn 事件频繁误标，是冲突的主要
+    来源；全局 diarization 是专门的"谁在何时说话"模型，证据更强。
+    """
+    audio = np.ones(4 * 16000, dtype=np.float32)
+    events = [
+        SubtitleEvent(1, 0.2, 1.8, "甲"),
+        SubtitleEvent(2, 2.2, 3.8, "乙"),
+    ]
+    global_result = DiarizationResult(
+        turns=[SpeakerTurn(0.0, 2.0, 0), SpeakerTurn(2.0, 4.0, 1)],
+        exclusive_turns=[SpeakerTurn(0.0, 2.0, 0), SpeakerTurn(2.0, 4.0, 1)],
+        speaker_count=2,
+        backend="pyannote-community-1",
+        status="ok",
+    )
+    monkeypatch.setattr(
+        speaker_fusion,
+        "_run_global_pass",
+        lambda audio, sample_rate, config: (
+            global_result,
+            "pyannote/speaker-diarization-community-1",
+            "ok",
+        ),
+    )
+    evidence = speaker_fusion.EmbeddingEvidence(
+        labels=[1, 0],
+        spans=[(0.0, 2.0), (2.0, 4.0)],
+        centroids={0: np.array([0.0, 1.0]), 1: np.array([1.0, 0.0])},
+        model="fake-ecapa",
+        silhouette=0.5,
+        status="ok",
+    )
+    monkeypatch.setattr(
+        speaker_fusion,
+        "_extract_embedding_evidence",
+        lambda *args, **kwargs: evidence,
+    )
+    monkeypatch.setattr(
+        speaker_fusion,
+        "_map_global_to_embedding",
+        lambda result, events, labels: {0: 0, 1: 1},
+    )
+
+    config = _config(global_model="community-1", local_refinement="off")
+    config.diarization.fusion_mode = "dual"
+
+    result = speaker_fusion.run_speaker_fusion(
+        events, audio, 16000, config, embedding_engine=_FakeEmbedding(),
+    )
+
+    # 事件0: 全局说 0、嵌入说 1 → 冲突 → 回退全局线（旧行为是置空）
+    # 事件1: 全局说 1、映射后 1、嵌入说 1 → fused
+    assert [item.speaker_id for item in result.events] == [0, 1]
+    assert [item.speaker_source for item in result.events] == [
+        "global_conflict_fallback",
+        "fused",
+    ]
+    assert result.conflict_count == 1
+    assert result.diagnostics["unknown_count"] == 0
+    assert all(item.speaker_label for item in result.events)

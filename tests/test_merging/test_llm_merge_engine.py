@@ -433,3 +433,59 @@ class TestLayoutSuggestions:
         suggestions = [{"group_id": 99, "line1": "X", "line2": "Y"}]
         result = apply_layout_suggestions(events, suggestions)
         assert result[0].text == "Test text"
+
+
+class TestSameSpeakerShortGapMerge:
+    """同说话人 + 短间隔合并（如"得|了吧"碎片）与 CJK 拼接"""
+
+    @pytest.fixture
+    def engine(self):
+        return LLMMergeEngine(MergeDecisionConfig(
+            fast_merge_max_gap=0.30,
+            llm_decision_min_gap=0.30,
+            llm_decision_max_gap=1.20,
+            hard_split_min_gap=1.20,
+            max_combined_duration=5.0,
+            llm_tier="rule_only",
+        ))
+
+    def test_chinese_fragments_merge_without_space(self, engine):
+        """同说话人 + 210ms 间隔 → 合并且 CJK 直接相连不加空格（用户实测案例）"""
+        fragments = [
+            {"id": 1, "start": 12.516, "end": 12.716, "text": "得", "speaker": "说话人A",
+             "gap_to_next_sec": 0.21, "gap_is_silent": True},
+            {"id": 2, "start": 12.926, "end": 13.126, "text": "了吧。", "speaker": "说话人A",
+             "gap_to_next_sec": None, "gap_is_silent": None},
+        ]
+        result = engine.merge(fragments)
+
+        assert len(result) == 1
+        assert result[0]["text"] == "得了吧。"
+        assert result[0]["start"] == pytest.approx(12.516)
+        assert result[0]["end"] == pytest.approx(13.126)
+
+    def test_latin_fragments_keep_space(self, engine):
+        """拉丁文本同说话人合并保持空格分隔"""
+        fragments = [
+            {"id": 1, "start": 0.0, "end": 1.0, "text": "hello", "speaker": "A",
+             "gap_to_next_sec": 0.25, "gap_is_silent": True},
+            {"id": 2, "start": 1.25, "end": 2.0, "text": "world", "speaker": "A",
+             "gap_to_next_sec": None, "gap_is_silent": None},
+        ]
+        result = engine.merge(fragments)
+
+        assert len(result) == 1
+        assert result[0]["text"] == "hello world"
+
+    def test_different_speaker_same_short_gap_not_merged(self, engine):
+        """同为 210ms 短间隔但说话人不同 → 不合并（防跨说话人粘连）"""
+        fragments = [
+            {"id": 1, "start": 12.516, "end": 12.716, "text": "得", "speaker": "说话人A",
+             "gap_to_next_sec": 0.21, "gap_is_silent": True},
+            {"id": 2, "start": 12.926, "end": 13.126, "text": "了吧。", "speaker": "说话人B",
+             "gap_to_next_sec": None, "gap_is_silent": None},
+        ]
+        result = engine.merge(fragments)
+
+        assert len(result) == 2
+        assert [item["text"] for item in result] == ["得", "了吧。"]

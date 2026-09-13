@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import math
 from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
@@ -9,7 +11,45 @@ import numpy as np
 from ..utils.audio_utils import AudioUtils
 
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_HARD_SILENCE_SECONDS = 0.4
+
+
+def adaptive_silence_threshold_db(
+    audio: Optional[np.ndarray],
+    sample_rate: int,
+    *,
+    enabled: bool = True,
+    fallback_db: float = -40.0,
+    margin_db: float = 10.0,
+    lower_bound_db: float = -45.0,
+    upper_bound_db: float = -30.0,
+) -> float:
+    """按音频噪声底自适应推导 silencedetect 阈值（dBFS）。
+
+    噪声底取底部 20% 帧 RMS 的中位数（AudioUtils.estimate_silence_rms），
+    阈值 = 噪声底 dB + margin_db，并钳制到 [lower_bound_db, upper_bound_db]
+    —— 与 reporting/noise_shadow 的建议策略保持一致（建议值同样只钳不放大）。
+    关闭、音频缺失或估计失败时返回 fallback_db 固定值。
+    """
+    if not enabled or audio is None:
+        return float(fallback_db)
+    try:
+        silence_rms = float(AudioUtils.estimate_silence_rms(audio, sample_rate))
+        if not math.isfinite(silence_rms) or silence_rms <= 1e-6:
+            return float(fallback_db)
+        floor_db = 20.0 * math.log10(min(1.0, silence_rms))
+        threshold = max(float(lower_bound_db), min(float(upper_bound_db), floor_db + margin_db))
+        logger.info(
+            "Adaptive skeleton threshold: noise_floor=%.1fdB -> threshold=%.1fdB "
+            "(margin=%.1fdB, fallback=%.1fdB)",
+            floor_db, threshold, margin_db, fallback_db,
+        )
+        return round(threshold, 1)
+    except Exception as exc:  # noqa: BLE001 - 阈值估计任何失败都回退固定值
+        logger.warning("Adaptive skeleton threshold failed, using %sdB: %s", fallback_db, exc)
+        return float(fallback_db)
 
 
 def group_speech_intervals(

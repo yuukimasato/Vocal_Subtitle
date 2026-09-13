@@ -198,7 +198,7 @@ class TestEndTimePrecision:
     # ------------------------------------------------------------------
 
     def test_acoustic_validator_snap_end_only_extends(self):
-        """吸附只在延长结束时间时才执行（方向保护）"""
+        """end 在连续语音内部 = 词尾时间戳偏早截尾，延长到语音终点（2026-09-13 契约）"""
         from vocal_subtitle.acoustic_validator import (
             AcousticValidationConfig,
             AcousticValidator,
@@ -211,7 +211,7 @@ class TestEndTimePrecision:
         )
         validator = AcousticValidator(cfg)
 
-        # 骨架语音段 0.0-2.0 → 字幕 end=1.5 在语音区内，不需要吸附
+        # 骨架语音段 0.0-2.0 → 字幕 end=1.5 在语音区内 = 截尾 0.5s
         skeleton = [(0.0, 2.0)]
         events = [
             SubtitleEvent(index=1, start=0.5, end=1.5, text="Inside speech"),
@@ -219,9 +219,10 @@ class TestEndTimePrecision:
         result, report = validator._physical_snap_validation(
             events, skeleton, audio=None, sample_rate=16000,
         )
-        # end 已在语音区内 → 不吸附，不缩短
+        # end 延长到语音终点 - margin（不走 snapped_ends 回缩计数）
         assert report["snapped_ends"] == 0
-        assert result[0].end == 1.5
+        assert report["ends_extended"] == 1
+        assert result[0].end == pytest.approx(2.0 - 0.003)
 
     def test_acoustic_validator_snap_end_protection(self):
         """吸附候选短于当前 end 时不执行（防止反向缩短）"""

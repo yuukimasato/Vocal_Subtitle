@@ -18,6 +18,7 @@ from typing import List, Optional, Tuple
 
 from .time_mapper import SubtitleEvent
 from .event_ops import can_merge_events, merge_event_group
+from ..utils.text_utils import smart_join_texts
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ class SubtitleBuilder:
                 if allowed:
                     merged[-1] = merge_event_group(
                         [prev, event],
-                        text=prev.text + " " + event.text,
+                        text=smart_join_texts([prev.text, event.text]),
                         reason="short_event_duration",
                         new_index=prev.index,
                     )

@@ -458,12 +458,38 @@ class LocalRecoveryEngine:
 def make_recovery_requests_from_coverage(
     recovery_ranges: Sequence[Any],
     reason: str = "uncovered",
+    *,
+    turns: Optional[Sequence[Any]] = None,
 ) -> List[LocalRecoveryRequest]:
-    """从物理覆盖率审计的 recovery_ranges 构建请求。"""
+    """从物理覆盖率审计的 recovery_ranges 构建请求。
+
+    turns 提供时(时间轴仲裁层 R3 联动):空洞区间与换人边界相交,或
+    审计侧已标 possible_speaker_hole 的区间,请求会携带
+    ``possible_speaker_hole`` 元数据,提示空洞可能是 B 话轮被 A 事件
+    吞掉。turns=None 时行为与现状一致。
+    """
+    from ..physical.coverage import (
+        hole_intersects_speaker_change,
+        speaker_change_boundaries,
+    )
+
+    boundaries = speaker_change_boundaries(turns) if turns else []
     requests = []
     for rec_range in recovery_ranges:
         start = float(getattr(rec_range, "start", 0.0))
         end = float(getattr(rec_range, "end", 0.0))
         if end > start:
-            requests.append(LocalRecoveryRequest(start=start, end=end, reasons=[reason]))
+            metadata: Dict[str, Any] = {}
+            flagged = bool(getattr(rec_range, "possible_speaker_hole", False))
+            if not flagged and boundaries and hole_intersects_speaker_change(
+                start, end, boundaries,
+            ):
+                flagged = True
+            if flagged:
+                metadata["possible_speaker_hole"] = True
+            requests.append(
+                LocalRecoveryRequest(
+                    start=start, end=end, reasons=[reason], metadata=metadata,
+                )
+            )
     return requests

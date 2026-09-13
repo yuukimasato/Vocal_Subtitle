@@ -129,14 +129,14 @@ pipeline:
   #   本地 NLP 无法裁决的   → 自动升级到云端 LLM
   #  云端 LLM 不可用时       → 自动降级到规则模式
   merge_decision:
-    fast_merge_max_gap: 0.20        # <200ms: 规则强制合并
-    llm_decision_min_gap: 0.20      # 200-1200ms: LLM 决策区间
+    fast_merge_max_gap: 0.30        # <300ms: 规则强制合并（同说话人+短间隔，如"得|了吧"）
+    llm_decision_min_gap: 0.30      # 300-1200ms: LLM 决策区间
     llm_decision_max_gap: 1.20
     hard_split_min_gap: 1.20        # >1200ms: 强制不合并
     max_combined_duration: 5.0
     min_fragment_duration: 0.15
     # 渐进降级间隙范围（降本策略，无需本地 GPU）
-    local_nlp_gap_range: [0.15, 0.60]  # [0.15, 0.60]：本地 NLP 优先（CPU，零成本）
+    local_nlp_gap_range: [0.30, 0.60]  # 本地 NLP 优先（CPU，零成本）
     cloud_llm_gap_range: [0.60, 1.20]  # [0.60, 1.20]：云端 LLM 裁决（仅此范围走 API）
     llm_tier: "cascading"           # cascading(推荐) | all_llm | rule_only
     llm_model: "deepseek-v4-pro"    # 云端模型（需配置 base_url + api_key）
@@ -160,7 +160,9 @@ pipeline:
   # 方案七：全局声学标尺校验
   acoustic_validation:
     enabled: true
-    skeleton_noise_db: -40.0        # 骨架提取阈值（敏感模式）
+    skeleton_noise_db: -40.0        # 骨架提取阈值（自适应关闭/估计失败时的回退值）
+    skeleton_adaptive_noise_db: true # ★ 自适应阈值：噪声底dB+余量，钳制[-45,-30]（noise-shadow 同策略）
+    skeleton_noise_margin_db: 10.0   # 自适应余量：阈值 = 噪声底dB + 10
     skeleton_min_silence: 0.1
     skeleton_min_speech: 0.05
     max_snap_distance: 0.15         # ★ 吸附距离从250ms降至150ms
@@ -172,8 +174,18 @@ pipeline:
     flag_threshold_ms: 200          # >200ms 偏差标记为需复核
     unified_ffmpeg_pass: true       # 与方案一共用 ffmpeg 调用
     skeleton_mode: true             # 骨架分段独立处理模式（默认开启）
+    reproject_grouped_windows: true # ★ 聚合窗口结果钳制回物理骨架段（恢复端点静音对齐）
+    member_split_min_gap: 0.3       # ★ 成员间隙<0.3s视为句内微停顿不拆文本（呼吸/强调停顿保持整行）
+    member_split_max_duration: 5.0  # ★ 聚合组超过5s即使微停顿也要在成员间隙处拆分（兜底防整段长字幕）
     allow_end_shorten: true         # ★ 允许声学标尺缩短结束时间（双向修正）
     allow_start_pull_earlier: true  # ★ 允许声学标尺将 start 向前吸附
+    allow_end_extend: true          # ★ 截尾修复：end 落在连续语音骨架段内时延长到该段语音终点（钳制到下一句 start 之前，绝不吞下一句）
+    max_start_snap_distance: 0.45   # ★ 吞静音修复：start 后向吸附限幅（ASR 词起点在换人/换句边界普遍偏早 200~300ms，需能量确认）
+    # 时间轴仲裁层（2026-09-11 定案，层2）：R1共识/R2盲区/R3空洞三规则表
+    timeline_arbitration: false     # 置 true 启用三规则仲裁（回退：改回 false）
+    arbitration_r1_min_overlap_chars: 6   # R1 整段信骨架所需最小一致字符数
+    arbitration_r1_min_similarity: 0.85   # R1 共识判定的最小字符重合率
+    arbitration_r2_local_noise: true      # R2 能量确认用局部噪声画像（防音乐残留误确认）
 
   # Stage 3.5: 说话人分离
   diarization:
@@ -193,6 +205,11 @@ pipeline:
     local_context_seconds: 0.6
     min_local_segment_seconds: 0.25
     min_change_confidence: 0.70
+    # 说话人身份主干（2026-09-11 定案，层1）：turns 前置 + 词级后切分
+    early_turns: true               # ★ 灰度开启：turns 前置进 ctx（回退：改回 false 即回到后处理聚类）
+    word_split_on_turn: false       # ★ 词级后切分：2026-09-13 双人素材实测——无词级时间戳的合并事件走 fallback 拆分会把整段文本压进
+                                    #   首个说话人小片段（60ms 塞 12 字），需先修 unworded 事件的词表传递后再开启
+    single_speaker_shortcut: true   # 单说话人素材（TTS/口播）自动短路
     # expected_speakers: null                # 自动推断说话人数
 
   # Stage 4: ASR 识别
@@ -355,3 +372,8 @@ logging:
   level: "INFO"
   format: "json"              # json | console
   file: "logs/pipeline.log"
+
+# 反馈学习（全部可选，缺省见 FeedbackConfig）
+feedback:
+  journal_sink_retention: "archive"  # ingest 消费成功后 sink 源文件处理：archive=归档到 consumed/ | delete=直接删除
+  journal_sink_ttl_days: 30          # 未消费 sink 文件 TTL 兜底清理（天；<=0 禁用清理）

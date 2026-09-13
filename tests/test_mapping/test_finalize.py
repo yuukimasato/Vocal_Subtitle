@@ -10,6 +10,7 @@ from vocal_subtitle.mapping.finalize import (
     _validate_input_events,
     _events_to_semantic_groups,
 )
+from vocal_subtitle.mapping.strict_segmenter import repair_cross_boundary_fragments
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 from vocal_subtitle.asr.base import WordTimestamp
 
@@ -221,3 +222,128 @@ def test_finalize_does_not_merge_short_events_across_physical_bins():
 
     assert [item.text for item in result.events] == ["第一句", "第二句"]
     assert [item.physical_bin_id for item in result.events] == ["bin-a", "bin-b"]
+
+
+# ── repair_cross_boundary_fragments ──────────────────────────────────
+
+def test_repair_moves_trailing_fragment_to_next_event():
+    """ASR 段边界切在句中：上一条尾部的残句片段移交给下一条开头。"""
+    events = [
+        _make_event(1, 10.986, 12.579, "我脚底板现在还在打颤。 得", speaker_id=0),
+        _make_event(2, 12.926, 13.126, "了吧。", speaker_id=0),
+    ]
+
+    result, diag = repair_cross_boundary_fragments(events)
+
+    assert [item.text for item in result] == [
+        "我脚底板现在还在打颤。",
+        "得了吧。",
+    ]
+    assert diag["moved_fragment_count"] == 1
+    assert diag["moved_fragments"] == ["得"]
+
+
+def test_repair_keeps_next_event_speaker_and_timing():
+    events = [
+        _make_event(1, 10.986, 12.579, "我脚底板现在还在打颤。 得", speaker_id=0),
+        _make_event(2, 12.926, 13.126, "了吧。", speaker_id=1),
+    ]
+
+    result, _diag = repair_cross_boundary_fragments(events)
+
+    assert result[1].speaker_id == 1
+    assert (result[0].start, result[0].end) == (10.986, 12.579)
+    assert (result[1].start, result[1].end) == (12.926, 13.126)
+
+
+def test_repair_is_idempotent():
+    events = [
+        _make_event(1, 0.0, 2.0, "今天天气不错。 我"),
+        _make_event(2, 2.2, 3.5, "们去爬山。"),
+    ]
+
+    first, diag = repair_cross_boundary_fragments(events)
+    second, diag2 = repair_cross_boundary_fragments(first)
+
+    assert [item.text for item in first] == ["今天天气不错。", "我们去爬山。"]
+    assert [item.text for item in second] == [item.text for item in first]
+    assert diag2["moved_fragment_count"] == 0
+
+
+def test_repair_skips_when_no_sentence_mark():
+    events = [
+        _make_event(1, 0.0, 2.0, "还没有说完的话"),
+        _make_event(2, 2.2, 3.5, "下一句。"),
+    ]
+
+    _result, diag = repair_cross_boundary_fragments(events)
+
+    assert diag["moved_fragment_count"] == 0
+
+
+def test_repair_skips_long_fragment():
+    events = [
+        _make_event(1, 0.0, 2.0, "第一句完了。 这一整句都留在上一条里"),
+        _make_event(2, 2.2, 3.5, "下一句。"),
+    ]
+
+    result, diag = repair_cross_boundary_fragments(events)
+
+    assert diag["moved_fragment_count"] == 0
+    assert result[0].text == "第一句完了。 这一整句都留在上一条里"
+
+
+def test_repair_skips_self_contained_fragment_with_punctuation():
+    """片段自带结束标点（如“谢谢!”）时是完整表达，保留在原条。"""
+    events = [
+        _make_event(1, 0.0, 2.0, "第一句完了。 谢谢!"),
+        _make_event(2, 2.2, 3.5, "明天见。"),
+    ]
+
+    result, diag = repair_cross_boundary_fragments(events)
+
+    assert diag["moved_fragment_count"] == 0
+    assert result[0].text == "第一句完了。 谢谢!"
+    assert result[1].text == "明天见。"
+
+
+def test_repair_skips_when_gap_too_large():
+    events = [
+        _make_event(1, 0.0, 2.0, "第一句完了。 得"),
+        _make_event(2, 6.0, 7.0, "了吧。"),
+    ]
+
+    result, diag = repair_cross_boundary_fragments(events)
+
+    assert diag["moved_fragment_count"] == 0
+    assert result[0].text == "第一句完了。 得"
+
+
+def test_repair_leaves_last_event_fragment_alone():
+    events = [
+        _make_event(1, 0.0, 2.0, "前面的话。"),
+        _make_event(2, 2.2, 3.5, "最后一句。 收"),
+    ]
+
+    result, diag = repair_cross_boundary_fragments(events)
+
+    assert diag["moved_fragment_count"] == 0
+    assert result[1].text == "最后一句。 收"
+
+
+def test_finalize_repairs_cross_boundary_spillover():
+    """finalize 集成：串句修复后条数不变、文本连贯、诊断有记录。"""
+    events = [
+        _make_event(1, 10.986, 12.579, "我脚底板现在还在打颤。 得", speaker_id=0),
+        _make_event(2, 12.926, 13.126, "了吧。", speaker_id=0),
+    ]
+
+    result = finalize_subtitle_events(events)
+
+    assert result.subtitle_count == 2
+    assert [item.text for item in result.events] == [
+        "我脚底板现在还在打颤。",
+        "得了吧。",
+    ]
+    assert result.diagnostics["cross_boundary_fragments"]["moved_fragment_count"] == 1
+    assert "repair_cross_boundary_fragments" in result.diagnostics["step"]

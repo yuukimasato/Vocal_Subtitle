@@ -118,6 +118,15 @@ def finalize_subtitle_events(
     diagnostics["strict_segmentation"] = strict_result.diagnostics
     diagnostics["step"].append("strict_segmentation")
 
+    # Cross-cue sentence spillover repair runs before the short-event merges:
+    # a complete sentence merged into a donor would look like a trailing
+    # fragment and get moved to an unrelated third event.
+    from .strict_segmenter import repair_cross_boundary_fragments
+
+    valid_events, fragment_diag = repair_cross_boundary_fragments(valid_events)
+    diagnostics["cross_boundary_fragments"] = fragment_diag
+    diagnostics["step"].append("repair_cross_boundary_fragments")
+
     # Merge word-level fragments back to sentence-level subtitles after
     # strict segmentation. The splitter's _split_long_events does NOT
     # merge short events — it only splits over-long ones — so this step

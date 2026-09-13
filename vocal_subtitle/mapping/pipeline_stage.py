@@ -193,8 +193,35 @@ class PipelineMappingMixin:
                     meta["next_speaker"] = next_label
                 event_metadata[idx_str] = meta
 
-            # Use the SubtitleOptimizer wrapper with enhanced validation
-            optimizer = self._build_safe_optimizer(llm_cfg)
+            # 进度回调：每批优化完成后向 UI 推送绝对进度。
+            # 注意回调在 worker 线程中执行，抛异常会导致该批次被
+            # optimizer 静默回退原文，因此内部自行兜底。
+            import threading
+
+            progress = getattr(self, "_progress", None)
+            total_chunks = max(
+                1, -(-len(subtitle_dict) // max(1, llm_cfg.batch_num))
+            )
+            lock = threading.Lock()
+            done = {"chunks": 0}
+
+            def _on_chunk_optimized(_batch_result):
+                if progress is None:
+                    return
+                with lock:
+                    done["chunks"] += 1
+                    current = done["chunks"]
+                try:
+                    progress.report_progress(
+                        current, total_chunks,
+                        {"detail": f"LLM 优化批次 {current}/{total_chunks}"},
+                    )
+                except Exception:
+                    logger.debug("LLM progress report failed", exc_info=True)
+
+            optimizer = self._build_safe_optimizer(
+                llm_cfg, update_callback=_on_chunk_optimized,
+            )
 
             optimized = optimizer.optimize(subtitle_dict, event_metadata)
 

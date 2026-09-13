@@ -141,8 +141,9 @@ class DataVersionManager:
     def _ensure_d0_seeded(self) -> None:
         """首次运行时自动登记 D0 基线版本。
 
-        D0-20260802-001: 对应 DATA_ASSETS.md 登记的 13 个音频样本 +
-        test/quality_manifest.yaml 的 10 个场景。
+        D0-20260802-001: 对应 DATA_ASSETS.md（docs/20260802/）登记的 13 个音频样本。
+        原始评估清单 test/quality_manifest.yaml 已随 8 月 4 日快照整理移除，
+        10 个场景定义见 DATA_ASSETS.md 归档说明。
         """
         if self._registry.get("D0", {}):
             return  # 已存在 D0 记录
@@ -162,7 +163,7 @@ class DataVersionManager:
             ("D0-007", "test/TTS中文朗读测试-双人.wav", 157.93, "zh", 2),
             ("D0-008", "test/简单三步就能复刻巧乐兹？-人声.wav", 216.23, "zh", 1),
             ("D0-009", "test/Grow Up Show ～向日葵馬戲團-4min-人声.wav", 249.30, "zh", 2),
-            ("D0-010", "test/40011894204-1-192--英语多人.mp3", 46.34, "en", 2),
+            ("D0-010", "test/40011894204-1-192--英语多人.wav", 46.34, "en", 2),
             ("D0-011", "test/20260428_214253_0043_KyGLgfKX.wav", 5.84, "zh", 1),
             ("D0-G01", "test/golden/non_speech_tone.wav", 4.00, "none", 0),
             ("D0-G02", "test/golden/repeated_phrase_me.wav", 2.80, "zh", 1),

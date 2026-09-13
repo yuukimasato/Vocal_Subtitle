@@ -11,7 +11,13 @@ import numpy as np
 from ..asr.base import ASRInvalidResultError
 from ..asr.contracts import ASRRuntimePorts, SegmentedASRRequest
 from ..asr.segmented_path import SegmentedASRService
-from ..acoustic.skeleton import group_speech_intervals
+from ..acoustic.skeleton import adaptive_silence_threshold_db, group_speech_intervals
+from ..diarization.early_turns import (
+    dominant_span_speaker,
+    dominant_speaker_at,
+    spans_from_skeleton,
+)
+from .member_projection import reproject_events_to_members
 from ..mapping.time_mapper import SubtitleEvent
 from ..pipeline_context import NoiseProfile, PipelineContext
 from ..utils.audio_utils import AudioUtils
@@ -159,6 +165,140 @@ class PipelineChunkMixin:
         except Exception:
             pass  # 非致命操作
 
+    # ------------------------------------------------------------------
+    # [层1] 说话人身份主干（early_turns，2026-09-11 定案）
+    # ------------------------------------------------------------------
+
+    def _attach_early_turns_context(self, ctx: PipelineContext, time_offset: float) -> None:
+        """把前置全局 turns / 骨架×turns 跨度注入窗口 ctx。
+
+        early_turns 未生效（关闭或全局 pass 失败）时不做任何事，
+        ctx 字段保持为空，全链路与现状一致。
+        """
+        state = getattr(self, "_early_turns_state", None)
+        if state is None or not state.active:
+            return
+        ctx.early_turns = list(state.turns)
+        ctx.early_turn_spans = list(getattr(self, "_early_turn_spans", []) or [])
+        ctx.early_turns_window_offset = float(time_offset or 0.0)
+        ctx.add_diagnostic(
+            f"Early turns: status={state.status}, "
+            f"global_turn_count={len(ctx.early_turns)}, "
+            f"span_count={len(ctx.early_turn_spans)}, "
+            f"window_offset={ctx.early_turns_window_offset:.2f}s"
+        )
+
+    def _early_speaker_ids_for_segments(
+        self,
+        segments: List[Any],
+        ctx: PipelineContext,
+        duration: float,
+    ) -> List[Optional[int]]:
+        """从 ctx 的全局 turns/spans 推导每个 ASR 段的说话人。
+
+        - 有骨架×turns 跨度（spans）时优先按跨度取主覆盖身份；
+        - 否则按全局 turns 直接求主覆盖说话人（turns/spans 均为全局
+          时间轴坐标，段坐标加 ``early_turns_window_offset`` 还原）；
+        - 无覆盖返回 None（无信息，合并检查按"安全合并"处理）；
+        - early_turns 未生效时返回空列表 → 行为与现状一致。
+        """
+        if not getattr(ctx, "early_turns", None):
+            return []
+        offset = float(getattr(ctx, "early_turns_window_offset", 0.0) or 0.0)
+        spans = list(getattr(ctx, "early_turn_spans", []) or [])
+        speaker_ids: List[Optional[int]] = []
+        for seg in segments:
+            start = float(seg.start) + offset
+            end = float(seg.end) + offset
+            if spans:
+                speaker_ids.append(dominant_span_speaker(spans, start, end))
+            else:
+                speaker_ids.append(dominant_speaker_at(ctx.early_turns, start, end))
+        return speaker_ids
+
+    def _filter_tiny_fragments(
+        self,
+        merged_segments: List[Any],
+        asr_results: List[Any],
+        speaker_ids: List[Optional[int]],
+        prefix: str = "",
+    ) -> Tuple[List[Any], List[Any], List[Optional[int]]]:
+        """过滤超短内容片段（编号碎片如 "1." "2."），合并到下一段。
+
+        ★ 说话人安全检查：仅当碎片与下一段属于同一说话人（或说话人
+        信息不可用）时才合并。early_turns 生效时 speaker_ids 来自全局
+        turns/spans，"不同说话人的碎片保留为独立段"分支真正生效，
+        避免将说话人 A 的内容错标给说话人 B；speaker_ids 为空时保持
+        "无信息 → 安全合并"的现状行为。
+        """
+        import re
+        _meaningful_pattern = re.compile(r'[A-Za-z一-鿿㐀-䶿]')
+        if len(merged_segments) <= 1 or len(asr_results) != len(merged_segments):
+            return merged_segments, asr_results, speaker_ids
+        filtered_segments = []
+        filtered_asr = []
+        filtered_speaker_ids = []
+        for i in range(len(merged_segments)):
+            seg = merged_segments[i]
+            asr = asr_results[i]
+            text = " ".join(ts.text for ts in asr).strip()
+            meaningful = len(_meaningful_pattern.findall(text))
+
+            # 检查是否可以安全合并：说话人相同或信息不可用
+            can_merge = False
+            if meaningful < 3 and i + 1 < len(merged_segments):
+                if speaker_ids and i < len(speaker_ids) and i + 1 < len(speaker_ids):
+                    # 有说话人信息 → 仅当同一说话人时合并
+                    # （None 表示 turn 未覆盖：None == 已知为 False → 保守
+                    #   不合并；None == None → 无冲突可合并）
+                    if speaker_ids[i] == speaker_ids[i + 1]:
+                        can_merge = True
+                    else:
+                        logger.debug(
+                            "%sTiny fragment speaker mismatch: "
+                            "'%.40s' (spk=%s) vs next (spk=%s) — keeping separate",
+                            prefix, text, speaker_ids[i], speaker_ids[i + 1],
+                        )
+                else:
+                    # 无说话人信息 → 安全合并
+                    can_merge = True
+
+            if can_merge:
+                # 超短内容碎片：合并到下一段（原地修改，下一轮迭代正常处理）
+                next_seg = merged_segments[i + 1]
+                next_asr = asr_results[i + 1]
+                merged_segments[i + 1] = type(next_seg)(
+                    start=seg.start,
+                    end=next_seg.end,
+                    confidence=next_seg.confidence,
+                )
+                asr_results[i + 1] = asr + next_asr
+                # speaker 继承下一段的值（同一说话人，无需修改）
+                logger.debug(
+                    "%sFiltered tiny fragment: '%.40s' (%.2fs-%.2fs) → "
+                    "merged into next segment (same speaker)",
+                    prefix, text, seg.start, seg.end,
+                )
+                # 跳过当前段（不追加到 filtered），下一轮迭代处理合并后的段
+                continue
+
+            filtered_segments.append(seg)
+            filtered_asr.append(asr)
+            if speaker_ids and i < len(speaker_ids):
+                filtered_speaker_ids.append(speaker_ids[i])
+
+        if len(filtered_segments) < len(merged_segments):
+            logger.info(
+                "%sFiltered %d tiny fragments (numbered-list artifacts)",
+                prefix, len(merged_segments) - len(filtered_segments),
+            )
+            return (
+                filtered_segments,
+                filtered_asr,
+                filtered_speaker_ids if filtered_speaker_ids else speaker_ids,
+            )
+        return merged_segments, asr_results, speaker_ids
+
     def _process_chunk_pipeline(
         self,
         audio: np.ndarray,
@@ -167,6 +307,7 @@ class PipelineChunkMixin:
         chunk_label: str = "",
         parallel_vad: bool = True,
         run_asr: bool = True,
+        time_offset: float = 0.0,
     ) -> tuple:
         """处理单个音频块的完整管线 (VAD → Merge → ASR → Refine → Mapping)
 
@@ -181,6 +322,8 @@ class PipelineChunkMixin:
             parallel_vad: 是否用 ThreadPoolExecutor 并行执行 Silero + ffmpeg VAD。
                           骨架分段/多块/流式等嵌套线程场景应设为 False，
                           避免 PyTorch 推理与 ThreadPoolExecutor 的三层嵌套死锁。
+            time_offset: 本块在全局时间轴中的起点（秒）。[层1] early_turns
+                         生效时用于把全局 turns/spans 对齐到本块局部时间轴。
 
         Returns:
             (events: List[SubtitleEvent], segment_count: int, ctx: PipelineContext)
@@ -195,6 +338,8 @@ class PipelineChunkMixin:
             audio=audio,
             sample_rate=sample_rate,
         )
+        # ---- [层1] early_turns:身份主干上下文注入 ----
+        self._attach_early_turns_context(ctx, time_offset)
 
         # ---- 前置降噪（可选，5.12.1） ----
         if self.config.noise_reduction.enabled:
@@ -327,9 +472,14 @@ class PipelineChunkMixin:
         self._progress.finish_stage()
 
         # ---- Stage 3.5: 说话人分离 ----
-        # 段级 diarization 已废弃，改用事件级聚类（见 Stage 5.1）。
-        # 保留空 speaker_ids 使下游文本降级/碎片过滤正确跳过。
-        speaker_ids: List[int] = []
+        # 段级 diarization 已废弃。speaker_ids 现有两个来源：
+        # 1) [层1] early_turns 生效时，从 ctx 的全局 turns/spans 推导
+        #    （tiny-fragment 合并的说话人安全检查据此生效）；
+        # 2) 否则保持空列表，下游碎片过滤按"无信息 → 安全合并"跳过，
+        #    说话人标签由后处理统一注入（现状行为）。
+        speaker_ids: List[Optional[int]] = self._early_speaker_ids_for_segments(
+            merged_segments, ctx, chunk_duration,
+        )
 
         # ---- Stage 4: ASR 识别 ----
         self._progress.start_stage(
@@ -349,72 +499,10 @@ class PipelineChunkMixin:
         # ---- 过滤超短内容片段（编号碎片如 "1." "2."） ----
         # 激进的预切分可能把编号/列表标记切成独立段（<3 个有效字符）。
         # 将它们合并到下一段，避免字幕中出现孤立的 "1." "2."
-        #
-        # ★ 说话人安全检查：仅当碎片与下一段属于同一说话人（或说话人
-        #    信息不可用）时才合并。不同说话人的碎片保留为独立段，
-        #    避免将说话人 A 的内容错标给说话人 B。
-        import re
-        _meaningful_pattern = re.compile(r'[A-Za-z一-鿿㐀-䶿]')
-        if len(merged_segments) > 1 and len(asr_results) == len(merged_segments):
-            filtered_segments = []
-            filtered_asr = []
-            filtered_speaker_ids = []
-            for i in range(len(merged_segments)):
-                seg = merged_segments[i]
-                asr = asr_results[i]
-                text = " ".join(ts.text for ts in asr).strip()
-                meaningful = len(_meaningful_pattern.findall(text))
-
-                # 检查是否可以安全合并：说话人相同或信息不可用
-                can_merge = False
-                if meaningful < 3 and i + 1 < len(merged_segments):
-                    if speaker_ids and i < len(speaker_ids) and i + 1 < len(speaker_ids):
-                        # 有说话人信息 → 仅当同一说话人时合并
-                        if speaker_ids[i] == speaker_ids[i + 1]:
-                            can_merge = True
-                        else:
-                            logger.debug(
-                                "%sTiny fragment speaker mismatch: "
-                                "'%.40s' (spk=%d) vs next (spk=%d) — keeping separate",
-                                prefix, text, speaker_ids[i], speaker_ids[i + 1],
-                            )
-                    else:
-                        # 无说话人信息 → 安全合并
-                        can_merge = True
-
-                if can_merge:
-                    # 超短内容碎片：合并到下一段（原地修改，下一轮迭代正常处理）
-                    next_seg = merged_segments[i + 1]
-                    next_asr = asr_results[i + 1]
-                    merged_segments[i + 1] = type(next_seg)(
-                        start=seg.start,
-                        end=next_seg.end,
-                        confidence=next_seg.confidence,
-                    )
-                    asr_results[i + 1] = asr + next_asr
-                    # speaker 继承下一段的值（同一说话人，无需修改）
-                    logger.debug(
-                        "%sFiltered tiny fragment: '%.40s' (%.2fs-%.2fs) → "
-                        "merged into next segment (same speaker)",
-                        prefix, text, seg.start, seg.end,
-                    )
-                    # 跳过当前段（不追加到 filtered），下一轮迭代处理合并后的段
-                    continue
-
-                filtered_segments.append(seg)
-                filtered_asr.append(asr)
-                if speaker_ids and i < len(speaker_ids):
-                    filtered_speaker_ids.append(speaker_ids[i])
-
-            if len(filtered_segments) < len(merged_segments):
-                logger.info(
-                    "%sFiltered %d tiny fragments (numbered-list artifacts)",
-                    prefix, len(merged_segments) - len(filtered_segments),
-                )
-                merged_segments = filtered_segments
-                asr_results = filtered_asr
-                if filtered_speaker_ids:
-                    speaker_ids = filtered_speaker_ids
+        # （说话人安全检查见 _filter_tiny_fragments）。
+        merged_segments, asr_results, speaker_ids = self._filter_tiny_fragments(
+            merged_segments, asr_results, speaker_ids, prefix=prefix,
+        )
 
         # ---- Stage 4.5: ASR 边界双向精修（方案四） ----
         if self.config.boundary_refinement.enabled:
@@ -542,7 +630,13 @@ class PipelineChunkMixin:
         from ..vad.ffmpeg_vad import unified_ffmpeg_pass
 
         cfg = self.config.acoustic_validation
-        skeleton_noise_db = cfg.skeleton_noise_db
+        skeleton_noise_db = adaptive_silence_threshold_db(
+            audio,
+            sample_rate,
+            enabled=cfg.skeleton_adaptive_noise_db,
+            fallback_db=cfg.skeleton_noise_db,
+            margin_db=cfg.skeleton_noise_margin_db,
+        )
         skeleton_min_silence = cfg.skeleton_min_silence
         min_speech_duration = cfg.skeleton_min_speech
 
@@ -606,6 +700,26 @@ class PipelineChunkMixin:
                 len(speech_skeleton), len(asr_skeleton),
             )
 
+        # ---- [层1] 骨架区间 × 全局 turns 求交（reconcile_regions 接线） ----
+        # 物理骨架只产时间区间；speaker identity 一律来自前置全局 turns。
+        # 相邻且同 speaker 的跨度合并，不同 speaker 永不合并；结果存入
+        # 窗口 ctx（_attach_early_turns_context），供 tiny-fragment 硬约束
+        # 与后续时间轴仲裁层（P3）复用。
+        if self._early_turns_active():
+            self._early_turn_spans = spans_from_skeleton(
+                speech_skeleton,
+                self._early_turns_state.turns,
+                duration=total_duration,
+            )
+            logger.info(
+                "Early turns reconcile: %d physical segments × %d global turns "
+                "→ %d speaker spans",
+                len(speech_skeleton), len(self._early_turns_state.turns),
+                len(self._early_turn_spans),
+            )
+        else:
+            self._early_turn_spans = []
+
         # Step 2: 先用带上下文的 ASR 窗口处理；若一个聚合窗口失败，
         # 只回退该窗口包含的原始物理段，避免扩大失败范围或跨硬静音重试。
         all_events: List[Any] = []
@@ -613,6 +727,7 @@ class PipelineChunkMixin:
 
         # ★ 跨段说话人偏移量（同多块路径）：每个骨架段独立运行 diarization，
         # 从 0 开始编号。为防止不同段的 "说话人0" 混淆，累加偏移量。
+        # [层1] early_turns 生效时标签来自全局 turns（全局唯一），无需偏移。
         speaker_offset = 0
         empty_asr_segments = 0
         first_empty_asr_error: Optional[Exception] = None
@@ -707,6 +822,7 @@ class PipelineChunkMixin:
                             vocals_path=tmp_path,
                             chunk_label=chunk_label,
                             parallel_vad=False,  # 骨架分段嵌套线程，避免 PyTorch 死锁
+                            time_offset=seg_start,
                         )
                     except ASRInvalidResultError as exc:
                         empty_asr_segments += 1
@@ -721,22 +837,59 @@ class PipelineChunkMixin:
                 finally:
                     tmp_path.unlink(missing_ok=True)
 
+                # 聚合窗口的 ASR 上下文不能改变物理时间契约：把结果投影
+                # 回原始物理成员段（在成员静音间隙处按词拆分、端点钳制到
+                # 骨架边界），恢复 v0.2.0 逐段切片的端点静音对齐精度。
+                if (
+                    attempt_index == 0
+                    and len(window_members) > 1
+                    and self.config.acoustic_validation.reproject_grouped_windows
+                ):
+                    local_members = [
+                        (member_start - seg_start, member_end - seg_start)
+                        for member_start, member_end in window_members
+                    ]
+                    seg_events, projection_stats = reproject_events_to_members(
+                        seg_events, local_members,
+                        split_min_gap=self.config.acoustic_validation.member_split_min_gap,
+                        max_duration=self.config.acoustic_validation.member_split_max_duration,
+                    )
+                    if any((
+                        projection_stats.split_events,
+                        projection_stats.clamped_events,
+                        projection_stats.dropped_events,
+                    )):
+                        logger.info(
+                            "%s member reprojection: %s",
+                            chunk_label,
+                            projection_stats.as_dict(),
+                        )
+                    if not seg_events:
+                        logger.warning(
+                            "%s all events dropped by member reprojection; "
+                            "retrying with physical member slices",
+                            chunk_label,
+                        )
+                        continue
+
                 window_succeeded = True
                 if attempt_index > 0:
                     grouped_window_fallbacks += 1
 
-                # ★ 跨段 speaker_id 偏移（同多块路径）
-                seg_speakers = set()
-                for evt in seg_events:
-                    if evt.speaker_id is not None:
-                        seg_speakers.add(evt.speaker_id)
-                if seg_speakers:
-                    max_spk = max(seg_speakers)
-                    if speaker_offset > 0:
-                        for evt in seg_events:
-                            if evt.speaker_id is not None:
-                                evt.speaker_id += speaker_offset
-                    speaker_offset += max_spk + 1
+                # ★ 跨段 speaker_id 偏移（同多块路径；early_turns 生效时跳过，
+                # 标签来自全局 turns 无需偏移）
+                if not self._early_turns_active():
+                    seg_speakers = set()
+                    for evt in seg_events:
+                        if evt.speaker_id is not None:
+                            seg_speakers.add(evt.speaker_id)
+                    if seg_speakers:
+                        max_spk = max(seg_speakers)
+                        if speaker_offset > 0:
+                            for evt in seg_events:
+                                if evt.speaker_id is not None:
+                                    evt.speaker_id += speaker_offset
+                        speaker_offset += max_spk + 1
 
                 # 偏移到全局时间轴；物理范围和来源追踪必须同步偏移。
                 from ..mapping.time_mapper import offset_subtitle_event

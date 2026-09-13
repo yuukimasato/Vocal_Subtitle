@@ -28,6 +28,85 @@ class EmbeddingEvidence:
     status: str = "unavailable"
 
 
+# ---- 说话人标签国际化（与 application/stage_runner 的映射保持一致） ----
+_SPEAKER_LABEL_MAP = {"zh": "说话人", "ja": "話者", "ko": "화자"}
+_SPEAKER_LABEL_DEFAULT = "Speaker"
+
+
+def _speaker_label(language: Optional[str], speaker_id: int) -> str:
+    """按语言生成说话人标签（"说话人A" / "Speaker A" / "話者A"）。"""
+    letter = (
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[speaker_id]
+        if 0 <= speaker_id < 26
+        else str(speaker_id)
+    )
+    if language:
+        base = str(language).split("-")[0].lower()
+        prefix = _SPEAKER_LABEL_MAP.get(base)
+        if prefix is not None:
+            # CJK 语言：标签与字母之间无空格（如 "说话人A"）
+            return f"{prefix}{letter}"
+    return f"{_SPEAKER_LABEL_DEFAULT} {letter}"
+
+
+# 回退聚类质量下限：silhouette 低于该值说明簇分离不可信（对 MFCC 特征
+# 尤其容易碎分成假说话人），收敛为单说话人比给出错误的多人划分更诚实。
+_FALLBACK_MIN_SILHOUETTE = 0.15
+
+
+def _fallback_cluster_labels(
+    events: list,
+    audio: np.ndarray,
+    sample_rate: int,
+    diar_cfg: Any,
+) -> Optional[dict]:
+    """声学嵌入与全局分离均不可用时的轻量聚类回退。
+
+    复用仓库内置的 MFCC+音高凝聚聚类（SpeakerDiarizer，仅依赖
+    sklearn/librosa，无需 speechbrain/pyannote），给事件级分配说话人，
+    避免最小依赖环境下全部事件 unknown。返回 {事件下标: speaker_id}。
+    """
+    if not events or not _has_audio_signal(audio):
+        return None
+    try:
+        from types import SimpleNamespace
+
+        from .speaker_clusterer import SpeakerDiarizer
+
+        segments = [
+            SimpleNamespace(start=event.start, end=event.end)
+            for event in events
+        ]
+        diarizer = SpeakerDiarizer(
+            distance_threshold=getattr(diar_cfg, "distance_threshold", 0.5),
+            min_speakers=getattr(diar_cfg, "min_speakers", 1),
+            max_speakers=getattr(diar_cfg, "max_speakers", 10),
+            expected_speakers=getattr(diar_cfg, "expected_speakers", None),
+            use_pca=getattr(diar_cfg, "use_pca", True),
+            pca_variance=getattr(diar_cfg, "pca_variance", 0.95),
+        )
+        diarizer.load_model()
+        ids = diarizer.diarize(segments, audio, sample_rate)
+    except Exception as exc:  # noqa: BLE001 - 回退失败保持 unknown
+        logger.warning("Fallback speaker clustering failed: %s", exc)
+        return None
+    if len(ids) != len(events):
+        return None
+    silhouette = getattr(diarizer, "last_silhouette_", None)
+    if len(set(ids)) > 1 and (silhouette is None or silhouette < _FALLBACK_MIN_SILHOUETTE):
+        logger.info(
+            "Fallback speaker clustering quality low (silhouette=%.3f) "
+            "→ collapsing to single speaker",
+            float(silhouette) if silhouette is not None else -1.0,
+        )
+        ids = [0] * len(ids)
+    logger.info(
+        "Fallback speaker clustering assigned %d events across %d speakers",
+        len(ids), len(set(ids)),
+    )
+    return {index: int(sid) for index, sid in enumerate(ids)}
+
+
 @dataclass
 class SpeakerFusionResult:
     events: list
@@ -482,6 +561,7 @@ def run_speaker_fusion(
     config: Any,
     *,
     embedding_engine: Any = None,
+    language: Optional[str] = None,
 ) -> SpeakerFusionResult:
     """Run both speaker lines and return final events with provenance."""
     if not events or not getattr(config.diarization, "enabled", True):
@@ -501,6 +581,16 @@ def run_speaker_fusion(
     use_global = global_result is not None
     if getattr(diar_cfg, "fusion_mode", "auto") == "dual" and global_result is None:
         global_status = "degraded"
+
+    # 双声学线均不可用（如未安装 speechbrain/pyannote 的最小环境）时，
+    # 退回内置 MFCC+音高凝聚聚类，至少给出粗粒度的说话人区分。
+    # 仅在引擎根本不可用（unavailable）时触发；引擎存在但提取失败
+    # （failed）说明音频本身有问题，保持 unknown 更诚实。
+    fallback_labels: Optional[dict] = None
+    if embedding.status == "unavailable" and not use_global:
+        fallback_labels = _fallback_cluster_labels(
+            events, audio, sample_rate, diar_cfg,
+        )
 
     global_turns = list(global_result.exclusive_turns or global_result.turns) if use_global else []
     global_map = _map_global_to_embedding(global_result if use_global else None, events, embedding.labels)
@@ -576,9 +666,14 @@ def run_speaker_fusion(
             if global_id is not None and embedding_id is not None:
                 mapped = global_map.get(global_id)
                 if mapped is not None and mapped != embedding_id:
+                    # 两条声学线归属冲突。过去直接置空(unknown),把可裁决的
+                    # 证据丢弃了——嵌入线是 3s 粗窗口聚类,短事件/跨turn事件
+                    # 频繁误标,是冲突的主要来源;全局 diarization 是专门的
+                    # "谁在何时说话"模型,证据更强。冲突时择优回退到全局线,
+                    # 并保留冲突计数供诊断。
                     conflict_count += 1
-                    speaker_id = None
-                    source = "unknown"
+                    speaker_id = mapped
+                    source = "global_conflict_fallback"
                 elif mapped is not None:
                     speaker_id = mapped
                     source = "fused"
@@ -591,6 +686,9 @@ def run_speaker_fusion(
             elif embedding_id is not None:
                 speaker_id = embedding_id
                 source = "embedding"
+            elif fallback_labels is not None and event_index in fallback_labels:
+                speaker_id = fallback_labels[event_index]
+                source = "fallback_cluster"
             else:
                 speaker_id = None
                 source = "unknown"
@@ -598,8 +696,8 @@ def run_speaker_fusion(
             part.speaker_id = int(speaker_id) if speaker_id is not None else None
             part.speaker_source = source
             part.speaker_status = "confirmed" if speaker_id is not None else "unknown"
-            if source == "unknown" and global_id is not None and embedding_id is not None:
-                part.speaker_repair_reason = "speaker_evidence_conflict"
+            if source == "global_conflict_fallback":
+                part.speaker_repair_reason = "speaker_evidence_conflict_resolved_global"
             elif source == "unknown":
                 part.speaker_repair_reason = "speaker_evidence_unavailable"
             else:
@@ -617,7 +715,7 @@ def run_speaker_fusion(
     for index, event in enumerate(final_events, start=1):
         if event.speaker_id is not None:
             event.speaker_id = remap[event.speaker_id]
-            event.speaker_label = f"Speaker {chr(ord('A') + event.speaker_id)}"
+            event.speaker_label = _speaker_label(language, event.speaker_id)
         else:
             event.speaker_label = None
         event.index = index
@@ -628,10 +726,16 @@ def run_speaker_fusion(
         backend = "pyannote"
     elif embedding.status == "ok":
         backend = "embedding"
+    elif fallback_labels is not None:
+        # 声学嵌入/全局分离不可用时的 MFCC+音高凝聚聚类回退
+        backend = "agglomerative"
     else:
         backend = "unknown"
     status = "ok" if final_events and any(e.speaker_id is not None for e in final_events) else "degraded"
-    if global_status in ("failed", "degraded") or embedding.status in ("failed", "unavailable"):
+    # 回退线已经给出说话人时，嵌入线缺失不再把整体状态压回 degraded
+    if global_status in ("failed", "degraded") or (
+        embedding.status in ("failed", "unavailable") and fallback_labels is None
+    ):
         status = "degraded" if status == "ok" else status
     unknown_count = sum(event.speaker_id is None for event in final_events)
     diagnostics = {

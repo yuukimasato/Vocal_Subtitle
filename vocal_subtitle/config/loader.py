@@ -173,6 +173,11 @@ class ConfigLoader:
             local_context_seconds=diar_raw.get("local_context_seconds", 0.6),
             min_local_segment_seconds=diar_raw.get("min_local_segment_seconds", 0.25),
             min_change_confidence=diar_raw.get("min_change_confidence", 0.70),
+            # 说话人身份主干（2026-09-11 定案，层1）开关。此前 YAML 里的
+            # early_turns 从未被读取，导致灰度开关无法生效（恒为 False）。
+            early_turns=diar_raw.get("early_turns", False),
+            word_split_on_turn=diar_raw.get("word_split_on_turn", False),
+            single_speaker_shortcut=diar_raw.get("single_speaker_shortcut", True),
         )
 
         asr_raw = pipeline_raw.get("asr", {})
@@ -511,10 +516,31 @@ class ConfigLoader:
             flag_threshold_ms=acoustic_raw.get("flag_threshold_ms", 200),
             unified_ffmpeg_pass=acoustic_raw.get("unified_ffmpeg_pass", True),
             skeleton_mode=acoustic_raw.get("skeleton_mode", True),
+            reproject_grouped_windows=acoustic_raw.get(
+                "reproject_grouped_windows", True,
+            ),
+            member_split_min_gap=acoustic_raw.get("member_split_min_gap", 0.3),
+            member_split_max_duration=acoustic_raw.get("member_split_max_duration", 5.0),
+            skeleton_adaptive_noise_db=acoustic_raw.get("skeleton_adaptive_noise_db", True),
+            skeleton_noise_margin_db=acoustic_raw.get("skeleton_noise_margin_db", 10.0),
             export_skeleton_segments=acoustic_raw.get("export_skeleton_segments", False),
             export_skeleton_dir=acoustic_raw.get("export_skeleton_dir", ""),
             allow_end_shorten=acoustic_raw.get("allow_end_shorten", True),
             allow_start_pull_earlier=acoustic_raw.get("allow_start_pull_earlier", True),
+            allow_end_extend=acoustic_raw.get("allow_end_extend", True),
+            max_start_snap_distance=acoustic_raw.get("max_start_snap_distance", 0.45),
+            # 时间轴仲裁层（2026-09-11 定案，层2）：R1/R2/R3 三规则表。
+            # arbitration_evidence_regions 是运行期注入字段，不从 yaml 加载。
+            timeline_arbitration=acoustic_raw.get("timeline_arbitration", False),
+            arbitration_r1_min_overlap_chars=acoustic_raw.get(
+                "arbitration_r1_min_overlap_chars", 6,
+            ),
+            arbitration_r1_min_similarity=acoustic_raw.get(
+                "arbitration_r1_min_similarity", 0.85,
+            ),
+            arbitration_r2_local_noise=acoustic_raw.get(
+                "arbitration_r2_local_noise", True,
+            ),
         )
 
         # Stage 4.6：边界滑动窗口冗余识别
@@ -549,6 +575,7 @@ class ConfigLoader:
             enabled=feedback_raw.get("enabled", True),
             user_profile_dir=feedback_raw.get("user_profile_dir", "~/.vocal_subtitle/profiles"),
             active_profile=feedback_raw.get("active_profile", "user_default"),
+            apply_overrides_on_run=feedback_raw.get("apply_overrides_on_run", False),
             alignment_min_iou=feedback_raw.get("alignment_min_iou", 0.3),
             alignment_min_coverage=feedback_raw.get("alignment_min_coverage", 0.60),
             alignment_text_weight=feedback_raw.get("alignment_text_weight", 0.30),
@@ -577,6 +604,8 @@ class ConfigLoader:
             few_shot_max_cache=feedback_raw.get("few_shot_max_cache", 20),
             few_shot_min_weight_to_inject=feedback_raw.get("few_shot_min_weight_to_inject", 0.3),
             few_shot_enabled=feedback_raw.get("few_shot_enabled", True),
+            journal_sink_retention=feedback_raw.get("journal_sink_retention", "archive"),
+            journal_sink_ttl_days=feedback_raw.get("journal_sink_ttl_days", 30),
         )
 
         return PipelineConfig(

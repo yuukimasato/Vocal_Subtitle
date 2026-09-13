@@ -78,8 +78,8 @@ class MergeDecisionConfig:
     """方案五：LLM 语义合并决策配置"""
 
     # Fast-Slow Path 分流阈值
-    fast_merge_max_gap: float = 0.20
-    llm_decision_min_gap: float = 0.20
+    fast_merge_max_gap: float = 0.30
+    llm_decision_min_gap: float = 0.30
     llm_decision_max_gap: float = 1.20
     hard_split_min_gap: float = 1.20
 
@@ -88,7 +88,7 @@ class MergeDecisionConfig:
     min_fragment_duration: float = 0.15
 
     # LLM 降本策略：渐进降级间隙范围
-    local_nlp_gap_range: Tuple[float, float] = (0.15, 0.60)  # 此范围内优先本地NLP
+    local_nlp_gap_range: Tuple[float, float] = (0.30, 0.60)  # 此范围内优先本地NLP
     cloud_llm_gap_range: Tuple[float, float] = (0.60, 1.20)  # 仅此范围调用云端LLM
 
     # LLM 策略
@@ -134,12 +134,57 @@ class AcousticValidationConfig:
     # 双向修正（默认开启）
     allow_end_shorten: bool = True         # ★ 允许声学标尺缩短结束时间
     allow_start_pull_earlier: bool = True  # ★ 允许声学标尺将 start 向前吸附
+    # ★ 截尾修复：事件 end 落在连续语音骨架段内部时，允许延长到该骨架段
+    # 语音终点（同时钳制到下一事件 start 之前，绝不跨静音/吞下一句）。
+    # 过去只标记 possible_truncation 不修复，是 ASR 词尾普遍偏早 60~300ms
+    # 时字幕"硬切"的直接原因。
+    allow_end_extend: bool = True
+    # ★ 吞静音修复：start 后向吸附（吸附到下一个真实语音起点）的限幅。
+    # faster-whisper 词起点在换人/换句边界普遍偏早 200~300ms，超过
+    # max_snap_distance 的偏差只标记不修，导致下一句开头吞掉静音区。
+    # 与 max_snap_distance 分开限幅，需能量确认兜底。
+    max_start_snap_distance: float = 0.45
     # 骨架分段独立处理模式：跳过 VAD 分段，直接按声学骨架逐段
     # 独立处理，然后拼接时间轴。每个骨架段是物理隔离的连续语音。
     skeleton_mode: bool = True
+    # 聚合 ASR 窗口结果重投影回原始物理成员段：在成员静音间隙处
+    # 按词拆分事件并把端点钳制到骨架边界（恢复 v0.2.0 逐段切片
+    # 的端点静音对齐契约），同时保留聚合窗口的识别上下文收益。
+    reproject_grouped_windows: bool = True
+    # 重投影拆分阈值：成员间隙 < 该值视为句内微停顿，不拆分文本，
+    # 端点跟随词时间延伸到最后一个成员段（避免"四/个半"式碎片行）。
+    member_split_min_gap: float = 0.3
+    # 聚合组超过该时长（秒）时，即使间隙 < member_split_min_gap 也要在
+    # 成员间隙处继续拆分（展示驱动兜底，<=0 关闭）；与合并级联的
+    # max_combined_duration(5.0) 对齐。
+    member_split_max_duration: float = 5.0
+    # 自适应骨架阈值：按音频噪声底（底部 20% 帧 RMS 中位数）+ 余量动态
+    # 推导，钳制 [-45, -30]（与 noise-shadow 建议策略一致）；估计失败或
+    # 关闭时回退固定 skeleton_noise_db。
+    skeleton_adaptive_noise_db: bool = True
+    skeleton_noise_margin_db: float = 10.0
     # 导出骨架段音频供人工验证
     export_skeleton_segments: bool = False
     export_skeleton_dir: str = ""
+    # ---- 时间轴仲裁层(2026-09-11 定案,层2) ----
+    # 三规则信任策略表:骨架管段级真值,ASR 管词级真值,能量检测当裁判,
+    # 文本一致性决定信任级别。命名用 timeline_arbitration,
+    # 避免与 LLM 语义仲裁(asr.arbitration)混淆。
+    timeline_arbitration: bool = False
+    # R1 共识门槛:分段基线与全程 evidence 字符对齐一致、且一致字符数
+    # ≥ 该值时才整段信骨架(解除 max_snap_distance 限幅),防短重复短语
+    # 假阳性把真实尾音钳掉。
+    arbitration_r1_min_overlap_chars: int = 6
+    # R1 共识判定的最小字符重合率(对齐重合字符 / 较短方字符数)。
+    arbitration_r1_min_similarity: float = 0.85
+    # R2 盲区能量确认:True 时用事件周边局部噪声画像,而非全局噪声底,
+    # 防止音乐残留等非均匀噪声被误确认为"真语音"。
+    arbitration_r2_local_noise: bool = True
+    # R1 共识参照文本区域(运行期注入,非用户配置):ASR 管线把全程识别
+    # evidence 简化为 (start, end, text) 三元组发布到该字段,validator
+    # 读取它做区域字符对齐。postprocess_runner 的 validate 调用点不传参,
+    # 共享配置对象是管线层到 validator 的唯一通道;None/空时 R1 不触发。
+    arbitration_evidence_regions: Optional[Tuple[Tuple[float, float, str], ...]] = None
 
 
 @dataclass
@@ -385,6 +430,17 @@ class DiarizationConfig:
     local_context_seconds: float = 0.6
     min_local_segment_seconds: float = 0.25
     min_change_confidence: float = 0.70
+    # ---- 说话人身份主干(2026-09-11 定案,层1) ----
+    # turns 前置:全局 diarization 在分离之后立即运行一次(结果进缓存),
+    # turns 贯通 ctx 供骨架×turns 求交、合并硬约束与词级切分使用;
+    # 置 false 回到后处理事件级聚类现状。
+    early_turns: bool = False
+    # 词级后切分:字幕事件在 turn 翻转点按最近词间隙切开,
+    # 两段各自继承 turn 标签(标签先天正确);重叠区标 overlapped。
+    word_split_on_turn: bool = False
+    # 单说话人短路:全局 turns 归一后 ≤1 个说话人时跳过切分与
+    # 多说话人路径(TTS/口播素材零额外开销)。
+    single_speaker_shortcut: bool = True
 
 
 @dataclass
@@ -510,6 +566,9 @@ class FeedbackConfig:
     user_profile_dir: str = "~/.vocal_subtitle/profiles"
     active_profile: str = "user_default"    # 当前活跃的用户配置
 
+    # 运行时应用（D38：overrides 接线，默认关——维持纯收集语义）
+    apply_overrides_on_run: bool = False    # 任务提交构建配置时合并 active_profile 的 overrides
+
     # 对齐参数
     alignment_min_iou: float = 0.3          # 最小时间交并比
     alignment_min_coverage: float = 0.60    # 最低对齐覆盖率（低于此值拒绝学习）
@@ -554,6 +613,10 @@ class FeedbackConfig:
 
     # 编辑日志摄取（edit-journal-v1 第三触发通道）
     journal_enabled: bool = True            # 是否消费编辑日志数据
+
+    # sink 保留策略（D30：防止 cache/journal_sink/ 在无人 ingest 时无限堆积）
+    journal_sink_retention: str = "archive"  # 消费成功后源文件处理：archive=归档到 consumed/ | delete=直接删除
+    journal_sink_ttl_days: int = 30          # 未消费文件 TTL 兜底清理（天；<=0 禁用清理）
 
     # V3 触发机制（D16：只定机制与可配置阈值，不定数值——等 V1 数据分布校准）
     v3_trigger_min_samples: Optional[int] = None       # D2+journal 样本数下限

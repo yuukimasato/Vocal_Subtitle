@@ -166,36 +166,146 @@ class PipelinePostprocessMixin:
         Returns:
             后处理完成的事件列表
         """
+        # ---- -1. 静音幻听碎片吸收（2026-09-13 诊断定案） ----
+        # ASR 词时间戳在换人/换句边界偏早，会把下一句首音节配上"骑在
+        # 静音区"的时间（实例：「得了吧」拆成静音上的「得」+ 提前截止
+        # 的「了吧」）。必须在说话人归属之前吸收，否则碎片按错误边界
+        # 归属说话人、合并引擎又因 unknown/跨说话人拒绝合并。
+        if self.config.acoustic_validation.enabled and audio is not None:
+            try:
+                from ..merging.fragment_absorber import (
+                    absorb_silent_fragments,
+                    reanchor_word_timestamps,
+                    resolve_speech_skeleton,
+                )
+
+                _skeleton = resolve_speech_skeleton(
+                    vocals_path, ffmpeg_unified_result,
+                    self.config.acoustic_validation, audio, sample_rate,
+                )
+                if _skeleton:
+                    _before = len(events)
+                    events = absorb_silent_fragments(events, _skeleton)
+                    if len(events) < _before:
+                        stats.subtitle_count = len(events)
+                        stats.quality_diagnostics[
+                            "silent_fragments_absorbed"
+                        ] = _before - len(events)
+                # 词级时间戳能量重锚定：finalize 的显示拆行以词起点为准，
+                # 句内停顿处偏早的词起点会把静音吞进下一行行首。
+                reanchored = reanchor_word_timestamps(
+                    events, audio, sample_rate,
+                )
+                if reanchored:
+                    stats.quality_diagnostics[
+                        "words_re_anchored"
+                    ] = reanchored
+            except Exception as e:
+                logger.warning("Silent fragment absorption failed: %s", e)
+
         # ---- 0. 两条主线说话人融合 ----
         # 在单块/多块/骨架三种路径的事件拼接完成后统一处理，
         # 让完整音频的全局 turns 跨越所有宏观块和骨架段。
+        #
+        # [层1] early_turns 生效时（分离后已成功运行全局 pass）：
+        # 事件标签直接来自前置全局 turns，事件级聚类退役（D5），
+        # stats 的 speaker_count/diarization_backend 等字段用早前 pass
+        # 的结果填充，保持下游字段契约；early_turns 关闭、全局 pass
+        # 失败或标签注入异常时，完整回退到后处理事件级聚类（现状行为）。
         if self.config.diarization.enabled and events:
-            try:
-                from ..diarization.speaker_fusion import run_speaker_fusion
+            early_state = getattr(self, "_early_turns_state", None)
+            early_done = False
+            if early_state is not None and early_state.active:
+                try:
+                    from ..diarization.early_turns import assign_event_speakers
 
-                fusion = run_speaker_fusion(
-                    events,
-                    audio,
-                    sample_rate,
-                    self.config,
-                    embedding_engine=self._get_embedding_engine(),
-                )
-                events = fusion.events
-                stats.speaker_count = fusion.speaker_count
-                stats.diarization_backend = fusion.backend
-                stats.diarization_status = fusion.status
-                stats.diarization_silhouette = fusion.diagnostics.get(
-                    "embedding_silhouette"
-                )
-                stats.local_speaker_split_count = fusion.local_split_count
-                stats.speaker_conflict_count = fusion.conflict_count
-                stats.unknown_speaker_count = fusion.unknown_count
-                stats.quality_diagnostics.update(fusion.diagnostics)
-            except Exception as e:
-                logger.warning("Speaker fusion failed; preserving unknown speakers: %s", e)
-                stats.diarization_backend = "unknown"
-                stats.diarization_status = "failed"
-                stats.quality_diagnostics["speaker_fusion_error"] = str(e)
+                    diar_cfg = self.config.diarization
+                    word_split_cfg = bool(getattr(diar_cfg, "word_split_on_turn", False))
+                    # 单说话人短路：归一后 turns ≤1 个说话人时跳过切分与
+                    # 多说话人路径（TTS/口播素材零额外开销）。
+                    single = (
+                        bool(getattr(diar_cfg, "single_speaker_shortcut", True))
+                        and early_state.single_speaker
+                    )
+                    events, early_diag = assign_event_speakers(
+                        events,
+                        early_state.turns,
+                        word_split=word_split_cfg and not single,
+                        min_part_duration=getattr(
+                            diar_cfg, "min_local_segment_seconds", 0.25,
+                        ),
+                        language=self._resolved_language_or_config(),
+                        model_ref=early_state.model_ref,
+                    )
+                    stats.speaker_count = early_diag.get("speaker_count", 0)
+                    stats.diarization_backend = early_state.backend
+                    stats.diarization_status = "ok"
+                    stats.diarization_silhouette = None
+                    stats.local_speaker_split_count = early_diag.get(
+                        "local_split_count", 0
+                    )
+                    stats.speaker_conflict_count = early_diag.get("conflict_count", 0)
+                    stats.unknown_speaker_count = early_diag.get("unknown_count", 0)
+                    stats.quality_diagnostics.update({
+                        "embedding_model": "",
+                        "embedding_status": "skipped",
+                        "embedding_silhouette": None,
+                        "global_model": early_state.model_ref,
+                        "global_status": early_state.diagnostics.get(
+                            "global_status", "ok"
+                        ),
+                        "global_turn_count": len(early_state.turns),
+                        "local_split_count": early_diag.get("local_split_count", 0),
+                        "fallback_split_count": early_diag.get(
+                            "fallback_split_count", 0
+                        ),
+                        "overlapped_count": early_diag.get("overlapped_count", 0),
+                        "conflict_count": 0,
+                        "unknown_count": early_diag.get("unknown_count", 0),
+                        "expected_speakers": early_state.diagnostics.get(
+                            "expected_speakers"
+                        ),
+                        "early_turns_status": "ok",
+                        "early_turn_word_split": word_split_cfg and not single,
+                        "single_speaker_shortcut": single,
+                        # D5:事件级聚类退役为校验诊断，不再是标签来源
+                        "event_clustering": "retired_by_early_turns",
+                    })
+                    early_done = True
+                except Exception as e:
+                    logger.warning(
+                        "Early turns labeling failed; falling back to "
+                        "event-level fusion: %s", e,
+                    )
+                    stats.quality_diagnostics["early_turns_fallback_reason"] = str(e)
+            if not early_done:
+                try:
+                    from ..diarization.speaker_fusion import run_speaker_fusion
+
+                    fusion = run_speaker_fusion(
+                        events,
+                        audio,
+                        sample_rate,
+                        self.config,
+                        embedding_engine=self._get_embedding_engine(),
+                        language=self._resolved_language_or_config(),
+                    )
+                    events = fusion.events
+                    stats.speaker_count = fusion.speaker_count
+                    stats.diarization_backend = fusion.backend
+                    stats.diarization_status = fusion.status
+                    stats.diarization_silhouette = fusion.diagnostics.get(
+                        "embedding_silhouette"
+                    )
+                    stats.local_speaker_split_count = fusion.local_split_count
+                    stats.speaker_conflict_count = fusion.conflict_count
+                    stats.unknown_speaker_count = fusion.unknown_count
+                    stats.quality_diagnostics.update(fusion.diagnostics)
+                except Exception as e:
+                    logger.warning("Speaker fusion failed; preserving unknown speakers: %s", e)
+                    stats.diarization_backend = "unknown"
+                    stats.diarization_status = "failed"
+                    stats.quality_diagnostics["speaker_fusion_error"] = str(e)
 
             # 事件级角色标注
             if self.config.speaker_role.enabled:

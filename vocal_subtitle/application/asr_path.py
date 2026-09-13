@@ -214,6 +214,34 @@ class PipelineASRPathMixin:
             result.diagnostics["route"] = route.to_dict()
         return result.events, result.diagnostics
 
+    def _publish_arbitration_evidence(self) -> None:
+        """把全程识别 evidence 发布为时间轴仲裁层 R1 的参照文本区域。
+
+        简化为 (start, end, text) 三元组写入共享的
+        ``acoustic_validation.arbitration_evidence_regions``：声学校验在
+        postprocess_runner 内部构造 AcousticValidator（该文件属于并行任务
+        领地,不改动）,共享配置对象是管线层到 validator 的唯一通道。
+        每次发布整体覆盖,不跨任务累积;evidence 不可用时清空,R1 不触发。
+        """
+        acoustic_config = getattr(self.config, "acoustic_validation", None)
+        if acoustic_config is None:
+            return
+        # 开关关闭时不做任何运行期注入,保持现状行为。
+        if not getattr(acoustic_config, "timeline_arbitration", False):
+            return
+        regions = []
+        for item in getattr(self, "_global_evidence", ()) or ():
+            text = str(getattr(item, "text", "") or "")
+            start = getattr(item, "start", None)
+            end = getattr(item, "end", None)
+            if not text.strip() or start is None or end is None:
+                continue
+            try:
+                regions.append((float(start), float(end), text))
+            except (TypeError, ValueError):
+                continue
+        acoustic_config.arbitration_evidence_regions = tuple(regions)
+
     def _ensure_global_evidence(
         self,
         *,
@@ -230,7 +258,9 @@ class PipelineASRPathMixin:
         global_config = getattr(getattr(self.config, "asr", None), "global_asr", None)
         if global_config is None or not getattr(global_config, "enabled", False):
             diagnostics = {"status": "disabled", "role": "evidence"}
+            self._global_evidence = ()
             self._global_evidence_diagnostics = diagnostics
+            self._publish_arbitration_evidence()
             return diagnostics
         if not getattr(global_config, "evidence_enabled", True):
             diagnostics = {
@@ -238,7 +268,9 @@ class PipelineASRPathMixin:
                 "reason": "evidence_disabled",
                 "role": "evidence",
             }
+            self._global_evidence = ()
             self._global_evidence_diagnostics = diagnostics
+            self._publish_arbitration_evidence()
             return diagnostics
         if audio is None or stats is None:
             diagnostics = {
@@ -246,7 +278,9 @@ class PipelineASRPathMixin:
                 "reason": "audio_or_stats_missing",
                 "role": "evidence",
             }
+            self._global_evidence = ()
             self._global_evidence_diagnostics = diagnostics
+            self._publish_arbitration_evidence()
             return diagnostics
 
         stats.global_attempted = True
@@ -282,6 +316,7 @@ class PipelineASRPathMixin:
             **dict(getattr(stats, "global_diagnostics", {}) or {}),
             "evidence": diagnostics,
         }
+        self._publish_arbitration_evidence()
         return diagnostics
 
     def _run_offline_production_review(

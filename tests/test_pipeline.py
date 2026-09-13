@@ -110,6 +110,23 @@ class TestPipelineDiarizationConfig:
         assert config.diarization.use_pca is True
         assert config.diarization.pca_variance == 0.95
 
+    def test_diarization_identity_backbone_keys_parsed(self):
+        """回归（2026-09-13）：early_turns 等身份主干开关必须从 YAML 生效。
+
+        此前 loader 从未读取这些键，default.yaml 里的 early_turns: true
+        是死配置，运行时恒为 False，说话人空缺问题因此长期存在。
+        """
+        config = ConfigLoader().load_profile("default")
+        assert config.diarization.early_turns is True
+        assert config.diarization.word_split_on_turn is False
+        assert config.diarization.single_speaker_shortcut is True
+
+    def test_acoustic_timeline_repair_keys_parsed(self):
+        """回归（2026-09-13）：截尾延长与 start 后向吸附限幅可从 YAML 配置"""
+        config = ConfigLoader().load_profile("default")
+        assert config.acoustic_validation.allow_end_extend is True
+        assert config.acoustic_validation.max_start_snap_distance == 0.45
+
     def test_speaker_role_config_fields_parsed(self):
         """验证所有 speaker_role 配置字段正确解析"""
         config = ConfigLoader().load_profile("podcast")

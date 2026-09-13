@@ -280,7 +280,7 @@ def data_assets_list(tier: str = "D0"):
         ("D0-007", "TTS中文朗读测试-双人.wav", "157.93s, zh, 2人, ❌"),
         ("D0-008", "简单三步就能复刻巧乐兹？-人声.wav", "216.23s, zh, 1+人, ❌"),
         ("D0-009", "Grow Up Show-4min-人声.wav", "249.30s, zh, 2+人, ✅*"),
-        ("D0-010", "40011894204-1-192-英语多人.mp3", "46.34s, en, 2+人, ✅*"),
+        ("D0-010", "40011894204-1-192--英语多人.wav", "46.34s, en, 2+人, ✅*"),
         ("D0-011", "20260428_214253_0043_KyGLgfKX.wav", "5.84s, zh, 1人, ❌"),
     ]
     for asset_id, filename, details in assets:
@@ -288,7 +288,9 @@ def data_assets_list(tier: str = "D0"):
     click.echo("\n  test/golden/ 合成样本 (2 个):")
     click.echo("    D0-G01  non_speech_tone.wav (4.00s, 纯音与噪声)")
     click.echo("    D0-G02  repeated_phrase_me.wav (2.80s, 重复短语)")
-    click.echo("\n  test/quality_manifest.yaml: 10 个场景\n\n  D1-D4: 尚未建立（见 DATA_ASSETS.md）")
+    click.echo("\n  ✅/❌ = 人工修正字幕是否被自动化测试使用（非文件存在性）")
+    click.echo("  原评估清单 test/quality_manifest.yaml 已移除，场景定义见 docs/20260802/DATA_ASSETS.md")
+    click.echo("\n  D1-D4: 尚未建立（见 DATA_ASSETS.md）")
 
 
 @click.command("preflight")
