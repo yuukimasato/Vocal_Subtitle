@@ -62,6 +62,10 @@ def _ensure_llm_deps():
 # ---- DeepSeek 默认配置 ----
 DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 DEFAULT_MODEL = "deepseek-v4-pro"
+# 单请求超时（秒）。openai 客户端默认 600s，无超时的挂起请求
+# 会让 LLM 优化阶段看起来永久卡死；观测到的单批耗时为 20~75s，
+# 300s 已留足余量。
+REQUEST_TIMEOUT_SECONDS = 300.0
 
 # 兼容多种环境变量名
 _API_KEY_ENV_NAMES = ["DEEPSEEK_API_KEY", "OPENAI_API_KEY"]
@@ -129,6 +133,7 @@ def get_llm_client(
     return _OpenAI(
         base_url=base_url,
         api_key=api_key,
+        timeout=REQUEST_TIMEOUT_SECONDS,
     )
 
 

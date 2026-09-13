@@ -11,7 +11,9 @@
 
 import difflib
 import json
+import logging
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
@@ -19,6 +21,8 @@ from .aligner import SubtitleAligner
 from .llm_client import call_llm
 from .prompts import get_prompt
 from .text_utils import count_words
+
+logger = logging.getLogger(__name__)
 
 MAX_STEPS = 3
 
@@ -93,6 +97,16 @@ class SubtitleOptimizer:
         self.update_callback = update_callback
 
         self._executor: Optional[ThreadPoolExecutor] = None
+        # 批次失败告警去重：依赖缺失等错误会逐批重复，同一原因只记录一次
+        self._warn_lock = threading.Lock()
+        self._warned_failures: set = set()
+
+    def _warn_failure_once(self, error: Exception) -> bool:
+        """记录批次失败；返回是否为该错误首次出现（首次才值得写日志）。"""
+        with self._warn_lock:
+            is_first = str(error) not in self._warned_failures
+            self._warned_failures.add(str(error))
+        return is_first
 
     def _ensure_executor(self) -> ThreadPoolExecutor:
         """延迟创建线程池"""
@@ -185,6 +199,11 @@ class SubtitleOptimizer:
                 optimized_dict.update(result)
             except Exception as e:
                 # 失败时保留原文
+                if self._warn_failure_once(e):
+                    logger.warning(
+                        "LLM chunk optimization failed, falling back to "
+                        "original text: %s", e,
+                    )
                 optimized_dict.update(chunk)
 
         return optimized_dict
@@ -215,6 +234,11 @@ class SubtitleOptimizer:
             return result
 
         except Exception as e:
+            if self._warn_failure_once(e):
+                logger.warning(
+                    "LLM chunk optimization failed, falling back to "
+                    "original text: %s", e,
+                )
             return subtitle_chunk
 
     def agent_loop(
@@ -576,19 +600,6 @@ class SubtitleOptimizer:
 
         return optimized
 
-
-def _clean_for_compare(text: str) -> str:
-    """清理文本用于吸收比较：去除标点差异和多余空格"""
-    import re as _re
-    t = text.strip()
-    # 移除末尾标点（LLM 常添加的）
-    t = _re.sub(r'[.。！!？?，,；;、]+$', '', t)
-    # 移除开头标点
-    t = _re.sub(r'^[.。！!？?，,；;、]+', '', t)
-    # 规范化空白
-    t = _re.sub(r'\s+', '', t)
-    return t
-
     @staticmethod
     def _repair(
         original: Dict[str, str],
@@ -639,3 +650,17 @@ def _clean_for_compare(text: str) -> str:
 
     def __exit__(self, *args):
         self.shutdown()
+
+
+def _clean_for_compare(text: str) -> str:
+    """清理文本用于吸收比较：去除标点差异和多余空格"""
+    import re as _re
+    t = text.strip()
+    # 移除末尾标点（LLM 常添加的）
+    t = _re.sub(r'[.。！!？?，,；;、]+$', '', t)
+    # 移除开头标点
+    t = _re.sub(r'^[.。！!？?，,；;、]+', '', t)
+    # 规范化空白
+    t = _re.sub(r'\s+', '', t)
+    return t
+
