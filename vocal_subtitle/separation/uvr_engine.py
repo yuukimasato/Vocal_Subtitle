@@ -11,11 +11,20 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 from .base import LicenseInfo, SeparationEngine, SeparationResult
 
 logger = logging.getLogger(__name__)
+
+# audio-separator（0.30.2）的 roformer 路径在音频短于一个推理 chunk 时，
+# demix 的 overlap_add 会以负起点切片而崩溃
+# （RuntimeError: The size of tensor a ... must match the size of tensor b
+#   (352800) ...）。BS-Roformer chunk = hop 441 × (dim_t 801 − 1) = 352800
+# ≈ 8s@44.1k；Mel-Roformer ≈ 409600。把输入 pad 到 10s（原生采样率下，
+# 包内部 librosa 会重采样到 44.1k）即可覆盖所有已知 UVR 模型的 chunk；
+# 分离完成后把 stem 截回原始时长。
+_MIN_SEP_INPUT_SECONDS = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +213,62 @@ class UVREngine(SeparationEngine):
                     "will trigger network download", bundled
                 )
 
+    @staticmethod
+    def _pad_short_input(input_path: Path) -> Tuple[Path, float]:
+        """短音频 pad 到安全长度，返回 (用于分离的路径, pad 的秒数)。
+
+        时长已达标时原样返回输入路径（pad 秒数为 0）。
+        """
+        import tempfile
+
+        import numpy as np
+        import soundfile as sf
+
+        info = sf.info(str(input_path))
+        original_seconds = info.frames / info.samplerate
+        if original_seconds >= _MIN_SEP_INPUT_SECONDS:
+            return input_path, 0.0
+
+        pad_seconds = _MIN_SEP_INPUT_SECONDS - original_seconds
+        data, sr = sf.read(str(input_path), dtype="float32", always_2d=True)
+        padded = np.pad(data, ((0, int(round(sr * pad_seconds))), (0, 0)))
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".wav", prefix="uvr_padded_", delete=False,
+        ) as tmp_f:
+            tmp_path = Path(tmp_f.name)
+        sf.write(str(tmp_path), padded, sr, subtype=info.subtype)
+        logger.info(
+            "Padded short input %.2fs → %.2fs to stay above the "
+            "separator's inference chunk size",
+            original_seconds, original_seconds + pad_seconds,
+        )
+        return tmp_path, pad_seconds
+
+    @staticmethod
+    def _trim_audio_to_length(
+        src: Path, dst: Path, keep_seconds: Optional[float],
+    ) -> None:
+        """复制 stem；keep_seconds 非 None 时截掉 pad 出去的尾部。"""
+        import shutil
+
+        if keep_seconds is None:
+            shutil.copy2(src, dst)
+            return
+        try:
+            import soundfile as sf
+
+            info = sf.info(str(src))
+            data, sr = sf.read(str(src), dtype="float32", always_2d=True)
+            keep_frames = min(info.frames, int(round(sr * keep_seconds)))
+            sf.write(str(dst), data[:keep_frames], sr, subtype=info.subtype)
+        except Exception as exc:
+            logger.warning(
+                "Failed to trim separated stem %s: %s; copying untrimmed",
+                src, exc,
+            )
+            shutil.copy2(src, dst)
+
     def separate(
         self,
         input_path: Path,
@@ -234,13 +299,22 @@ class UVREngine(SeparationEngine):
         vocals_path = output_dir / "vocals.wav"
         accompaniment_path = output_dir / "accompaniment.wav"
 
+        # 短音频防护：pad 后分离，完成后再截回原始时长
+        separation_input, pad_seconds = self._pad_short_input(input_path)
+        keep_seconds: Optional[float] = None
+        if pad_seconds > 0.0:
+            import soundfile as sf
+
+            info = sf.info(str(input_path))
+            keep_seconds = info.frames / info.samplerate
+
         # 安装 tqdm 进度钩子（将 audio-separator 内部迭代进度导向外部回调）
         if progress_callback is not None:
             _install_tqdm_hook(progress_callback)
 
         try:
             # audio-separator 的输出文件名由库内部生成
-            output_files = self._model.separate(str(input_path))
+            output_files = self._model.separate(str(separation_input))
 
             # audio-separator 可能返回相对路径，需要拼接 output_dir
             sep_output_dir = Path(getattr(self._model, "output_dir", "/tmp"))
@@ -252,9 +326,6 @@ class UVREngine(SeparationEngine):
                 return f_path
 
             if isinstance(output_files, list) and len(output_files) >= 2:
-                # 将输出文件复制到指定目录
-                import shutil
-
                 vocals_src = None
                 accomp_src = None
 
@@ -267,14 +338,16 @@ class UVREngine(SeparationEngine):
                         accomp_src = f_path
 
                 if vocals_src and vocals_src.exists():
-                    shutil.copy2(vocals_src, vocals_path)
+                    self._trim_audio_to_length(
+                        vocals_src, vocals_path, keep_seconds,
+                    )
                 if accomp_src and accomp_src.exists():
-                    shutil.copy2(accomp_src, accompaniment_path)
+                    self._trim_audio_to_length(
+                        accomp_src, accompaniment_path, keep_seconds,
+                    )
             else:
                 # 单个输出文件（可能是人声），复制到 vocals_path
                 # 处理空列表等异常情况
-                import shutil
-
                 if isinstance(output_files, list):
                     if len(output_files) == 0:
                         raise RuntimeError(
@@ -287,7 +360,7 @@ class UVREngine(SeparationEngine):
                     src = output_files
                 src = _resolve_path(str(src)) if src else None
                 if src and src.exists():
-                    shutil.copy2(src, vocals_path)
+                    self._trim_audio_to_length(src, vocals_path, keep_seconds)
                 else:
                     logger.warning(
                         "UVR output file not found at %s", src
@@ -297,6 +370,9 @@ class UVREngine(SeparationEngine):
             logger.error("UVR separation failed: %s", e)
             raise
         finally:
+            # 清理短音频 pad 出来的临时输入
+            if separation_input != input_path:
+                separation_input.unlink(missing_ok=True)
             # 确保钩子在分离完成后卸载（无论成功或失败）
             if progress_callback is not None:
                 _uninstall_tqdm_hook()
