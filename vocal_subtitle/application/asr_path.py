@@ -396,6 +396,12 @@ class PipelineASRPathMixin:
                 ),
             )
         self._asr_route_decision = decision
+        # 显式执行计划(重构计划 Task 4):路径与回退策略可观测。
+        from ..asr.execution_plan import build_execution_plan
+        self._asr_execution_plan = build_execution_plan(
+            self.config, decision,
+            requested_path=self._resolve_asr_path(),
+        )
         self._resolved_language = decision.language
         self._asr_engine = self._get_asr_engine_for(decision.selected_engine)
         logger.info(

@@ -19,7 +19,7 @@
 """
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from .window_execution import WindowExecutionCoordinator
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -86,6 +86,34 @@ class BoundaryReASRResult:
 
 
 @dataclass
+class _CoordinatorWindow:
+    """coordinator 兼容的窗口包装(id + 原 SlidingWindow)。"""
+
+    __slots__ = ("id", "payload")
+
+    def __init__(self, window_id: str, payload: SlidingWindow):
+        self.id = window_id
+        self.payload = payload
+
+
+class _BoundaryReASREngine:
+    """把 _transcribe_window 适配为 coordinator 的 review 接口。"""
+
+    name = "boundary-reasr"
+    model_name = None
+
+    def __init__(self, reasr: "SlidingWindowReASR", audio, sample_rate: int):
+        self._reasr = reasr
+        self._audio = audio
+        self._sample_rate = sample_rate
+
+    def review(self, audio, sample_rate, window, language=None):
+        result = self._reasr._transcribe_window(
+            window.payload, self._audio, self._sample_rate,
+        )
+        return [result]
+
+
 class SlidingWindowConfig:
     """滑动窗口配置"""
 
@@ -201,27 +229,47 @@ class SlidingWindowReASR:
             len(low_conf_indices), len(all_windows),
         )
 
-        # 并行执行所有窗口的 ASR
+        # 统一窗口并发(重构计划 Task 4):所有窗口 ASR 复用
+        # WindowExecutionCoordinator,获得一致的并发预算、取消与超时语义。
         window_results: Dict[int, List[WindowASRResult]] = {}
         for w in all_windows:
             window_results.setdefault(w.boundary_index, [])
 
-        with ThreadPoolExecutor(max_workers=min(cfg.max_workers, len(all_windows))) as executor:
-            futures = {
-                executor.submit(
-                    self._transcribe_window,
-                    w, audio, sample_rate,
-                ): w
-                for w in all_windows
-            }
-            for future in as_completed(futures):
-                w = futures[future]
-                try:
-                    wr = future.result()
-                except Exception as e:
-                    logger.error("Window ASR failed for boundary %d: %s", w.boundary_index, e)
-                    wr = WindowASRResult(window=w, segments=[], success=False, error=str(e))
-                window_results[w.boundary_index].append(wr)
+        coordinator = WindowExecutionCoordinator(
+            max_workers=max(1, min(cfg.max_workers, len(all_windows))),
+        )
+        co_windows = [
+            _CoordinatorWindow(f"boundary:{w.boundary_index}:{index}", w)
+            for index, w in enumerate(all_windows)
+        ]
+        window_by_id = {item.id: item.payload for item in co_windows}
+        engine = _BoundaryReASREngine(self, audio, sample_rate)
+        execution_candidates, diagnostics = coordinator.execute(
+            audio, sample_rate, co_windows, engine,
+            language=self._language,
+        )
+        # 执行器级观测计数(active/timeout/cancelled/failed,重构计划 Task 4)。
+        self.last_execution_diagnostics = diagnostics
+        for wr in execution_candidates:
+            window_results[wr.window.boundary_index].append(wr)
+        produced = {id(wr.window) for wr in execution_candidates}
+        for item in diagnostics.get("windows", ()):
+            status = item.get("status", "ok")
+            if status == "ok":
+                continue
+            payload = window_by_id.get(item.get("window_id"))
+            if payload is None or id(payload) in produced:
+                continue
+            logger.error(
+                "Window ASR failed for boundary %d: %s",
+                payload.boundary_index, item.get("error") or status,
+            )
+            window_results[payload.boundary_index].append(
+                WindowASRResult(
+                    window=payload, segments=[], success=False,
+                    error=str(item.get("error") or status),
+                )
+            )
 
         # 汇总每个边界的结果
         for idx in low_conf_indices:

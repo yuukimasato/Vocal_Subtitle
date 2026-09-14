@@ -198,6 +198,10 @@ class WindowExecutionCoordinator:
                 "max_workers": self.max_workers,
                 "timeout_seconds": self.timeout_seconds,
                 "window_count": len(windows),
+                "cancelled_count": sum(1 for item in results if item.status == "cancelled"),
+                "timeout_count": sum(1 for item in results if item.status == "timeout"),
+                "failed_count": sum(1 for item in results if item.status == "failed"),
+
                 "completed_window_count": len(results),
                 "candidate_count": len(candidates),
                 "cancelled": selected_token.cancelled,

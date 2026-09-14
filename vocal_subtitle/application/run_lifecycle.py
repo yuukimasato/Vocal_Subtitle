@@ -715,6 +715,9 @@ class PipelineLifecycleMixin:
             stats.language_probability = decision.language_probability
             stats.asr_route_version = decision.route_version
             stats.quality_gate_version = decision.quality_gate_version
+        execution_plan = getattr(self, "_asr_execution_plan", None)
+        if execution_plan is not None:
+            stats.quality_diagnostics["asr_execution_plan"] = execution_plan.to_dict()
         self._prepare_task_language(audio, sample_rate)
         if global_completed:
             pass
