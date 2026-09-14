@@ -85,6 +85,7 @@ test/benchmark_results/
 test/golden/
 test/*.wav
 test/*.ass
+test/*.srt
 test/*.mp4
 test/quality_manifest.yaml
 test/summary.json
