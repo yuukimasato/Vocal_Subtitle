@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from typing import AsyncIterator
 
 from fastapi import FastAPI
@@ -71,10 +72,23 @@ def create_app() -> FastAPI:
     static_dir = Path(__file__).parent / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
 
-    # html=True 使访问 / 时自动服务 index.html
+    # html=True 使访问 / 时自动服务 index.html。
+    # WebSocket 请求若未匹配任何 /ws 路由会落到根挂载；StaticFiles 只支持
+    # http，会抛 AssertionError 变成 500。包装一层把非 http scope 明确拒绝。
+    class _HttpOnlyStatic:
+        def __init__(self, asgi_app: Any):
+            self._asgi_app = asgi_app
+
+        async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+            if scope.get("type") == "websocket":
+                from starlette.websockets import WebSocketClose
+                await WebSocketClose(code=1008)(scope, receive, send)
+                return
+            await self._asgi_app(scope, receive, send)
+
     app.mount(
         "/",
-        StaticFiles(directory=str(static_dir), html=True),
+        _HttpOnlyStatic(StaticFiles(directory=str(static_dir), html=True)),
         name="static",
     )
 
