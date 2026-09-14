@@ -311,6 +311,7 @@ class PipelineLifecycleMixin:
         stats.quality_diagnostics["stage_reports"] = aggregate_run_diagnostics(
             self._run_context,
         )
+        self._report_legacy_usage(stats)
         self._finalize_task_state(stats, result_payload=result_payload)
         self._generate_run_report(
             input_path, stats, task_id,
@@ -721,6 +722,7 @@ class PipelineLifecycleMixin:
                     raise  # 用户显式要求 global 路径，不应静默降级
                 if not global_completed:
                     stats.asr_path = "legacy_degraded"
+                    self._record_legacy_use("legacy_degraded_fallback")
         if self._asr_route_decision is None:
             decision = self._prepare_asr_route(audio, sample_rate)
             stats.requested_engine = decision.requested_engine

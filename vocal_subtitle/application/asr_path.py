@@ -428,6 +428,20 @@ class PipelineASRPathMixin:
                 pass
         return decision
 
+    def _record_legacy_use(self, name: str) -> None:
+        """legacy 路径使用计数（重构计划 Task 9）：移除需以证据为前提。"""
+        usage = getattr(self, "_legacy_path_usage", None)
+        if not isinstance(usage, dict):
+            usage = {}
+            self._legacy_path_usage = usage
+        usage[name] = usage.get(name, 0) + 1
+
+    def _report_legacy_usage(self, stats: Any) -> None:
+        """把 legacy 使用计数写入 stats 诊断。"""
+        usage = getattr(self, "_legacy_path_usage", None)
+        if isinstance(usage, dict) and usage and stats is not None:
+            stats.quality_diagnostics["legacy_path_usage"] = dict(usage)
+
     def _run_global_transcription_path(
         self,
         audio,
@@ -440,6 +454,7 @@ class PipelineASRPathMixin:
         noise_profile=None,
     ):
         """Compatibility adapter for the explicit global ASR service."""
+        self._record_legacy_use("global_transcription_legacy")
         self._global_review_timeline = getattr(shadow, "physical_timeline", None)
         request = GlobalASRRequest(
             audio=audio,
