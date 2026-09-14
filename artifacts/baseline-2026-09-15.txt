@@ -25,3 +25,16 @@ $ python -m pytest -q --disable-warnings
 ## Working tree protection
 git diff > /tmp/vocal-subtitle-preexisting.diff (1404 lines)
 git ls-files --others --exclude-standard > /tmp/vocal-subtitle-untracked.txt (5 entries)
+
+## Final state (after Task 1-9, commit 5861df8)
+$ uv run pytest -q --disable-warnings → 1614 passed, 4 skipped, 0 failed
+$ python -m compileall -q vocal_subtitle llm_subtitle_optimizer → OK
+$ scripts/check_import_boundaries.py → OK
+$ scripts/check_module_size.py --baseline → exit 0 (run_lifecycle 1052 large 为既有状态,较基线 1052 无恶化)
+$ scripts/check_cli_contract.py → OK
+
+## Known pre-existing issues (not introduced by this session, out of scope)
+1. scripts/check_api_contract.py exit 1: 路由漂移 58→64(journal/feedback/overrides 等路由
+   来自更早的 learn/overrides 提交;本会话未修改任何路由)。需单独跑 --update 类流程重建契约。
+2. uv.lock 无法 --all-extras 完整构建(llvmlite 0.36 编译失败);建议单独治理锁文件。
+3. Task 9 路径移除未执行:黄金集 fixture 缺失,无法建立零调用者证据(计划自身前置条件)。
