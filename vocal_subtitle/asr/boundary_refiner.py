@@ -91,6 +91,11 @@ class BoundaryRefiner:
             if asr.words:
                 all_words.extend(asr.words)
 
+        # 统一边界裁决(高精度方案 Task 4):来源为 segment_boundary 的
+        # 伪造词时间不得驱动段首收缩;无来源标记的原始 ASR 词照常参与。
+        from ..physical.boundary_decision import has_authoritative_word_time
+        all_words = [w for w in all_words if has_authoritative_word_time(w)]
+
         if not all_words:
             # 无词级时间戳 → 仅用三帧能量斜率
             seg_start = self.refine_boundary_bidirectional(

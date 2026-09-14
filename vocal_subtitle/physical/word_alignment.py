@@ -20,6 +20,10 @@ from .boundary_arbiter import (
     BoundaryCandidate,
     BoundaryDecision,
 )
+from .boundary_decision import (
+    apply_word_time_provenance,
+    enforce_snap_policy,
+)
 from .subtitle_bins import PhysicalSubtitleBin, assign_word_to_bin
 from .timeline import PhysicalTimeline
 
@@ -383,6 +387,8 @@ def align_words_to_physical(
     vad_segments: Sequence[Any] | None = None,
     ffmpeg_result: Mapping[str, Any] | None = None,
     noise_profile: Any | None = None,
+    hard_silences: Sequence[Tuple[float, float]] = (),
+    large_snap_evidence: Optional[Mapping[str, bool]] = None,
 ) -> List[WordAllocation]:
     """Produce aligned WordAllocations with BoundaryDecision on each word endpoint.
 
@@ -573,6 +579,25 @@ def align_words_to_physical(
             missing_reason="no_legal_end_candidate",
         )
 
+        # 统一边界裁决(高精度方案 Task 4):先标记词级时间来源,再按
+        # 置信度档位限幅;低置信只保留诊断,跨硬静音一律拒绝。
+        start_decision = apply_word_time_provenance(start_decision, word)
+        end_decision = apply_word_time_provenance(end_decision, word)
+        start_decision = enforce_snap_policy(
+            start_decision,
+            raw_time=raw_start,
+            tier=tier,
+            hard_silences=hard_silences,
+            large_snap_evidence=large_snap_evidence,
+        )
+        end_decision = enforce_snap_policy(
+            end_decision,
+            raw_time=raw_end,
+            tier=tier,
+            hard_silences=hard_silences,
+            large_snap_evidence=large_snap_evidence,
+        )
+
         # Never stretch the last word end beyond raw_end by more than 50ms
         if end_decision.boundary_time > raw_end + 0.050:
             end_decision_limited = BoundaryDecision(
@@ -606,6 +631,7 @@ def align_words_to_physical(
             boundary_evidence_ids=tuple(dict.fromkeys(
                 start_decision.evidence_ids + end_decision.evidence_ids
             )),
+            time_source=start_decision.time_source or "segment_boundary",
         )
 
         result.append(new_allocation)

@@ -54,6 +54,8 @@ class WordAllocation:
     start_boundary_decision: BoundaryDecision | None = None
     end_boundary_decision: BoundaryDecision | None = None
     boundary_evidence_ids: tuple[str, ...] = ()
+    # 统一边界裁决(高精度方案 Task 4):该词端点的权威时间来源。
+    time_source: str = "segment_boundary"
 
     @property
     def clip_ids(self) -> tuple[str, ...]:

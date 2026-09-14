@@ -45,6 +45,9 @@ class BoundaryDecision:
     candidate_scores: tuple[tuple[str, float], ...] = ()
     rejected_candidates: tuple[str, ...] = ()
     candidate_diagnostics: tuple[dict[str, Any], ...] = ()
+    # 统一边界裁决(高精度方案 Task 4):词级时间来源与修订轨迹。
+    time_source: str = ""
+    revision_trace: tuple[dict[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +65,8 @@ class BoundaryDecision:
             "candidate_diagnostics": [
                 dict(item) for item in self.candidate_diagnostics
             ],
+            "time_source": self.time_source,
+            "revision_trace": [dict(item) for item in self.revision_trace],
         }
 
     @classmethod
@@ -81,6 +86,12 @@ class BoundaryDecision:
             candidate_diagnostics=tuple(
                 dict(item)
                 for item in payload.get("candidate_diagnostics", ())
+                if isinstance(item, Mapping)
+            ),
+            time_source=str(payload.get("time_source", "") or ""),
+            revision_trace=tuple(
+                dict(item)
+                for item in payload.get("revision_trace", ())
                 if isinstance(item, Mapping)
             ),
         )
