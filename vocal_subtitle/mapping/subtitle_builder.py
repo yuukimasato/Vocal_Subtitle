@@ -63,6 +63,17 @@ class SubtitleBuilder:
     # 弱分隔符（逗号、分号、空格等 — 仅在强制拆分时使用）
     _WEAK_SPLIT = re.compile(r"[,，;；\s—…]+")
 
+    # CJK 字间空格：逐字词拼接路径（"师 姐"）在导出前压掉 CJK 内部空格，
+    # 拉丁词间空格不受影响（仅当空格两侧都是 CJK 字符/全角标点时才移除）
+    _CJK_INNER_SPACE = re.compile(
+        r"(?<=[一-鿿぀-ゟ゠-ヿ가-힯\u3000-\u303F\uFF00-\uFFEF])[ \t]+"
+        r"(?=[一-鿿぀-ゟ゠-ヿ가-힯\u3000-\u303F\uFF00-\uFFEF])"
+    )
+
+    @classmethod
+    def _collapse_cjk_spaces(cls, text: str) -> str:
+        return cls._CJK_INNER_SPACE.sub("", text) if text else text
+
     def __init__(self, rule: Optional[SubtitleRule] = None):
         self.rule = rule or SubtitleRule()
 
@@ -85,7 +96,10 @@ class SubtitleBuilder:
         # Events reaching the builder have already passed the finalizer.  The
         # builder may format text for a target container, but it must not alter
         # logical cue count, timing, numbering, or caller-owned objects.
-        wrapped = self._apply_line_wrapping(copy.deepcopy(list(events)))
+        prepared = copy.deepcopy(list(events))
+        for event in prepared:
+            event.text = self._collapse_cjk_spaces(event.text)
+        wrapped = self._apply_line_wrapping(prepared)
 
         # 使用 pysubs2 导出
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,7 +128,10 @@ class SubtitleBuilder:
         Returns:
             字幕文件内容字符串
         """
-        wrapped = self._apply_line_wrapping(copy.deepcopy(list(events)))
+        prepared = copy.deepcopy(list(events))
+        for event in prepared:
+            event.text = self._collapse_cjk_spaces(event.text)
+        wrapped = self._apply_line_wrapping(prepared)
         subs = self._to_ssa(wrapped, fmt=fmt)
         return subs.to_string(fmt)
 

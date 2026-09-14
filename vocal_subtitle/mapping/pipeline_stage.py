@@ -76,6 +76,12 @@ class PipelineMappingMixin:
         from ..mapping.finalize import FinalizeConfig
         sub_cfg = getattr(self.config, "subtitle", None)
 
+        # 合并塌缩补偿：word_split_on_turn 关闭时，横跨多个说话人 turn 的
+        # 合并事件由 assign_event_speakers 整体继承主说话人（配置语义），
+        # finalizer 随后按行长/时长拆出的 cue 全部继承同一标签。这里记录
+        # 此类事件的范围，finalization 之后按各 cue 的主导 turn 重新归属。
+        multi_spans, early_turns = self._multi_speaker_spans(events)
+
         result = finalize_subtitle_events(
             events,
             config=FinalizeConfig(
@@ -87,9 +93,81 @@ class PipelineMappingMixin:
             ),
             audio_duration=audio_duration if audio_duration and audio_duration > 0 else None,
         )
+        if multi_spans:
+            relabeled_count, distinct_speakers = self._relabel_multi_speaker_cues(
+                result.events, multi_spans, early_turns,
+            )
+            if relabeled_count and distinct_speakers > stats.speaker_count:
+                stats.speaker_count = distinct_speakers
         stats.subtitle_count = result.subtitle_count
         stats.quality_diagnostics["finalization"] = result.diagnostics
         return result.events
+
+    def _multi_speaker_spans(self, events: list[SubtitleEvent]):
+        """找出横跨多个说话人 turn 的事件范围（early_turns 生效时）。
+
+        Returns:
+            ([(start, end), ...], EarlyTurnsState) — 无可补偿范围时首项为空。
+        """
+        diar_cfg = getattr(self.config, "diarization", None)
+        if diar_cfg is None or not getattr(diar_cfg, "enabled", True):
+            return [], None
+        state = getattr(self, "_early_turns_state", None)
+        if state is None or not state.active or state.single_speaker:
+            return [], state
+        spans = []
+        for event in events:
+            relevant = [
+                turn for turn in state.turns
+                if turn.end > event.start and turn.start < event.end
+            ]
+            if len({turn.speaker_id for turn in relevant}) > 1:
+                spans.append((float(event.start), float(event.end)))
+        return spans, state
+
+    def _relabel_multi_speaker_cues(
+        self,
+        cues: list[SubtitleEvent],
+        spans,
+        state,
+    ) -> tuple:
+        """按主导 turn 重新归属落在多说话人范围内的 cue（原地修改）。
+
+        Returns:
+            (relabeled_count, distinct_speaker_count)
+        """
+        from ..diarization.early_turns import dominant_speaker_at
+        from ..diarization.speaker_fusion import _speaker_label
+
+        language = self._resolved_language_or_config()
+        relabeled = 0
+        for cue in cues:
+            inside = any(
+                span_start - 1e-6 <= float(cue.start)
+                and float(cue.end) <= span_end + 1e-6
+                for span_start, span_end in spans
+            )
+            if not inside:
+                continue
+            speaker_id = dominant_speaker_at(
+                state.turns, float(cue.start), float(cue.end),
+            )
+            if speaker_id is None or speaker_id == cue.speaker_id:
+                continue
+            cue.speaker_id = speaker_id
+            cue.speaker_label = _speaker_label(language, speaker_id)
+            cue.speaker_source = "global"
+            relabeled += 1
+        if relabeled:
+            distinct = len({
+                cue.speaker_id for cue in cues if cue.speaker_id is not None
+            })
+            logger.info(
+                "Merged-event speaker compensation: %d cues relabeled",
+                relabeled,
+            )
+            return relabeled, distinct
+        return 0, 0
 
     def _run_mapping(
         self,
