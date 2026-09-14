@@ -188,7 +188,8 @@ class PyannoteDiarizationEngine:
                 import transformers.utils.hub as _tf_hub
                 _saved_tf_offline = _tf_hub._is_offline_mode
                 _tf_hub._is_offline_mode = False
-            except (ImportError, ValueError):
+            except (ImportError, ValueError, AttributeError):
+                # AttributeError: 新版 transformers 移除了私有 _is_offline_mode
                 pass
             os.environ["HF_HUB_OFFLINE"] = "0"
 

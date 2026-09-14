@@ -353,10 +353,76 @@ def _run_global_pass(audio: np.ndarray, sample_rate: int, config: Any) -> tuple[
             audio=audio,
             sample_rate=sample_rate,
         )
+        if expected is None:
+            result, model_ref = _verify_single_speaker_auto(
+                audio, sample_rate, diar_cfg, model_ref, result,
+                token=getattr(emb_cfg, "hf_token", "") or None,
+                cache_dir=cache_dir,
+            )
         return result, model_ref, "ok"
     except Exception as exc:
         logger.warning("Global diarization unavailable: %s", exc)
         return None, model_ref, "failed"
+
+
+# auto 模式单说话人复核：首个候选模型把多人对话塌缩为单说话人时（真实案例：
+# community-1 对相近声线的双人对话返回 1 人，导致全片标成说话人A），用下一个
+# auto 候选模型自然重跑一次；第二模型发现更多说话人则采纳其 turns。不设嵌入
+# 仲裁门控——实测 turn 级 silhouette 无法区分"真双人"与"被强拆的独白"
+# （真双人可低至 0.04），而两个候选模型一致认为单说话人时不会进入采纳分支。
+def _verify_single_speaker_auto(
+    audio: np.ndarray,
+    sample_rate: int,
+    diar_cfg: Any,
+    first_model_ref: str,
+    result: DiarizationResult,
+    *,
+    token: str | None,
+    cache_dir: str,
+) -> tuple[DiarizationResult, str]:
+    turns = list(result.turns or [])
+    speakers = {turn.speaker_id for turn in turns}
+    if len(speakers) > 1 or len(turns) < 2:
+        return result, first_model_ref
+    if getattr(diar_cfg, "global_model", "auto") != "auto":
+        return result, first_model_ref
+
+    for candidate in ("diarization-3.1", "community-1"):
+        ref = resolve_global_model_ref(candidate)
+        if (not ref or ref == first_model_ref
+                or not is_model_cached(candidate, cache_dir)):
+            continue
+        try:
+            from .pyannote_engine import PyannoteDiarizationEngine
+
+            engine = PyannoteDiarizationEngine(
+                model_ref=ref, token=token, cache_dir=cache_dir,
+            )
+            verify_result = engine.diarize(
+                audio=audio,
+                sample_rate=sample_rate,
+                min_speakers=None,
+                max_speakers=getattr(diar_cfg, "max_speakers", 10),
+            )
+            verify_result = canonicalize_diarization_result(
+                verify_result,
+                max_speakers=getattr(diar_cfg, "max_speakers", 10),
+                audio=audio,
+                sample_rate=sample_rate,
+            )
+        except Exception as exc:
+            logger.warning("Single-speaker verify pass failed (%s): %s", ref, exc)
+            continue
+        verify_speakers = {turn.speaker_id for turn in (verify_result.turns or [])}
+        if len(verify_speakers) > 1:
+            logger.info(
+                "Single-speaker verify: %s found %d speakers "
+                "(first model %s reported 1) — adopting multi-speaker turns",
+                ref, len(verify_speakers), first_model_ref,
+            )
+            return verify_result, ref
+        return result, first_model_ref
+    return result, first_model_ref
 
 
 def _global_speaker_at(turns: list[SpeakerTurn], point: float) -> Optional[int]:

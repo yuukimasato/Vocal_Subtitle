@@ -316,3 +316,100 @@ def test_speaker_evidence_conflict_falls_back_to_global(monkeypatch):
     assert result.conflict_count == 1
     assert result.diagnostics["unknown_count"] == 0
     assert all(item.speaker_label for item in result.events)
+
+
+# ---- auto 单说话人复核 (_verify_single_speaker_auto) ----
+
+def _turns_result(*speaker_ids):
+    return DiarizationResult(
+        turns=[
+            SpeakerTurn(start=float(i) * 3.0, end=float(i) * 3.0 + 2.0, speaker_id=sid)
+            for i, sid in enumerate(speaker_ids)
+        ],
+        status="ok",
+    )
+
+
+class _FakeVerifyEngine:
+    result = None
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def diarize(self, audio, sample_rate, min_speakers=None, max_speakers=10):
+        return type(self).result
+
+
+def test_single_speaker_verify_adopts_multi_speaker_retry(monkeypatch):
+    monkeypatch.setattr(speaker_fusion, "is_model_cached", lambda name, cache: True)
+    monkeypatch.setattr(
+        speaker_fusion, "resolve_global_model_ref",
+        lambda name: f"pyannote/speaker-diarization-{name}",
+    )
+    _FakeVerifyEngine.result = _turns_result(0, 1, 0, 1)
+    monkeypatch.setattr(
+        "vocal_subtitle.diarization.pyannote_engine.PyannoteDiarizationEngine",
+        _FakeVerifyEngine,
+    )
+
+    config = PipelineConfig()
+    config.diarization.global_model = "auto"
+    first = _turns_result(0, 0, 0)
+
+    result, model_ref = speaker_fusion._verify_single_speaker_auto(
+        np.zeros(16000, dtype=np.float32), 16000,
+        config.diarization, "pyannote/speaker-diarization-community-1",
+        first, token=None, cache_dir="cache/speaker_models",
+    )
+
+    assert {turn.speaker_id for turn in result.turns} == {0, 1}
+    assert model_ref == "pyannote/speaker-diarization-diarization-3.1"
+
+
+def test_single_speaker_verify_keeps_first_when_retry_also_single(monkeypatch):
+    monkeypatch.setattr(speaker_fusion, "is_model_cached", lambda name, cache: True)
+    monkeypatch.setattr(
+        speaker_fusion, "resolve_global_model_ref",
+        lambda name: f"pyannote/speaker-diarization-{name}",
+    )
+    _FakeVerifyEngine.result = _turns_result(0, 0)
+    monkeypatch.setattr(
+        "vocal_subtitle.diarization.pyannote_engine.PyannoteDiarizationEngine",
+        _FakeVerifyEngine,
+    )
+
+    config = PipelineConfig()
+    config.diarization.global_model = "auto"
+    first = _turns_result(0, 0, 0)
+
+    result, model_ref = speaker_fusion._verify_single_speaker_auto(
+        np.zeros(16000, dtype=np.float32), 16000,
+        config.diarization, "pyannote/speaker-diarization-community-1",
+        first, token=None, cache_dir="cache/speaker_models",
+    )
+
+    assert result is first
+    assert model_ref == "pyannote/speaker-diarization-community-1"
+
+
+def test_single_speaker_verify_skipped_for_explicit_model(monkeypatch):
+    def _fail_engine(*args, **kwargs):
+        raise AssertionError("verify engine must not load for explicit model")
+
+    monkeypatch.setattr(
+        "vocal_subtitle.diarization.pyannote_engine.PyannoteDiarizationEngine",
+        _fail_engine,
+    )
+
+    config = PipelineConfig()
+    config.diarization.global_model = "diarization-3.1"
+    first = _turns_result(0, 0, 0)
+
+    result, model_ref = speaker_fusion._verify_single_speaker_auto(
+        np.zeros(16000, dtype=np.float32), 16000,
+        config.diarization, "pyannote/speaker-diarization-3.1",
+        first, token=None, cache_dir="cache/speaker_models",
+    )
+
+    assert result is first
+    assert model_ref == "pyannote/speaker-diarization-3.1"
