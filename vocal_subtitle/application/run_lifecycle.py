@@ -306,6 +306,11 @@ class PipelineLifecycleMixin:
             "fallback_category": str(stats.fallback_category or ""),
             "stage_timings": dict(stats.stage_timings or {}),
         })
+        # 阶段质量报告聚合(Task 6):每个任务的阶段耗时、状态与降级原因。
+        from ..quality.stage_report import aggregate_run_diagnostics
+        stats.quality_diagnostics["stage_reports"] = aggregate_run_diagnostics(
+            self._run_context,
+        )
         self._finalize_task_state(stats, result_payload=result_payload)
         self._generate_run_report(
             input_path, stats, task_id,
@@ -353,9 +358,11 @@ class PipelineLifecycleMixin:
                     "status": "ok",
                 })
             except Exception as e:
+                from ..contracts.errors import classify_exception
                 logger.error("Preflight failed: %s", e)
                 context.add_diagnostic("preflight", {
                     "status": "failed",
+                    "category": classify_exception(e),
                     "error": str(e),
                 })
                 return {
