@@ -279,6 +279,7 @@ pipeline:
     authoritative_mode: false
     shadow_mode: true
     context_reasr_enabled: false
+    context_reasr_min_level: "medium"         # 风险门控下限：medium(现状) | high(仅 high/critical/冲突窗口)
     qwen_enabled: false
     forced_aligner_enabled: false
     sed_enabled: false

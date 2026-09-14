@@ -319,6 +319,9 @@ class EvidenceReviewConfig:
     # global 候选角色准入（优化方案 8.1）：默认 global 只作为 signal 参与风险
     # 评分；显式开启后才允许通过校验的 global 候选进入替代候选集合。
     global_alternative_enabled: bool = False
+    # Context Re-ASR 风险门控下限（优化方案 3.3 / Task 6）：只复核达到该档位
+    # 或带明确冲突码的窗口。默认 medium 保持既有行为；高精度配置可提升为 high。
+    context_reasr_min_level: str = "medium"
     qwen_enabled: bool = False
     forced_aligner_enabled: bool = False
     sed_enabled: bool = False

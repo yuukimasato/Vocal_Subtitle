@@ -99,6 +99,9 @@ class EvidenceReviewService:
             right_context=config.right_context,
             max_group_duration=config.max_group_duration,
             max_window_duration=config.max_window_duration,
+            # 风险门控下限(高精度方案 Task 6):默认 medium 保持既有行为,
+            # high_precision 配置可提升为 high,只复核 high/critical/冲突窗口。
+            min_level=str(getattr(config, "context_reasr_min_level", "medium") or "") or None,
         ))
         review_policy = getattr(request, "review_policy", "risk_only")
         windows = scheduler.schedule(
@@ -112,6 +115,7 @@ class EvidenceReviewService:
         review_diagnostics: dict[str, Any] = {
             "status": "skipped",
             "reason": "no_review_windows",
+            "reviewed_window_count": 0,
         }
         audio_hash = request.audio_hash
         if ports.cache is not None and not audio_hash:
@@ -122,6 +126,7 @@ class EvidenceReviewService:
                     "status": "unavailable",
                     "reason": "context_reasr_port_missing",
                     "windows": len(windows),
+                    "reviewed_window_count": 0,
                 }
             else:
                 review_candidates, review_diagnostics = self._review_windows(
@@ -135,6 +140,22 @@ class EvidenceReviewService:
                     ports=ports,
                     audio_hash=audio_hash,
                 )
+                # Context Re-ASR 可观测性(高精度方案 Task 6):失败数、
+                # 耗时与调用比例;替换收益在决策后回填。
+                review_diagnostics.setdefault("windows", [])
+                review_diagnostics["reasr_failed_count"] = sum(
+                    1 for item in review_diagnostics["windows"]
+                    if item.get("status") not in {"ok", "cache_hit"}
+                )
+                review_diagnostics["reasr_time_ms"] = round(
+                    float(review_diagnostics.get("wall_time_seconds", 0.0)) * 1000.0,
+                    3,
+                )
+                review_diagnostics["reasr_call_ratio"] = round(
+                    review_diagnostics.get("reviewed_window_count", 0)
+                    / max(1, len(primary_candidates)),
+                    4,
+                )
                 assessments = self._rescore_after_context(
                     primary_candidates,
                     assessments,
@@ -146,6 +167,7 @@ class EvidenceReviewService:
                 "status": "unavailable",
                 "reason": "context_reasr_disabled_or_audio_missing",
                 "windows": len(windows),
+                "reviewed_window_count": 0,
                 }
 
         # global 候选角色路由（优化方案 8.1）：默认只把 global 证据传给风险
@@ -301,6 +323,13 @@ class EvidenceReviewService:
             if item.selected_candidate_id in candidate_by_id
             and candidate_by_id[item.selected_candidate_id].source == "global"
         ]
+        # 替换收益(高精度方案 Task 6):决策最终选中的 context_reasr 候选数。
+        review_diagnostics["reasr_replaced_count"] = sum(
+            1
+            for item in decisions
+            if item.selected_candidate_id in candidate_by_id
+            and candidate_by_id[item.selected_candidate_id].source == "context_reasr"
+        )
         global_diagnostics = {
             **global_diagnostics,
             "selected_global_count": len(selected_global_ids),

@@ -17,6 +17,14 @@ class ReviewSchedulerConfig:
     max_group_duration: float = 12.0
     max_window_duration: float = 15.0
     merge_gap: float = 0.8
+    # 风险门控下限(高精度方案 Task 6):只对达到该档位或带明确冲突码的
+    # 候选调度 re-ASR。None 表示沿用 assessment.review_required 原语义。
+    min_level: Optional[str] = None
+
+
+RISK_LEVEL_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+# 明确冲突窗口:即便档位低于 min_level 也必须复核(优化方案 3.3)。
+CONFLICT_CODES = {"global_text_conflict", "context_reasr_conflict"}
 
 
 @dataclass(frozen=True)
@@ -50,12 +58,25 @@ class ReviewScheduler:
         if policy not in {"risk_only", "full_quality"}:
             raise ValueError(f"unsupported review policy: {policy}")
         assessment_by_id = {item.candidate_id: item for item in assessments}
+
+        def passes_level_gate(assessment: RiskAssessment) -> bool:
+            if policy != "full_quality" and not assessment.review_required:
+                return False
+            min_level = self.config.min_level
+            if min_level is None:
+                return True
+            if RISK_LEVEL_ORDER.get(assessment.level, 0) >= RISK_LEVEL_ORDER.get(
+                min_level, 0
+            ):
+                return True
+            return bool(CONFLICT_CODES & set(assessment.evidence_codes))
+
         targets = [
             candidate for candidate in candidates
             if assessment_by_id.get(candidate.id) is not None
             and (
                 policy == "full_quality"
-                or assessment_by_id[candidate.id].review_required
+                or passes_level_gate(assessment_by_id[candidate.id])
             )
         ]
         targets.sort(key=lambda item: (item.start, item.end, item.id))
