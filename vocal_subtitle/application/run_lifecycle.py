@@ -509,6 +509,9 @@ class PipelineLifecycleMixin:
 
         state["separation_result"] = separation_result
         state["requested_asr_path"] = requested_asr_path
+        # 只读音频缓冲(Task 7):一次解码,后续阶段复用切片视图。
+        from ..utils.audio_buffer import audio_buffer_from_array
+        state["audio_buffer"] = audio_buffer_from_array(audio, sample_rate)
         state["vocals_path"] = vocals_path
         state["macro_chunks"] = macro_chunks
         state["audio"] = audio

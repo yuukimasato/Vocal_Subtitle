@@ -88,6 +88,33 @@ class CacheManager:
         raw = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.sha256(raw.encode()).hexdigest()
 
+    @staticmethod
+    def make_content_key(
+        content_hash: str,
+        *,
+        stage: str,
+        stage_version: str,
+        engine: Optional[str] = None,
+        model: Optional[str] = None,
+        config: Optional[dict] = None,
+        params: Optional[dict] = None,
+    ) -> str:
+        """内容 + 版本身份键(重构计划 Task 7)。
+
+        与 make_key(路径绑定)并存;新阶段应优先使用本方法,
+        同内容不同路径可命中,模型/阶段版本变化自动失效。
+        """
+        from .cache_key import build_cache_key
+        return build_cache_key(
+            content_hash=content_hash,
+            stage=stage,
+            stage_version=stage_version,
+            engine=engine,
+            model=model,
+            config=config,
+            params=params,
+        )
+
     def get(self, stage: str, key: str) -> Optional[Any]:
         """获取缓存值
 
