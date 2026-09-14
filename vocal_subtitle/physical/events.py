@@ -34,6 +34,7 @@ class GlobalSubtitleEvent:
     physical_bin_start: float | None = None
     physical_bin_end: float | None = None
     time_source: str = "asr_word"
+    speaker_split_degraded: bool = False
     revision_trace: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -93,6 +94,7 @@ class GlobalSubtitleEvent:
             physical_bin_start=self.physical_bin_start,
             physical_bin_end=self.physical_bin_end,
             time_source=self.time_source,
+            speaker_split_degraded=self.speaker_split_degraded,
             revision_trace=list(self.revision_trace),
         )
 

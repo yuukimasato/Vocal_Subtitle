@@ -33,7 +33,6 @@ from .turn_reconciler import (
     merge_same_speaker_spans,
     normalize_turns,
     reconcile_regions,
-    split_event_intervals,
 )
 
 logger = logging.getLogger(__name__)
@@ -241,13 +240,38 @@ def _apply_identity(
 
 
 def _clamp_event_bounds(event: Any, start: float, end: float) -> None:
-    """无词级时间戳 fallback:把事件范围钳制到第一个说话人片段。"""
+    """无词级时间戳 fallback:把事件范围钳制到第一个说话人片段。
+
+    .. deprecated:: 高精度方案 Task 5
+        该行为会把整句文本压进首个说话人小片段(如 60ms 塞 12 字),
+        已被“保留整段 + speaker_split_degraded 降级标记”取代,仅保留
+        供历史脚本兼容,主链路不再调用。
+    """
     event.start = max(float(event.start), start)
     event.end = min(float(event.end), end)
     if getattr(event, "physical_start", None) is not None:
         event.physical_start = max(event.physical_start, start)
     if getattr(event, "physical_end", None) is not None:
         event.physical_end = min(event.physical_end, end)
+
+
+def _word_times_valid(words: Sequence[Any]) -> bool:
+    """每个词都必须携带合法的 start/end(end > start)才允许词级切分。"""
+    for word in words:
+        try:
+            start = float(_value(word, "start", None))
+            end = float(_value(word, "end", None))
+        except (TypeError, ValueError):
+            return False
+        if start is None or end is None or not (end > start >= 0.0):
+            return False
+    return True
+
+
+def _value(item: Any, key: str, default: Any = None) -> Any:
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
 
 
 def assign_event_speakers(
@@ -276,6 +300,7 @@ def assign_event_speakers(
     output: List[Any] = []
     word_split_count = 0
     fallback_split_count = 0
+    speaker_split_degraded_count = 0
     overlapped_count = 0
 
     for event in events:
@@ -310,31 +335,22 @@ def assign_event_speakers(
             output.append(event)
             continue
 
-        if len(words) < 2:
-            # 无词级时间戳 fallback:turn_reconciler.split_event_intervals
-            # 拆区间。文本无法按词归属,整段文本保留在第一个说话人片段,
-            # 其余片段无法归属即丢弃(计数进诊断)。
-            pieces = [
-                (start, end, speaker_id)
-                for start, end, speaker_id in split_event_intervals(
-                    event.start, event.end, normalized,
-                )
-                if speaker_id is not None
-            ]
-            if len(pieces) >= 2:
-                fallback_split_count += len(pieces) - 1
-            if pieces:
-                start, end, speaker_id = pieces[0]
-                turn = dominant_turn_at(
-                    [t for t in relevant if t.speaker_id == speaker_id],
-                    start, end,
-                )
-                _clamp_event_bounds(event, start, end)
-                if _apply_identity(event, speaker_id, turn, model_ref):
-                    overlapped_count += 1
-            else:
-                if _apply_identity(event, None, None, model_ref):
-                    overlapped_count += 1
+        # 词级切分仅当词表可靠:每个词都携带合法 start/end(优化方案 4.4)。
+        # 无词级时间戳或词时间非法时,禁止按 speaker 硬拆文本——那会把整句
+        # 压进首个说话人小片段;保留整段并标记 speaker_split_degraded,
+        # 归属主说话人,等待词表传递修复后再开启 word_split_on_turn。
+        if len(words) < 2 or not _word_times_valid(words):
+            turn = dominant_turn_at(normalized, event.start, event.end)
+            if _apply_identity(
+                event,
+                turn.speaker_id if turn is not None else None,
+                turn, model_ref,
+            ):
+                overlapped_count += 1
+            event.speaker_split_degraded = True
+            if not str(getattr(event, "time_source", "") or ""):
+                event.time_source = "segment_boundary"
+            speaker_split_degraded_count += 1
             output.append(event)
             continue
 
@@ -386,14 +402,16 @@ def assign_event_speakers(
         "speaker_count": len(unique),
         "local_split_count": word_split_count,
         "fallback_split_count": fallback_split_count,
+        "speaker_split_degraded_count": speaker_split_degraded_count,
         "overlapped_count": overlapped_count,
         "conflict_count": 0,
         "unknown_count": sum(e.speaker_id is None for e in output),
     }
     logger.info(
         "Early turns labeling: %d events / %d speakers "
-        "(word_split=%d, fallback_split=%d, overlapped=%d, unknown=%d)",
+        "(word_split=%d, fallback_split=%d, degraded_split=%d, overlapped=%d, unknown=%d)",
         len(output), len(unique), word_split_count,
-        fallback_split_count, overlapped_count, diagnostics["unknown_count"],
+        fallback_split_count, speaker_split_degraded_count,
+        overlapped_count, diagnostics["unknown_count"],
     )
     return output, diagnostics

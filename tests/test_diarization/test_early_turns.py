@@ -349,7 +349,12 @@ def test_word_split_still_applies_when_shortcut_disabled():
 # ---------------------------------------------------------------------------
 
 def test_no_word_timestamps_fallback_uses_split_event_intervals():
-    """无词级时间戳：split_event_intervals 拆区间，文本保留在首片段。"""
+    """无词级时间戳：保留整段单事件并标记降级,不压进首个说话人片段。
+
+    高精度方案 Task 5(2026-09-14)定案:旧 fallback 会把事件钳制到
+    第一个说话人片段(整句文本压进小片段),改为整段保留 +
+    ``speaker_split_degraded`` 降级标记,归属主说话人。
+    """
     turns = [SpeakerTurn(0.0, 2.0, 0), SpeakerTurn(2.0, 4.0, 1)]
     event = SubtitleEvent(1, 0.0, 4.0, "整段文本")
 
@@ -360,9 +365,10 @@ def test_no_word_timestamps_fallback_uses_split_event_intervals():
     assert len(events) == 1
     assert events[0].speaker_id == 0
     assert events[0].text == "整段文本"
-    # 事件钳制到第一个说话人片段
-    assert events[0].start == 0.0 and events[0].end == 2.0
-    assert diag["fallback_split_count"] == 1
+    # 事件不再被钳制到第一个说话人片段(Task 5)
+    assert events[0].start == 0.0 and events[0].end == 4.0
+    assert events[0].speaker_split_degraded is True
+    assert diag["speaker_split_degraded_count"] == 1
 
 
 def test_word_split_off_inherits_dominant_speaker_without_splitting():

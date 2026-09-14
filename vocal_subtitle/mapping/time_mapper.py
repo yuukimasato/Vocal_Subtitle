@@ -151,6 +151,11 @@ class SubtitleEvent:
     # Stable evidence contract shared by chunk, skeleton, and review paths.
     trace_context: dict = field(default_factory=dict)
 
+    # 说话人切分降级标记（高精度方案 Task 5）：无词级时间戳时事件按
+    # speaker turn 硬拆会把整句文本压进首个说话人片段；此时保留整段并
+    # 置 True，配合 time_source=segment_boundary 提示下游风险。
+    speaker_split_degraded: bool = False
+
     @property
     def duration(self) -> float:
         return self.end - self.start
