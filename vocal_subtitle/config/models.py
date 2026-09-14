@@ -310,6 +310,9 @@ class EvidenceReviewConfig:
     shadow_mode: bool = True
     authoritative_mode: bool = False
     context_reasr_enabled: bool = False
+    # global 候选角色准入（优化方案 8.1）：默认 global 只作为 signal 参与风险
+    # 评分；显式开启后才允许通过校验的 global 候选进入替代候选集合。
+    global_alternative_enabled: bool = False
     qwen_enabled: bool = False
     forced_aligner_enabled: bool = False
     sed_enabled: bool = False

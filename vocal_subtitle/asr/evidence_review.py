@@ -148,13 +148,33 @@ class EvidenceReviewService:
                 "windows": len(windows),
                 }
 
-        global_alternatives, global_diagnostics = self._global_alternatives(
-            primary_candidates,
-            global_evidence,
-            assessments,
-            request.physical_timeline,
+        # global 候选角色路由（优化方案 8.1）：默认只把 global 证据传给风险
+        # 评分；显式准入后才生成 global_alternative 参与替换决策。缺失该字段
+        # 的旧配置对象保持既有准入行为。
+        alternative_admission_enabled = bool(
+            getattr(config, "global_alternative_enabled", True)
         )
-        review_candidates.extend(global_alternatives)
+        if alternative_admission_enabled:
+            global_alternatives, global_diagnostics = self._global_alternatives(
+                primary_candidates,
+                global_evidence,
+                assessments,
+                request.physical_timeline,
+            )
+            review_candidates.extend(global_alternatives)
+        else:
+            global_diagnostics = {
+                "role": "global_signal_only",
+                "alternative_admission": "disabled",
+                "signal_count": len(global_evidence),
+                "considered_overlap_count": 0,
+                "considered_alternative_count": 0,
+                "accepted_alternative_count": 0,
+                "selected_global_count": 0,
+                "accepted_candidate_ids": [],
+                "rejected_count": 0,
+                "rejected": [],
+            }
 
         optional_diagnostics = self._optional_capabilities(config, ports)
         qwen_assessments = assessments
@@ -366,6 +386,12 @@ class EvidenceReviewService:
                     reasons.append("missing_word_timestamps")
                 if not observation.window_id:
                     reasons.append("missing_window_id")
+                if (
+                    candidate.language
+                    and observation.language
+                    and candidate.language.casefold() != observation.language.casefold()
+                ):
+                    reasons.append("language_mismatch")
                 physical = decision_engine._validate_physical(
                     observation,
                     physical_timeline,
@@ -415,6 +441,7 @@ class EvidenceReviewService:
         return alternatives, {
             "role": "global_signal_and_alternative",
             "candidate_role": "global_alternative",
+            "alternative_admission": "enabled",
             "signal_count": len(global_evidence),
             "considered_overlap_count": considered,
             "considered_alternative_count": considered,
