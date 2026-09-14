@@ -537,12 +537,125 @@ def evaluate_golden_set(
     }
 
 
+# ---------------------------------------------------------------------------
+# TTS 专项黄金集门禁（高精度方案 Task 9 / 优化方案 §10.3）
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TTSGoldenThresholds:
+    """TTS 骨架优先场景的独立门禁阈值。
+
+    未达标只阻止 TTS profile 默认化,不参与通用模式门禁,
+    也不得通过放宽通用门禁来隐藏其他场景回归。
+    """
+
+    max_skeleton_start_delta_p90_ms: float = 50.0
+    max_skeleton_end_delta_p90_ms: float = 50.0
+    min_skeleton_coverage_rate: float = 0.98
+    max_cross_skeleton_merge_count: int = 0
+    max_micro_pause_split_rate: float = 0.2
+
+
+def _percentile(values: Sequence[float], ratio: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    position = ratio * (len(ordered) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return float(ordered[lower] * (1 - fraction) + ordered[upper] * fraction)
+
+
+def evaluate_tts_golden_set(
+    cases: Iterable[Mapping[str, Any]],
+    *,
+    thresholds: TTSGoldenThresholds | None = None,
+) -> dict[str, Any]:
+    """对 TTS 骨架优先场景输出独立的质量结论。
+
+    每个用例的 ``diagnostics`` 需要携带骨架优先运行产出的
+    ``skeleton_start_delta_ms`` / ``skeleton_end_delta_ms`` /
+    ``skeleton_coverage_rate`` / ``cross_skeleton_merge_count`` /
+    ``micro_pause_split_count`` 字段(见 AcousticValidator
+    ``_apply_skeleton_priority`` 报告)。
+    """
+    policy = thresholds or TTSGoldenThresholds()
+    normalized = [dict(case) for case in cases]
+    start_deltas: list[float] = []
+    end_deltas: list[float] = []
+    coverage_values: list[float] = []
+    cross_merges = 0
+    micro_splits = 0
+    event_total = 0
+
+    for case in normalized:
+        diagnostic = case.get("diagnostics", {})
+        if not isinstance(diagnostic, Mapping):
+            diagnostic = {}
+        start_deltas.append(float(diagnostic.get("skeleton_start_delta_ms", 0.0) or 0.0))
+        end_deltas.append(float(diagnostic.get("skeleton_end_delta_ms", 0.0) or 0.0))
+        coverage = diagnostic.get("skeleton_coverage_rate")
+        if coverage is not None:
+            coverage_values.append(float(coverage))
+        cross_merges += int(diagnostic.get("cross_skeleton_merge_count", 0) or 0)
+        micro_splits += int(diagnostic.get("micro_pause_split_count", 0) or 0)
+        event_total += int(diagnostic.get("event_count", 0) or 0)
+
+    micro_rate = _rate(micro_splits, event_total)
+    coverage_rate = (
+        sum(coverage_values) / len(coverage_values) if coverage_values else 0.0
+    )
+    metrics = {
+        "case_count": len(normalized),
+        "skeleton_start_delta_p50_ms": round(_percentile(start_deltas, 0.50), 3),
+        "skeleton_start_delta_p90_ms": round(_percentile(start_deltas, 0.90), 3),
+        "skeleton_end_delta_p50_ms": round(_percentile(end_deltas, 0.50), 3),
+        "skeleton_end_delta_p90_ms": round(_percentile(end_deltas, 0.90), 3),
+        "skeleton_coverage_rate": round(coverage_rate, 6),
+        "cross_skeleton_merge_count": cross_merges,
+        "micro_pause_split_count": micro_splits,
+        "micro_pause_split_rate": micro_rate,
+    }
+    checks = {
+        "skeleton_start_delta": (
+            metrics["skeleton_start_delta_p90_ms"] <= policy.max_skeleton_start_delta_p90_ms
+        ),
+        "skeleton_end_delta": (
+            metrics["skeleton_end_delta_p90_ms"] <= policy.max_skeleton_end_delta_p90_ms
+        ),
+        "skeleton_coverage": coverage_rate >= policy.min_skeleton_coverage_rate,
+        "cross_skeleton_merge": cross_merges <= policy.max_cross_skeleton_merge_count,
+        "micro_pause_split": micro_rate <= policy.max_micro_pause_split_rate,
+    }
+    passed = all(checks.values())
+    return {
+        "gate": "tts_skeleton_priority",
+        "status": "pass" if passed else "fail",
+        "publishable": passed,
+        "metrics": metrics,
+        "checks": checks,
+        "thresholds": {
+            "max_skeleton_start_delta_p90_ms": policy.max_skeleton_start_delta_p90_ms,
+            "max_skeleton_end_delta_p90_ms": policy.max_skeleton_end_delta_p90_ms,
+            "min_skeleton_coverage_rate": policy.min_skeleton_coverage_rate,
+            "max_cross_skeleton_merge_count": policy.max_cross_skeleton_merge_count,
+            "max_micro_pause_split_rate": policy.max_micro_pause_split_rate,
+        },
+    }
+
+
 __all__ = [
     "DEFAULT_STRICT_MIN_OVERLAP_SECONDS",
     "GoldenQualityThresholds",
     "LEGACY_MATCH_POLICY_VERSION",
     "STRICT_MATCH_POLICY_VERSION",
+    "TTSGoldenThresholds",
     "audit_case_coverage",
     "classify_expected_match",
     "evaluate_golden_set",
+    "evaluate_tts_golden_set",
 ]

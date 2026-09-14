@@ -284,6 +284,19 @@ class AcousticValidator:
             adjusted[index] = (new_start, new_end)
             next_start = new_start
 
+        # 骨架覆盖率:被 ≥1 条 cue 映射的骨架段时长 / 骨架总时长。
+        total_skeleton = sum(
+            seg_end - seg_start for seg_start, seg_end in speech_skeleton
+        )
+        covered_skeleton = sum(
+            bound[2][1] - bound[2][0]
+            for bound in bounds
+            if bound is not None
+        )
+        report["skeleton_coverage_rate"] = (
+            round(covered_skeleton / total_skeleton, 6) if total_skeleton > 0 else None
+        )
+
         # 同段内相邻 cue 对计数(上游微停顿拆分,TTS 模式保留不合并)。
         for index in range(len(ordered) - 1):
             if adjusted[index] is None or adjusted[index + 1] is None:

@@ -166,6 +166,27 @@ def _diagnostics(stats: Any) -> dict[str, Any]:
             (stats.quality_diagnostics or {}).get("physical_speech_spans", ())
         ),
         "coverage_audit": projection.get("coverage") or {},
+        # TTS 骨架优先门禁字段（高精度方案 Task 9）：仅 skeleton_priority
+        # profile 的运行会产出实际数值；通用运行为 enabled=False。
+        "skeleton_priority": bool(
+            (getattr(stats, "diagnostic_report", None) or {}).get("skeleton_priority")
+        ),
+        "skeleton_start_delta_ms": (getattr(stats, "diagnostic_report", None) or {}).get(
+            "skeleton_start_delta_ms",
+        ),
+        "skeleton_end_delta_ms": (getattr(stats, "diagnostic_report", None) or {}).get(
+            "skeleton_end_delta_ms",
+        ),
+        "skeleton_coverage_rate": (getattr(stats, "diagnostic_report", None) or {}).get(
+            "skeleton_coverage_rate",
+        ),
+        "cross_skeleton_merge_count": (getattr(stats, "diagnostic_report", None) or {}).get(
+            "cross_skeleton_merge_count",
+        ),
+        "micro_pause_split_count": (getattr(stats, "diagnostic_report", None) or {}).get(
+            "micro_pause_split_count",
+        ),
+        "event_count": stats.subtitle_count,
     }
 
 
@@ -534,6 +555,7 @@ def main(argv: list[str] | None = None) -> int:
         "generated_from": str(args.manifest.relative_to(REPO_ROOT)),
         "metadata": {
             "primary_engine": args.engine,
+            "profile": args.profile,
             "primary_model": args.model if not args.model_matrix else None,
             "models": list(models),
             "secondary_engine": args.secondary_engine,
