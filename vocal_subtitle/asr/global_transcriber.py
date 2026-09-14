@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import copy
 import re
 from collections.abc import Sequence
@@ -105,6 +106,7 @@ class GlobalTranscriber:
                 if isinstance(raw_segments, GlobalTranscript):
                     transcript = raw_segments
                 else:
+                    alignment_applied = False
                     if self.config.alignment and hasattr(self.engine, "align"):
                         try:
                             raw_segments = self.engine.align(
@@ -113,6 +115,7 @@ class GlobalTranscriber:
                                 segments=raw_segments,
                                 language=language,
                             )
+                            alignment_applied = True
                             diagnostics["alignment_status"] = "applied"
                         except Exception as exc:
                             diagnostics["alignment_failures"].append(
@@ -127,6 +130,9 @@ class GlobalTranscriber:
                         time_offset=window.start,
                         language=language,
                         audio_duration=duration,
+                        word_time_source="whisperx_alignment"
+                        if alignment_applied
+                        else "faster_whisper_word",
                     )
                 candidates.append(transcript)
                 diagnostics["raw_word_count"] += len(transcript.words)
@@ -154,6 +160,14 @@ class GlobalTranscriber:
                 diagnostics["windows"].append({**failure, "status": "failed"})
 
         transcript = self._combine(candidates, duration, diagnostics)
+        diagnostics["word_time_source_counts"] = dict(
+            sorted(
+                collections.Counter(
+                    word.metadata.get("time_source", "unspecified")
+                    for word in transcript.words
+                ).items()
+            )
+        )
         return GlobalTranscriptionResult(transcript=transcript, diagnostics=diagnostics)
 
     def _bound_windows(self, windows: Sequence[ContextWindow]) -> list[ContextWindow]:

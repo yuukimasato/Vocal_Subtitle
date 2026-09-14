@@ -17,6 +17,9 @@ TIME_SOURCES = {
     "qwen_forced_alignment",
     "segment_boundary",
     "physical_acoustic_boundary",
+    # 高精度链路的词级时间来源（优化方案 3.1）。
+    "whisperx_alignment",
+    "faster_whisper_word",
 }
 EVIDENCE_SOURCES = {
     "segmented",

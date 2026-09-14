@@ -528,6 +528,7 @@ class PipelineASRPathMixin:
                     right_context=float(getattr(global_config, "right_context", 0.5)),
                     max_window_duration=max_window_duration,
                     window_overlap=float(getattr(global_config, "window_overlap", 0.5)),
+                    alignment=bool(getattr(global_config, "alignment_enabled", True)),
                 ),
             )
             windowed = transcriber.transcribe(

@@ -225,6 +225,9 @@ class GlobalASRConfig:
     enabled: bool = True
     routing: str = "segmented"  # segmented | global (compatibility)
     evidence_enabled: bool = True
+    # WhisperX 词级强制对齐开关。默认 True 与既有 GlobalTranscriber 行为一致
+    # （后端不支持 align() 时自动跳过）；仅当后端实现 align() 时才会实际调用。
+    alignment_enabled: bool = True
     backend: str = "faster-whisper"
     left_context: float = 0.5
     right_context: float = 0.5

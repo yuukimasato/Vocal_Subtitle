@@ -329,8 +329,14 @@ def adapt_transcription_segments(
     time_offset: float = 0.0,
     language: Optional[str] = None,
     audio_duration: Optional[float] = None,
+    word_time_source: Optional[str] = None,
 ) -> GlobalTranscript:
-    """Adapt relative-window ASR segments into absolute global IR."""
+    """Adapt relative-window ASR segments into absolute global IR.
+
+    ``word_time_source`` records where each word timestamp came from
+    (e.g. ``whisperx_alignment`` or ``faster_whisper_word``); when omitted the
+    word metadata keeps its legacy shape without the provenance key.
+    """
     offset = _number(time_offset, "time_offset")
     source_window_id = _text(source_window_id, "source_window_id")
     prefix = _text(segment_id_prefix, "segment_id_prefix")
@@ -365,7 +371,10 @@ def adapt_transcription_segments(
                     avg_logprob=segment.avg_logprob,
                     no_speech_prob=segment.no_speech_prob,
                     compression_ratio=segment.compression_ratio,
-                    metadata={"source": "transcription_segment"},
+                    metadata={
+                        "source": "transcription_segment",
+                        **({"time_source": word_time_source} if word_time_source else {}),
+                    },
                 )
             except (AttributeError, TypeError, ValueError):
                 diagnostics["skipped_words"] += 1

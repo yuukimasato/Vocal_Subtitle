@@ -264,6 +264,7 @@ def normalize_whisperx_transcript(
     time_offset: float = 0.0,
     language: str | None = None,
     audio_duration: float | None = None,
+    word_time_source: str | None = None,
 ) -> GlobalTranscript:
     """Normalize one window directly into absolute global IR."""
     segments = normalize_whisperx_segments(raw_segments, language=language)
@@ -274,6 +275,7 @@ def normalize_whisperx_transcript(
         time_offset=time_offset,
         language=language,
         audio_duration=audio_duration,
+        word_time_source=word_time_source,
     )
 
 
