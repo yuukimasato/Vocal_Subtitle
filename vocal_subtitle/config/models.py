@@ -162,6 +162,10 @@ class AcousticValidationConfig:
     # 推导，钳制 [-45, -30]（与 noise-shadow 建议策略一致）；估计失败或
     # 关闭时回退固定 skeleton_noise_db。
     skeleton_adaptive_noise_db: bool = True
+    # 骨架优先（高精度方案 Task 8 / 优化方案 §10）：TTS、配音、干净单人
+    # 播报场景下骨架段即 cue 的硬物理范围，词级 ASR 只做段内细化；
+    # 骨架间静音是硬边界，字幕不得跨越。仅由场景 profile 显式开启。
+    skeleton_priority: bool = False
     skeleton_noise_margin_db: float = 10.0
     # 导出骨架段音频供人工验证
     export_skeleton_segments: bool = False

@@ -1,0 +1,130 @@
+# ============================================================
+# Vocal Subtitle — TTS / 干净单人播报场景模板
+# ============================================================
+# 适用场景（优化方案 §10）：高质量 TTS 人声、配音、干净单人播报。
+# 特点：单人、低噪声、骨架端点与真实语音起止高度吻合。
+# 核心策略：物理骨架优先 —— 骨架段即 cue 的硬物理范围，
+# ASR 只负责文本和词级顺序，骨架间静音是硬边界不得跨越。
+# 不适用于：音乐现场、强 BGM 影视对白、多人重叠、强混响低信噪比。
+# ============================================================
+
+pipeline:
+
+  separation:
+    engine: "uvr"
+    uvr_model: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+    output:
+      sample_rate: 16000
+      channels: 1
+      format: "wav"
+      bit_depth: 16
+
+  vad:
+    engine: "silero"
+    threshold: 0.40
+    min_speech_duration_ms: 150
+    min_silence_duration_ms: 350
+
+  merging:
+    min_silence_gap: 0.4
+    max_segment_length: 20.0
+    padding: 0.08
+    adaptive_padding: true
+    padding_min: 0.03
+    padding_max: 0.15
+    pre_split_silence: true
+    pre_split_threshold: 0.8
+    min_fragment_duration: 0.25
+    protect_single_word: true
+    min_word_gap_ms: 80
+    min_segment_length: 0.15
+
+  # 方案七：全局声学标尺校验 —— 骨架优先
+  acoustic_validation:
+    enabled: true
+    skeleton_mode: true                    # 骨架分段独立处理
+    skeleton_priority: true                # ★ 骨架段即 cue 硬物理范围（§10 专项）
+    timeline_arbitration: true             # 三规则仲裁
+    reproject_grouped_windows: true        # 聚合窗口钳制回物理骨架段
+    allow_start_pull_earlier: true         # start 拉回骨架起点
+    allow_end_shorten: true                # end 向内收缩
+    allow_end_extend: true                 # end 延长到段内语音终点
+    max_snap_distance: 0.15                # 受限吸附:150ms
+    max_start_snap_distance: 0.20          # start 吸附限幅:200ms
+    snap_start_margin: 0.01                # start 前导余量
+    snap_end_margin: 0.003                 # end 向内安全余量 ≤3ms
+    member_split_min_gap: 0.3
+    member_split_max_duration: 5.0
+    generate_report: true
+    flag_threshold_ms: 200
+
+  # 说话人分离：单人 TTS 自动短路，不做复杂 speaker change 切分
+  diarization:
+    enabled: true
+    engine: "agglomerative"
+    early_turns: true
+    word_split_on_turn: true               # Task 5 修复后开启;单说话人时自动短路
+    single_speaker_shortcut: true
+    min_speakers: 1
+    max_speakers: 2
+
+  asr:
+    engine: "faster-whisper"
+    model: "large-v3"
+    beam_size: 5
+    word_timestamps: true
+    condition_on_previous_text: false
+    vad_filter: false
+    language_mode: "single"
+
+    global_asr:
+      enabled: true
+      routing: "global_primary"            # TTS 骨架清晰,全局窗口作为主候选
+      evidence_enabled: true
+      alignment_enabled: true              # WhisperX 词级强制对齐
+      backend: "faster-whisper"
+      left_context: 0.8
+      right_context: 0.8
+      max_window_duration: 180.0
+      window_overlap: 0.5
+
+  evidence_review:
+    enabled: true
+    shadow_mode: false
+    context_reasr_enabled: true
+    context_reasr_min_level: "high"
+    global_alternative_enabled: true
+    qwen_enabled: false
+    forced_aligner_enabled: false
+    sed_enabled: false
+    semantic_review_enabled: false
+    unresolved_keeps_candidate: true
+    require_multi_source_drop: true
+    fallback_to_segmented: true
+    local_recovery_enabled: true
+
+  subtitle:
+    min_duration: 0.8
+    max_duration: 5.0
+    max_chars_cjk: 20
+    max_chars_latin: 42
+    max_lines: 2
+    gap_handling:
+      seamless_threshold: 0.2
+      natural_pause_max: 1.0
+    frame_seamless: true
+    max_stitch_gap: 0.12
+
+  llm_optimize:
+    enabled: false
+
+cache:
+  enabled: true
+  directory: "./cache"
+  ttl_separation: 86400
+  ttl_transcription: 604800
+
+logging:
+  level: "INFO"
+  format: "json"
+  file: "logs/pipeline.log"

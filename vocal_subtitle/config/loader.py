@@ -524,6 +524,7 @@ class ConfigLoader:
             member_split_min_gap=acoustic_raw.get("member_split_min_gap", 0.3),
             member_split_max_duration=acoustic_raw.get("member_split_max_duration", 5.0),
             skeleton_adaptive_noise_db=acoustic_raw.get("skeleton_adaptive_noise_db", True),
+            skeleton_priority=acoustic_raw.get("skeleton_priority", False),
             skeleton_noise_margin_db=acoustic_raw.get("skeleton_noise_margin_db", 10.0),
             export_skeleton_segments=acoustic_raw.get("export_skeleton_segments", False),
             export_skeleton_dir=acoustic_raw.get("export_skeleton_dir", ""),

@@ -15,7 +15,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -65,6 +65,10 @@ class AcousticValidationConfig:
     # ★ 吞静音修复：start 后向吸附（吸附到下一个真实语音起点）的限幅；
     #   faster-whisper 词起点在换人/换句边界普遍偏早 200~300ms
     max_start_snap_distance: float = 0.45
+
+    # 骨架优先（高精度方案 Task 8 / 优化方案 §10）：TTS、配音、干净单人
+    # 播报场景下骨架段即 cue 的硬物理范围，词级 ASR 只做段内细化。
+    skeleton_priority: bool = False
 
 
 class AcousticValidator:
@@ -128,10 +132,17 @@ class AcousticValidator:
         )
 
         # Step 2: 吸附修正
-        validated, report = self._physical_snap_validation(
-            events, speech_skeleton, audio, sample_rate,
-            arbitration=arbitration,
-        )
+        if getattr(cfg, "skeleton_priority", False):
+            # 骨架优先模式（优化方案 §10）：TTS/干净单人场景,骨架段即
+            # cue 的硬物理范围,不走 ASR 词驱动吸附。
+            validated, report = self._apply_skeleton_priority(
+                events, speech_skeleton,
+            )
+        else:
+            validated, report = self._physical_snap_validation(
+                events, speech_skeleton, audio, sample_rate,
+                arbitration=arbitration,
+            )
 
         # Step 2.5: 微间隙合并（同说话人 + gap < 50ms → 合并）
         validated, gap_merged = self._merge_micro_gaps(validated, max_gap=0.05)
@@ -162,6 +173,148 @@ class AcousticValidator:
             report.get("health_score", 100.0),
         )
         return validated, report
+
+    # ------------------------------------------------------------------
+    # 骨架优先边界策略（高精度方案 Task 8 / 优化方案 §10）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _dominant_skeleton_segment(
+        event: object,
+        speech_skeleton: List[Tuple[float, float]],
+    ) -> Optional[Tuple[float, float]]:
+        """返回与事件重叠最长的骨架段;无重叠为 None。"""
+        best: Optional[Tuple[float, float]] = None
+        best_overlap = 0.0
+        for segment in speech_skeleton:
+            overlap = min(float(event.end), segment[1]) - max(
+                float(event.start), segment[0],
+            )
+            if overlap > best_overlap:
+                best, best_overlap = segment, overlap
+        return best
+
+    def _apply_skeleton_priority(
+        self,
+        events: List,
+        speech_skeleton: List[Tuple[float, float]],
+    ) -> Tuple[List, Dict]:
+        """骨架段决定 cue 的合法 start/end;词级只做段内细化。
+
+        - cue start 取主骨架段起点(允许把 ASR 偏晚的起点拉回真实起音);
+        - cue end 取主骨架段终点并向内收缩 snap_end_margin,不进入静音;
+        - 骨架间静音是硬边界:跨越 ≥2 骨架段的事件钳制回主骨架段,
+          不做跨段合并;
+        - 完全无骨架覆盖的事件保持原状并计数;
+        - 相邻 cue 钳制后保持原有顺序且互不重叠。
+        """
+        cfg = self.config
+        end_margin = float(getattr(cfg, "snap_end_margin", 0.003))
+        ordered = sorted(
+            events,
+            key=lambda item: (
+                float(getattr(item, "start", 0.0)),
+                float(getattr(item, "end", 0.0)),
+            ),
+        )
+
+        report: Dict[str, Any] = {
+            "skeleton_priority": True,
+            "skeleton_start_delta_ms": 0.0,
+            "skeleton_end_delta_ms": 0.0,
+            "cross_skeleton_merge_count": 0,
+            "micro_pause_split_count": 0,
+            "skeleton_uncovered_count": 0,
+            "snapped_starts": 0,
+            "snapped_ends": 0,
+            "events_flagged": [],
+        }
+
+        # 骨架间静音是硬边界:统计相邻骨架段之间的静音间隙。
+        hard_gaps: List[Tuple[float, float]] = [
+            (speech_skeleton[i][1], speech_skeleton[i + 1][0])
+            for i in range(len(speech_skeleton) - 1)
+            if speech_skeleton[i + 1][0] > speech_skeleton[i][1]
+        ]
+
+        # Pass 1: 主骨架段归属与基础边界。
+        bounds: List[Optional[Tuple[float, float, object]]] = []
+        for event in ordered:
+            segment = self._dominant_skeleton_segment(event, speech_skeleton)
+            if segment is None:
+                report["skeleton_uncovered_count"] += 1
+                bounds.append(None)
+                continue
+            crossed_gap = any(
+                min(float(event.end), gap_end) - max(float(event.start), gap_start) > 1e-9
+                for gap_start, gap_end in hard_gaps
+            )
+            if crossed_gap:
+                # 事件原范围跨越骨架间硬静音:钳制回主骨架段,
+                # 不跨静音合并、不拆文本。
+                report["cross_skeleton_merge_count"] += 1
+            base_start = float(segment[0])
+            base_end = float(segment[1]) - end_margin
+            report["skeleton_start_delta_ms"] = max(
+                report["skeleton_start_delta_ms"],
+                abs(float(event.start) - base_start) * 1000.0,
+            )
+            report["skeleton_end_delta_ms"] = max(
+                report["skeleton_end_delta_ms"],
+                abs(float(event.end) - base_end) * 1000.0,
+            )
+            bounds.append((base_start, base_end, segment))
+
+        # Pass 2/3: 同段内多 cue 保持原顺序且互不重叠。
+        adjusted: List[Optional[Tuple[float, float]]] = [None] * len(ordered)
+        previous_end: Optional[float] = None
+        for index, bound in enumerate(bounds):
+            if bound is None:
+                continue
+            new_start = max(bound[0], previous_end) if previous_end is not None else bound[0]
+            adjusted[index] = (new_start, bound[1])
+            previous_end = bound[1]
+        next_start: Optional[float] = None
+        for index in range(len(ordered) - 1, -1, -1):
+            if adjusted[index] is None:
+                continue
+            new_start, new_end = adjusted[index]
+            if next_start is not None:
+                new_end = min(new_end, next_start)
+            adjusted[index] = (new_start, new_end)
+            next_start = new_start
+
+        # 同段内相邻 cue 对计数(上游微停顿拆分,TTS 模式保留不合并)。
+        for index in range(len(ordered) - 1):
+            if adjusted[index] is None or adjusted[index + 1] is None:
+                continue
+            if bounds[index][2] == bounds[index + 1][2]:
+                report["micro_pause_split_count"] += 1
+
+        for index, (event, bound) in enumerate(zip(ordered, bounds)):
+            if bound is None:
+                continue
+            new_start, new_end = adjusted[index]
+            if new_start != float(event.start):
+                report["snapped_starts"] += 1
+            if new_end != float(event.end):
+                report["snapped_ends"] += 1
+            trace = getattr(event, "revision_trace", None)
+            if hasattr(trace, "append"):
+                trace.append({
+                    "stage": "skeleton_priority",
+                    "segment": list(bound[2]),
+                    "applied_start": round(new_start, 6),
+                    "applied_end": round(new_end, 6),
+                })
+            event.start = new_start
+            event.end = new_end
+            if getattr(event, "physical_start", None) is not None:
+                event.physical_start = new_start
+            if getattr(event, "physical_end", None) is not None:
+                event.physical_end = new_end
+
+        return ordered, report
 
     # ------------------------------------------------------------------
     # 骨架构建
