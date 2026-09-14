@@ -201,6 +201,11 @@ class PipelineLifecycleMixin:
         )
         if overlap_diag["overlap_count"]:
             stats.quality_diagnostics["final_overlap_repair"] = overlap_diag
+        # 导出前只读时间轴校验(Task 5):修复 Owner 是 enforce_non_overlap,
+        # 此处只验证并记录,不修改事件。
+        from ..mapping.timeline_result import validate_timeline
+        timeline_report = validate_timeline(events)
+        stats.quality_diagnostics["timeline_invariant"] = timeline_report.to_dict()
         export_label = "llm" if self.config.llm_optimize.enabled else "asr"
         final_paths = self._export_subtitles_multi_format(
             builder, events, output_path, output_format, session_dir, label=export_label
