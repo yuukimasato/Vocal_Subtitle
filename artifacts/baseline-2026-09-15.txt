@@ -1,0 +1,27 @@
+=== Vocal Subtitle pipeline-optimization baseline (2026-09-15) ===
+
+## Environment repair note
+uv.lock 无法在 --all-extras 下完整构建 (llvmlite 0.36 编译失败),
+.venv 原始状态 scipy/numpy 版本错配 (scipy 文件引用 np.long)。
+修复: uv sync --inexact + 锁内版本 scipy==1.17.1/numpy==1.26.4 + 补装 dev/webui/soundfile/scikit-learn。
+uv run 曾把误装的包回滚 — 补装必须用 --python .venv/bin/python。
+
+## Baseline commands and results
+$ git status --short --branch  → main 领先 origin/main 12 commits;工作树含未提交用户修改 (validator/run_lifecycle/mapping/*)
+$ python -m compileall -q vocal_subtitle llm_subtitle_optimizer → exit 0
+$ python scripts/check_import_boundaries.py → exit 0
+$ python scripts/check_module_size.py --baseline → exit 0
+$ python scripts/check_api_contract.py → exit 0
+$ python scripts/check_cli_contract.py → exit 0
+
+## Canonical test entry (plan-mandated)
+$ uv run pytest -q --disable-warnings
+→ 1550 passed, 4 skipped, 0 failed (after environment repair)
+
+## Secondary entry (system env)
+$ python -m pytest -q --disable-warnings
+→ 1475 passed, 1 skipped (system venv 缺少部分可选依赖,测试子集更小)
+
+## Working tree protection
+git diff > /tmp/vocal-subtitle-preexisting.diff (1404 lines)
+git ls-files --others --exclude-standard > /tmp/vocal-subtitle-untracked.txt (5 entries)
