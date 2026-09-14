@@ -1,9 +1,9 @@
 {
-  "captured_at": "2026-09-14T15:13:11.571195+00:00",
+  "captured_at": "2026-09-14T16:38:12.468812+00:00",
   "baseline_commit": "d3d49d1",
-  "head": "d3d49d1459ea5979a4fcfd4e36e333f287a80dcc",
+  "head": "9c17f52a2ec8d68b2630ec7479e54645cafa2922",
   "worktree_diff_stat": "...\\267\\257\\346\\226\\271\\346\\241\\210-2026-08-02.md\" | 1200 --------------------\n vocal_subtitle/acoustic/validator.py               |   10 +-\n vocal_subtitle/application/run_lifecycle.py        |   11 +\n vocal_subtitle/mapping/display_timeline.py         |   19 +-\n vocal_subtitle/mapping/final_validator.py          |   55 +\n vocal_subtitle/mapping/subtitle_builder.py         |   24 +-\n 6 files changed, 107 insertions(+), 1212 deletions(-)",
-  "worktree_status": "D \"docs/\\347\\246\\273\\347\\272\\277\\345\\255\\227\\345\\271\\225\\345\\205\\250\\351\\223\\276\\350\\267\\257\\346\\226\\271\\346\\241\\210-2026-08-02.md\"\n M vocal_subtitle/acoustic/validator.py\n M vocal_subtitle/application/run_lifecycle.py\n M vocal_subtitle/mapping/display_timeline.py\n M vocal_subtitle/mapping/final_validator.py\n M vocal_subtitle/mapping/subtitle_builder.py\n?? docs/superpowers/plans/2026-09-14-high-precision-implementation-plan.md\n?? scripts/capture_high_precision_baseline.py\n?? tests/test_mapping/test_adjacent_cue_overlap_repairs.py\n?? \"\\344\\274\\230\\345\\214\\226\\346\\226\\271\\346\\241\\210_\\351\\253\\230\\347\\262\\276\\345\\272\\246\\346\\227\\266\\351\\227\\264\\350\\275\\264\\344\\270\\216\\350\\257\\206\\345\\210\\253\\346\\226\\207\\346\\234\\254.md\"",
+  "worktree_status": "D \"docs/\\347\\246\\273\\347\\272\\277\\345\\255\\227\\345\\271\\225\\345\\205\\250\\351\\223\\276\\350\\267\\257\\346\\226\\271\\346\\241\\210-2026-08-02.md\"\n M vocal_subtitle/acoustic/validator.py\n M vocal_subtitle/application/run_lifecycle.py\n M vocal_subtitle/mapping/display_timeline.py\n M vocal_subtitle/mapping/final_validator.py\n M vocal_subtitle/mapping/subtitle_builder.py\n?? docs/superpowers/plans/2026-09-14-high-precision-implementation-plan.md\n?? tests/test_mapping/test_adjacent_cue_overlap_repairs.py\n?? \"\\344\\274\\230\\345\\214\\226\\346\\226\\271\\346\\241\\210_\\351\\253\\230\\347\\262\\276\\345\\272\\246\\346\\227\\266\\351\\227\\264\\350\\275\\264\\344\\270\\216\\350\\257\\206\\345\\210\\253\\346\\226\\207\\346\\234\\254.md\"",
   "config_snapshot": {
     "asr.engine": "auto",
     "asr.model": "large-v3",
@@ -25,13 +25,13 @@
     "release_gate_group": {
       "command": "/home/hope/.claude/venvs/webnovel-writer/bin/python -m pytest tests/test_release_check.py tests/test_golden_quality_gate.py tests/test_global_asr_path.py -q",
       "exit_code": 0,
-      "summary": "======================= 31 passed, 4 warnings in 15.41s ========================",
+      "summary": "======================= 31 passed, 4 warnings in 16.25s ========================",
       "passed": true
     },
     "asr_physical_mapping_group": {
       "command": "/home/hope/.claude/venvs/webnovel-writer/bin/python -m pytest tests/test_asr tests/test_physical tests/test_mapping -q",
       "exit_code": 0,
-      "summary": "======================== 368 passed, 1 warning in 0.98s ========================",
+      "summary": "======================== 399 passed, 1 warning in 1.01s ========================",
       "passed": true
     }
   },
