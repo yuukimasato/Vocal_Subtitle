@@ -11,13 +11,6 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 
-FALLBACK_REASONS = {
-    "empty_transcript",
-    "invalid_time_range",
-    "insufficient_speech_coverage",
-    "abnormal_text_density",
-}
-
 DEFAULT_MIN_SPEECH_COVERAGE = 0.6
 DEFAULT_MIN_CHARS_PER_SECOND = 0.5
 DEFAULT_MAX_CHARS_PER_SECOND = 100.0

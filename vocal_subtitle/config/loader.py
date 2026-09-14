@@ -57,6 +57,8 @@ class ConfigLoader:
         "education": "education.yaml",
         "variety_show": "variety_show.yaml",
         "music_live": "music_live.yaml",
+        "high_precision": "high_precision.yaml",
+        "tts_clean": "tts_clean.yaml",
     }
 
     def __init__(self, configs_dir: Optional[Path] = None):

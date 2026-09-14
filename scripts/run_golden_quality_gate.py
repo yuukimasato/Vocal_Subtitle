@@ -13,7 +13,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from vocal_subtitle.quality.golden_gate import GoldenQualityThresholds, evaluate_golden_set
+from vocal_subtitle.quality.golden_gate import (
+    GoldenQualityThresholds,
+    TTSGoldenThresholds,
+    evaluate_golden_set,
+    evaluate_tts_golden_set,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,6 +56,11 @@ def main(argv: list[str] | None = None) -> int:
         default=1.0,
         help="字幕重叠事件比例上限(高精度门禁;1.0 = 不设限)",
     )
+    parser.add_argument(
+        "--tts-gate",
+        action="store_true",
+        help="对 skeleton_priority 用例追加 TTS 专项门禁结论(Task 9)",
+    )
     args = parser.parse_args(argv)
     payload: dict[str, Any] = json.loads(args.input.read_text(encoding="utf-8"))
     cases = payload if isinstance(payload, list) else payload.get("cases", [])
@@ -79,6 +89,21 @@ def main(argv: list[str] | None = None) -> int:
         strict_min_overlap_seconds=args.strict_min_overlap_seconds,
         strict_min_overlap_ratio=args.strict_overlap_ratio,
     )
+    if args.tts_gate:
+        tts_cases = [
+            case
+            for case in cases
+            if isinstance(case, dict)
+            and isinstance(case.get("diagnostics"), dict)
+            and case["diagnostics"].get("skeleton_priority")
+        ]
+        tts_report = evaluate_tts_golden_set(
+            tts_cases,
+            thresholds=TTSGoldenThresholds(),
+        )
+        report["tts_skeleton_gate"] = tts_report
+        if args.ci and not tts_report["publishable"]:
+            return 3
     serialized = json.dumps(report, ensure_ascii=False, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
