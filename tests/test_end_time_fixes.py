@@ -624,9 +624,12 @@ class TestPipelineArchitecture:
         import inspect
         from vocal_subtitle.pipeline import Pipeline
 
-        run_source = inspect.getsource(Pipeline.run)
+        # 2026-09-15 重构 Task 3:_post_process_events 调用随 ASR 分支
+        # 迁入 _run_asr_stage;改为检查整个生命周期模块源码,≥3 的断言不变。
+        import vocal_subtitle.application.run_lifecycle as run_lifecycle_module
+        run_source = inspect.getsource(run_lifecycle_module)
         # 检查 _post_process_events 被调用次数
-        call_count = run_source.count("_post_process_events(")
+        call_count = run_source.count("self._post_process_events(")
         assert call_count >= 3, (
             f"_post_process_events should be called 3 times (skeleton, "
             f"multi-chunk, single-chunk), found {call_count}"

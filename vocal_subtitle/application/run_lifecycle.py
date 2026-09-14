@@ -9,6 +9,9 @@ from typing import Dict, List, Optional
 import numpy as np
 from ..application.pipeline_result import PipelineStats
 from ..application.run_context import RunContext
+from ..application.stages.asr_stage import ASRStage
+from ..application.stages.audio_stage import AudioStage
+from ..application.stages.preflight_stage import PreflightStage
 from ..mapping.time_mapper import SubtitleEvent
 from ..pipeline_context import ASRFragment, NoiseProfile, PipelineContext
 from ..utils.audio_utils import AudioUtils
@@ -140,6 +143,195 @@ class PipelineLifecycleMixin:
             overrides=dict(overrides or {}),
             stats=stats,
         )
+        preflight_failure = PreflightStage(self).execute(self._run_context)
+        if preflight_failure is not None:
+            return preflight_failure
+        AudioStage(self).execute(
+            self._run_context, progress_callback=progress_callback,
+        )
+        ASRStage(self).execute(self._run_context)
+        _state = self._run_context.state
+        events = _state["events"]
+        builder = _state["builder"]
+        clean_subtitle_paths = _state["clean_subtitle_paths"]
+        clean_subtitle_path = _state["clean_subtitle_path"]
+        llm_subtitle_path = _state["llm_subtitle_path"]
+        llm_subtitle_paths = _state["llm_subtitle_paths"]
+        separation_result = _state["separation_result"]
+        vocals_path = _state["vocals_path"]
+        audio = _state["audio"]
+        sample_rate = _state["sample_rate"]
+        events = self._finalize_events(events, stats, stats.duration_seconds)
+        # ---- 显示 cue 能量对齐（2026-09-13 诊断定案） ----
+        # finalize 的显示拆行以词起点/文本宽度为准，句内停顿处偏早的
+        # 行首会把静音吞进行首；骨架路径的合并事件无词表，校验阶段无法
+        # 修正。这里在拆行之后、导出之前对最终 cue 做一次能量对齐：
+        # start 后向吸附到真实语音起点，end 在连续语音骨架段内延长。
+        if self.config.acoustic_validation.enabled:
+            try:
+                from ..acoustic import AcousticValidator
+                from ..merging.fragment_absorber import resolve_speech_skeleton
+
+                _validator = AcousticValidator(
+                    self.config.acoustic_validation
+                )
+                _skeleton = resolve_speech_skeleton(
+                    vocals_path, None,
+                    self.config.acoustic_validation, audio, sample_rate,
+                )
+                if _skeleton:
+                    events, _align_report = _validator._physical_snap_validation(
+                        events, _skeleton, audio=audio, sample_rate=sample_rate,
+                    )
+                    stats.quality_diagnostics["display_energy_alignment"] = {
+                        "snapped_starts": _align_report["snapped_starts"],
+                        "ends_extended": _align_report.get("ends_extended", 0),
+                        "snapped_ends": _align_report["snapped_ends"],
+                    }
+            except Exception as e:
+                logger.warning("Display energy alignment failed: %s", e)
+        # ---- 最终防重叠不变量（最后防线） ----
+        # 显示能量对齐是 finalize 校验之后唯一还会延长 end 的步骤；
+        # 在导出前强制相邻 cue 零重叠。触发即告警（warn 日志 +
+        # quality_diagnostics），不被静默吞掉——告警意味着上游
+        # 又出现了新的倒置来源，需要回源头修。
+        from ..mapping.final_validator import enforce_non_overlap
+        events, overlap_diag = enforce_non_overlap(
+            events, source="post_display_alignment",
+        )
+        if overlap_diag["overlap_count"]:
+            stats.quality_diagnostics["final_overlap_repair"] = overlap_diag
+        export_label = "llm" if self.config.llm_optimize.enabled else "asr"
+        final_paths = self._export_subtitles_multi_format(
+            builder, events, output_path, output_format, session_dir, label=export_label
+        )
+        final_subtitle_path = final_paths.get(output_format, str(output_path))
+        if session_dir:
+            final_subtitle_path = final_paths.get("srt", final_subtitle_path)
+        if self.config.llm_optimize.enabled:
+            llm_subtitle_paths = final_paths
+            llm_subtitle_path = final_subtitle_path
+        else:
+            clean_subtitle_paths = final_paths
+            clean_subtitle_path = final_subtitle_path
+        logger.info(
+            "Final subtitle exported: %s (%d events)",
+            final_subtitle_path, len(events),
+        )
+        if session_dir and separation_result:
+            import shutil
+            from ..utils.session_manager import OUTPUT_NAMES
+            vocals_dest = session_dir / OUTPUT_NAMES["vocals"]
+            accomp_dest = session_dir / OUTPUT_NAMES["accompaniment"]
+            if separation_result.vocals_path and Path(separation_result.vocals_path).exists():
+                shutil.copy2(separation_result.vocals_path, vocals_dest)
+            if separation_result.accompaniment_path and Path(separation_result.accompaniment_path).exists():
+                shutil.copy2(separation_result.accompaniment_path, accomp_dest)
+        if session_dir:
+            try:
+                from ..utils.session_manager import SessionManager
+                mgr = SessionManager(session_dir.parent)
+                outputs_info = {}
+                for fmt_key, path in {**clean_subtitle_paths, **llm_subtitle_paths}.items():
+                    p = Path(path)
+                    if p.exists():
+                        outputs_info[p.name] = {
+                            "sha256": compute_file_hash(p),
+                            "size": p.stat().st_size,
+                        }
+                mgr.write_metadata(
+                    session_dir,
+                    original_filename="",
+                    input_sha256=self._file_hash,
+                    profile=getattr(self.config, '_profile_name', ''),
+                    config_hash=self._config_hash,
+                    task_id=task_id or "",
+                    outputs=outputs_info,
+                )
+            except Exception as e:
+                logger.warning("Failed to write session metadata: %s", e)
+        stats.total_time = time.time() - start_time
+        logger.info(
+            "Pipeline complete: %.1fs total, %d subtitle events",
+            stats.total_time,
+            stats.subtitle_count,
+        )
+        if self._progress:
+            pm_stats = self._progress.get_stats()
+            for stage_name, elapsed in pm_stats.get("stage_timings", {}).items():
+                if stage_name not in stats.stage_timings:
+                    stats.stage_timings[stage_name] = elapsed
+        from ..utils.session_manager import OUTPUT_NAMES
+        vocals_result = (
+            str(session_dir / OUTPUT_NAMES["vocals"])
+            if session_dir and (session_dir / OUTPUT_NAMES["vocals"]).exists()
+            else str(separation_result.vocals_path) if separation_result else None
+        )
+        accomp_result = (
+            str(session_dir / OUTPUT_NAMES["accompaniment"])
+            if session_dir and (session_dir / OUTPUT_NAMES["accompaniment"]).exists()
+            else str(separation_result.accompaniment_path) if separation_result else None
+        )
+        feedback_report = None
+        if feedback_reference and self.config.feedback.enabled:
+            feedback_report = self._run_feedback_learning(
+                auto_events=events,
+                reference_path=feedback_reference,
+                audio_path=str(vocals_path),
+            )
+        if stats.fallback_reason and stats.status == "completed":
+            stats.status = "degraded_completed"
+        from .run_finalizer import build_result_payload
+
+        result_payload = build_result_payload(
+            task_id=getattr(self, "_effective_task_id", None) or stats.task_id or task_id or "",
+            stats=stats,
+            events=events,
+            input_path=input_path,
+            subtitle_path=final_subtitle_path,
+            clean_subtitle_path=clean_subtitle_path,
+            llm_subtitle_path=llm_subtitle_path,
+            vocals_path=vocals_result,
+            accompaniment_path=accomp_result,
+        )
+        # 运行摘要写入显式上下文诊断(Task 2),Task 6 将聚合为阶段质量报告。
+        self._run_context.add_diagnostic("run_summary", {
+            "status": str(getattr(stats, "status", "") or ""),
+            "quality_status": str(stats.quality_status),
+            "fallback_category": str(stats.fallback_category or ""),
+            "stage_timings": dict(stats.stage_timings or {}),
+        })
+        self._finalize_task_state(stats, result_payload=result_payload)
+        self._generate_run_report(
+            input_path, stats, task_id,
+            sample_rate=sample_rate if "sample_rate" in dir() else 0,
+            final_subtitle_path=final_subtitle_path,
+        )
+        return {
+            "subtitle_path": final_subtitle_path,
+            "clean_subtitle_path": clean_subtitle_path,
+            "llm_subtitle_path": llm_subtitle_path,
+            "stats": stats,
+            "events": events,
+            "from_cache": False,
+            "status": stats.status,
+            "diagnostics": stats.to_dict(),
+            "vocals_path": vocals_result,
+            "accompaniment_path": accomp_result,
+            "clean_subtitle_paths": clean_subtitle_paths,
+            "llm_subtitle_paths": llm_subtitle_paths,
+            "feedback_report": feedback_report,  # ★ 反馈学习报告
+        }
+
+    def _run_preflight_stage(self, context: RunContext):
+        """Preflight 阶段（Task 3）：状态重置、preflight 与报告构建器初始化。
+
+        返回 None 表示继续执行；返回 dict 为需要提前返回的失败结果。
+        """
+        stats = context.stats
+        input_path = context.input_path
+        output_path = context.output_path
+        task_id = context.task_id
         self._resolved_language = None
         self._asr_route_decision = None
         self._asr_engine = None
@@ -150,19 +342,19 @@ class PipelineLifecycleMixin:
                     output_path,
                     task_id,
                     stats,
-                    skip_separation=skip_separation,
+                    skip_separation=context.skip_separation,
                 )
-                self._run_context.add_diagnostic("preflight", {
+                context.add_diagnostic("preflight", {
                     "status": "ok",
                 })
             except Exception as e:
                 logger.error("Preflight failed: %s", e)
-                self._run_context.add_diagnostic("preflight", {
+                context.add_diagnostic("preflight", {
                     "status": "failed",
                     "error": str(e),
                 })
                 return {
-                    "subtitle_path": output_path,
+                    "subtitle_path": context.output_path,
                     "stats": stats,
                     "events": [],
                     "from_cache": False,
@@ -175,7 +367,7 @@ class PipelineLifecycleMixin:
             try:
                 from ..reporting import RunReportBuilder
                 from ..utils.session_manager import create_run_id, create_task_id
-                effective_task_id = task_id or create_task_id(input_path)
+                effective_task_id = context.task_id or create_task_id(context.input_path)
                 effective_run_id = create_run_id(effective_task_id)
                 stats.run_id = effective_run_id
                 stats.task_id = effective_task_id
@@ -188,6 +380,16 @@ class PipelineLifecycleMixin:
                     pass
             except Exception as e:
                 logger.warning("Failed to init report builder early: %s", e)
+
+    def _run_audio_stage(self, context: RunContext, progress_callback=None):
+        """音频阶段（Task 3）：模块预算、分离、宏切块、音频加载与 early turns。"""
+        stats = context.stats
+        input_path = context.input_path
+        session_dir = context.session_dir
+        skip_separation = context.skip_separation
+        output_path = context.output_path
+        task_id = context.task_id
+        state = context.state
         active = self._resolve_active_modules()
         if self.config.degradation.mode != "full":
             logger.info(
@@ -195,6 +397,8 @@ class PipelineLifecycleMixin:
                 self.config.degradation.mode,
                 {k: v for k, v in active.items() if v},
             )
+        audio = None
+        sample_rate = None
         total_stages = 5  # vad + merging + asr + mapping + (llm_optimize)
         if not skip_separation:
             total_stages += 1  # separation
@@ -277,7 +481,7 @@ class PipelineLifecycleMixin:
                     logger.warning("Macro chunking failed, treating as single chunk: %s", e)
                     macro_chunks = None
                     self._progress.finish_stage()
-        if "audio" not in locals() or "sample_rate" not in locals():
+        if audio is None or sample_rate is None:
             audio, sample_rate = AudioUtils.load_audio(vocals_path)
             stats.duration_seconds = len(audio) / sample_rate
         # ---- [层1] 身份主干 P1:全局 diarization 前置（early_turns） ----
@@ -290,6 +494,28 @@ class PipelineLifecycleMixin:
         self._run_early_global_turns(audio, sample_rate, stats)
         requested_asr_path = self._resolve_asr_path()
         stats.asr_path = requested_asr_path
+
+        state["separation_result"] = separation_result
+        state["requested_asr_path"] = requested_asr_path
+        state["vocals_path"] = vocals_path
+        state["macro_chunks"] = macro_chunks
+        state["audio"] = audio
+        state["sample_rate"] = sample_rate
+
+    def _run_asr_stage(self, context: RunContext):
+        """ASR 阶段（Task 3）：路由决策 + global/骨架/多块/legacy 各路径产出事件。"""
+        stats = context.stats
+        state = context.state
+        audio = state["audio"]
+        sample_rate = state["sample_rate"]
+        vocals_path = state["vocals_path"]
+        macro_chunks = state["macro_chunks"]
+        requested_asr_path = state["requested_asr_path"]
+        global_transcript = None
+        output_path = context.output_path
+        output_format = context.output_format
+        session_dir = context.session_dir
+        task_id = context.task_id
         global_completed = False
         self._global_evidence = ()
         self._global_evidence_attempted = False
@@ -494,7 +720,7 @@ class PipelineLifecycleMixin:
             pass
         elif self.config.acoustic_validation.skeleton_mode:
             logger.info("Skeleton segmentation mode enabled")
-            if 'audio' not in dir() or 'sample_rate' not in dir():
+            if audio is None or sample_rate is None:
                 audio, sample_rate = AudioUtils.load_audio(vocals_path)
                 stats.duration_seconds = len(audio) / sample_rate
             events, seg_count, skeleton_ffmpeg_result = self._process_skeleton_segmented(
@@ -714,7 +940,7 @@ class PipelineLifecycleMixin:
             if macro_chunks is not None and len(macro_chunks) == 1:
                 chunk = macro_chunks[0]
                 audio = chunk.audio
-            if 'audio' not in dir() or 'sample_rate' not in dir():
+            if audio is None or sample_rate is None:
                 audio, sample_rate = AudioUtils.load_audio(vocals_path)
                 stats.duration_seconds = len(audio) / sample_rate
             events, seg_count, ctx = self._process_chunk_pipeline(
@@ -794,153 +1020,13 @@ class PipelineLifecycleMixin:
                 1, extra={"detail": f"LLM 优化完成，共 {len(events)} 条字幕"}
             )
             stats.stage_timings["llm"] = self._progress.finish_stage()
-        events = self._finalize_events(events, stats, stats.duration_seconds)
-        # ---- 显示 cue 能量对齐（2026-09-13 诊断定案） ----
-        # finalize 的显示拆行以词起点/文本宽度为准，句内停顿处偏早的
-        # 行首会把静音吞进行首；骨架路径的合并事件无词表，校验阶段无法
-        # 修正。这里在拆行之后、导出之前对最终 cue 做一次能量对齐：
-        # start 后向吸附到真实语音起点，end 在连续语音骨架段内延长。
-        if self.config.acoustic_validation.enabled:
-            try:
-                from ..acoustic import AcousticValidator
-                from ..merging.fragment_absorber import resolve_speech_skeleton
 
-                _validator = AcousticValidator(
-                    self.config.acoustic_validation
-                )
-                _skeleton = resolve_speech_skeleton(
-                    vocals_path, None,
-                    self.config.acoustic_validation, audio, sample_rate,
-                )
-                if _skeleton:
-                    events, _align_report = _validator._physical_snap_validation(
-                        events, _skeleton, audio=audio, sample_rate=sample_rate,
-                    )
-                    stats.quality_diagnostics["display_energy_alignment"] = {
-                        "snapped_starts": _align_report["snapped_starts"],
-                        "ends_extended": _align_report.get("ends_extended", 0),
-                        "snapped_ends": _align_report["snapped_ends"],
-                    }
-            except Exception as e:
-                logger.warning("Display energy alignment failed: %s", e)
-        export_label = "llm" if self.config.llm_optimize.enabled else "asr"
-        final_paths = self._export_subtitles_multi_format(
-            builder, events, output_path, output_format, session_dir, label=export_label
-        )
-        final_subtitle_path = final_paths.get(output_format, str(output_path))
-        if session_dir:
-            final_subtitle_path = final_paths.get("srt", final_subtitle_path)
-        if self.config.llm_optimize.enabled:
-            llm_subtitle_paths = final_paths
-            llm_subtitle_path = final_subtitle_path
-        else:
-            clean_subtitle_paths = final_paths
-            clean_subtitle_path = final_subtitle_path
-        logger.info(
-            "Final subtitle exported: %s (%d events)",
-            final_subtitle_path, len(events),
-        )
-        if session_dir and separation_result:
-            import shutil
-            from ..utils.session_manager import OUTPUT_NAMES
-            vocals_dest = session_dir / OUTPUT_NAMES["vocals"]
-            accomp_dest = session_dir / OUTPUT_NAMES["accompaniment"]
-            if separation_result.vocals_path and Path(separation_result.vocals_path).exists():
-                shutil.copy2(separation_result.vocals_path, vocals_dest)
-            if separation_result.accompaniment_path and Path(separation_result.accompaniment_path).exists():
-                shutil.copy2(separation_result.accompaniment_path, accomp_dest)
-        if session_dir:
-            try:
-                from ..utils.session_manager import SessionManager
-                mgr = SessionManager(session_dir.parent)
-                outputs_info = {}
-                for fmt_key, path in {**clean_subtitle_paths, **llm_subtitle_paths}.items():
-                    p = Path(path)
-                    if p.exists():
-                        outputs_info[p.name] = {
-                            "sha256": compute_file_hash(p),
-                            "size": p.stat().st_size,
-                        }
-                mgr.write_metadata(
-                    session_dir,
-                    original_filename="",
-                    input_sha256=self._file_hash,
-                    profile=getattr(self.config, '_profile_name', ''),
-                    config_hash=self._config_hash,
-                    task_id=task_id or "",
-                    outputs=outputs_info,
-                )
-            except Exception as e:
-                logger.warning("Failed to write session metadata: %s", e)
-        stats.total_time = time.time() - start_time
-        logger.info(
-            "Pipeline complete: %.1fs total, %d subtitle events",
-            stats.total_time,
-            stats.subtitle_count,
-        )
-        if self._progress:
-            pm_stats = self._progress.get_stats()
-            for stage_name, elapsed in pm_stats.get("stage_timings", {}).items():
-                if stage_name not in stats.stage_timings:
-                    stats.stage_timings[stage_name] = elapsed
-        from ..utils.session_manager import OUTPUT_NAMES
-        vocals_result = (
-            str(session_dir / OUTPUT_NAMES["vocals"])
-            if session_dir and (session_dir / OUTPUT_NAMES["vocals"]).exists()
-            else str(separation_result.vocals_path) if separation_result else None
-        )
-        accomp_result = (
-            str(session_dir / OUTPUT_NAMES["accompaniment"])
-            if session_dir and (session_dir / OUTPUT_NAMES["accompaniment"]).exists()
-            else str(separation_result.accompaniment_path) if separation_result else None
-        )
-        feedback_report = None
-        if feedback_reference and self.config.feedback.enabled:
-            feedback_report = self._run_feedback_learning(
-                auto_events=events,
-                reference_path=feedback_reference,
-                audio_path=str(vocals_path),
-            )
-        if stats.fallback_reason and stats.status == "completed":
-            stats.status = "degraded_completed"
-        from .run_finalizer import build_result_payload
-
-        result_payload = build_result_payload(
-            task_id=getattr(self, "_effective_task_id", None) or stats.task_id or task_id or "",
-            stats=stats,
-            events=events,
-            input_path=input_path,
-            subtitle_path=final_subtitle_path,
-            clean_subtitle_path=clean_subtitle_path,
-            llm_subtitle_path=llm_subtitle_path,
-            vocals_path=vocals_result,
-            accompaniment_path=accomp_result,
-        )
-        # 运行摘要写入显式上下文诊断(Task 2),Task 6 将聚合为阶段质量报告。
-        self._run_context.add_diagnostic("run_summary", {
-            "status": str(getattr(stats, "status", "") or ""),
-            "quality_status": str(stats.quality_status),
-            "fallback_category": str(stats.fallback_category or ""),
-            "stage_timings": dict(stats.stage_timings or {}),
-        })
-        self._finalize_task_state(stats, result_payload=result_payload)
-        self._generate_run_report(
-            input_path, stats, task_id,
-            sample_rate=sample_rate if "sample_rate" in dir() else 0,
-            final_subtitle_path=final_subtitle_path,
-        )
-        return {
-            "subtitle_path": final_subtitle_path,
-            "clean_subtitle_path": clean_subtitle_path,
-            "llm_subtitle_path": llm_subtitle_path,
-            "stats": stats,
-            "events": events,
-            "from_cache": False,
-            "status": stats.status,
-            "diagnostics": stats.to_dict(),
-            "vocals_path": vocals_result,
-            "accompaniment_path": accomp_result,
-            "clean_subtitle_paths": clean_subtitle_paths,
-            "llm_subtitle_paths": llm_subtitle_paths,
-            "feedback_report": feedback_report,  # ★ 反馈学习报告
-        }
+        state["events"] = events
+        state["builder"] = builder
+        state["clean_subtitle_paths"] = clean_subtitle_paths
+        state["clean_subtitle_path"] = clean_subtitle_path
+        state["llm_subtitle_path"] = llm_subtitle_path
+        state["llm_subtitle_paths"] = llm_subtitle_paths
+        state["global_completed"] = global_completed
+        state["quality_speech_intervals"] = quality_speech_intervals
+        state["global_transcript"] = global_transcript

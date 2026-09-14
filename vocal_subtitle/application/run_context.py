@@ -50,6 +50,8 @@ class RunContext:
     # 协作取消与诊断。
     cancellation_token: Optional[CancellationToken] = None
     diagnostics: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    # 阶段间暂存(跨阶段局部状态的显式载体,Task 3)。
+    state: Dict[str, Any] = field(default_factory=dict)
     schema_version: str = SCHEMA_VERSION
 
     def add_diagnostic(self, stage: str, payload: Dict[str, Any]) -> None:
