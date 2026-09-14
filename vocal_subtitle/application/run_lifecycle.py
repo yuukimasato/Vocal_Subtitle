@@ -52,6 +52,8 @@ class PipelineLifecycleMixin:
             raise FileNotFoundError(f"Input file not found: {input_path}")
         if output_path is None:
             output_path = input_path.with_suffix(f".{output_format}")
+        else:
+            output_path = Path(output_path)
         if self.config.mode == "streaming":
             logger.info("Pipeline running in streaming mode")
             return self.run_streaming(

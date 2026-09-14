@@ -12,6 +12,13 @@ from .common import verbose_option
 logger = logging.getLogger(__name__)
 
 
+def _scenarios():
+    """D27 四场景标签（延迟导入避免加载 feedback 全家桶）。"""
+    from ..feedback.dataset_export import SCENARIOS
+
+    return SCENARIOS
+
+
 @click.group()
 def feedback():
     """基于用户修订字幕的自适应参数学习。"""
@@ -23,10 +30,14 @@ def feedback():
 @click.option("--profile", "-p", default="default", help="场景模板 (default / podcast / education / variety_show / music_live)")
 @click.option("--feedback-profile", default="user_default", help="用户配置名称 (默认: user_default)")
 @click.option("--consent", "-c", default="anonymous", type=click.Choice(["local", "anonymous", "full"]), help="反馈数据用途同意级别")
+@click.option("--scenario", "-s", default="external-correction",
+              help="D27 场景标签 (inline-review / external-correction / "
+                   "existing-subtitle / from-scratch-timing)；"
+                   "CLI 上传外部修订字幕默认 external-correction")
 @click.option("--dry-run", is_flag=True, help="仅预览差异，不实际更新配置")
 @verbose_option
 def learn(audio: str, reference: str, profile: str, feedback_profile: str,
-          consent: str, dry_run: bool, verbose: bool):
+          consent: str, scenario: str, dry_run: bool, verbose: bool):
     """上传修订字幕和音频，自动学习用户偏好。"""
     from ..config import ConfigLoader
     from ..feedback import (AudioFingerprinter, DiffAnalyzer, FewShotBuilder,
@@ -36,6 +47,13 @@ def learn(audio: str, reference: str, profile: str, feedback_profile: str,
     from ..feedback.conflict_detector import ConflictDetector
     from ..feedback.health_scorer import compute_health_score_from_pairs
     from ..pipeline import Pipeline
+
+    if scenario not in _scenarios():
+        click.echo(
+            f"✗ 无效场景标签: {scenario}，合法值: {' / '.join(_scenarios())}",
+            err=True,
+        )
+        raise SystemExit(1)
 
     audio_path = Path(audio)
     reference_path = Path(reference)
@@ -168,7 +186,8 @@ def learn(audio: str, reference: str, profile: str, feedback_profile: str,
                 if verbose:
                     click.echo(f"   ⚠️ 指纹提取失败: {exc}")
         _ingest_d2_sample(auto_events, manual_events, diff_report.alignment_coverage,
-                          consent, diff_report, feedback_cfg, audio_path)
+                          consent, diff_report, feedback_cfg, audio_path,
+                          scenario=scenario)
         try:
             from ..feedback.user_profile import load_apply_overrides_on_run
 
@@ -188,7 +207,8 @@ def learn(audio: str, reference: str, profile: str, feedback_profile: str,
         click.echo(f"  使用 --feedback-profile {feedback_profile} 指定此配置")
     else:
         _ingest_d2_sample(auto_events, manual_events, diff_report.alignment_coverage,
-                          consent, diff_report, feedback_cfg, audio_path)
+                          consent, diff_report, feedback_cfg, audio_path,
+                          scenario=scenario)
         click.echo("\n✓ 无参数变更。")
 
 
@@ -710,7 +730,8 @@ def sample_freeze(strata: str, description: str):
 
 
 def _ingest_d2_sample(auto_events, manual_events, alignment_coverage, consent,
-                      diff_report, feedback_cfg, audio_path) -> None:
+                      diff_report, feedback_cfg, audio_path, *,
+                      scenario: str = "") -> None:
     """将反馈学习结果自动入库到 D2；失败不影响主流程。"""
     try:
         from ..feedback.sample_manager import FeedbackSampleManager
@@ -735,7 +756,8 @@ def _ingest_d2_sample(auto_events, manual_events, alignment_coverage, consent,
             auto_subtitle=events_to_text(auto_events), human_revision=events_to_text(manual_events),
             alignment={"method": "dtw", "coverage_ratio": alignment_coverage,
                        "confidence": getattr(diff_report, "confidence", 0.8) if diff_report else 0.8},
-            consent_level=consent, language="unknown", scene="", audio_duration=0.0,
+            consent_level=consent, language="unknown", scene=scenario,
+            audio_duration=0.0,
             audio_condition="", speaker_count=0, original_config={}, edit_types=edit_types,
         )
         if sample:
