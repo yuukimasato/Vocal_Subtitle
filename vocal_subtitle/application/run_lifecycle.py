@@ -275,7 +275,7 @@ class PipelineLifecycleMixin:
         self._global_evidence_diagnostics = {}
         self._global_review_timeline = None
         quality_speech_intervals = None
-        if requested_asr_path == "global":
+        if requested_asr_path in ("global", "global_primary"):
             stats.global_attempted = True
             global_diag = {
                 "route": requested_asr_path,

@@ -28,6 +28,7 @@ from ..asr.global_transcriber import GlobalTranscriber, GlobalTranscriberConfig
 from ..asr.global_path import GlobalASRService
 from ..asr.engine_pairing import EnginePairRouter
 from ..asr.review_path import ASRFailureRequest, ASRReviewRequest, ASRReviewService
+from .global_primary import evaluate_global_primary_suitability
 from ..asr.router import ASRRouter
 from ..pipeline_context import NoiseProfile, PipelineContext
 from ..utils.audio_utils import AudioUtils
@@ -465,6 +466,26 @@ class PipelineASRPathMixin:
         # Global output is retained as evidence. The default segmented route
         # can use it for risk scoring or bounded replacement, but never as a
         # raw final-event bypass.
+        if self._resolve_asr_path() == "global_primary":
+            gate = evaluate_global_primary_suitability(
+                result.transcript,
+                audio_duration=(
+                    len(audio) / max(sample_rate, 1) if audio is not None else None
+                ),
+                physical_timeline=getattr(shadow, "physical_timeline", None),
+                config=getattr(self.config.asr, "global_asr", None),
+            )
+            result.diagnostics = dict(result.diagnostics or {})
+            result.diagnostics["global_primary_gate"] = gate.as_diagnostics()
+            if not gate.passed:
+                # 门禁未通过:清空主候选,由上层记录回退原因并转入 segmented。
+                result.diagnostics["global_primary_fallback_reason"] = gate.reason
+                logger.warning(
+                    "global-primary gate failed (%s): %s",
+                    gate.reason,
+                    gate.details,
+                )
+                result.events = []
         self._global_evidence = tuple(
             result.evidence
             or [candidate_from_subtitle_event(event, source="global") for event in result.events]
@@ -849,11 +870,13 @@ class PipelineASRPathMixin:
         if explicit:
             return str(explicit)
         if self._requested_asr_path:
-            return "global" if self._requested_asr_path == "global" else "segmented"
+            if self._requested_asr_path in ("global", "global_primary"):
+                return self._requested_asr_path
+            return "segmented"
         if self.config.asr.global_asr.enabled:
             routing = self.config.asr.global_asr.routing
-            if routing == "global":
-                return "global"
+            if routing in ("global", "global_primary"):
+                return routing
         return "segmented"
 
     @staticmethod
@@ -866,7 +889,11 @@ class PipelineASRPathMixin:
         cached_stats = cache_entry.get("stats", {})
         cached_path = cached_stats.get("asr_path", "")
         requested_path = self._resolve_asr_path()
-        if self.config.asr.engine == "auto" and requested_path in ("global", "auto"):
+        if self.config.asr.engine == "auto" and requested_path in (
+            "global",
+            "global_primary",
+            "auto",
+        ):
             policy = self.config.asr.auto_routing
             if (
                 cached_stats.get("asr_route_version") != policy.route_version
@@ -875,7 +902,7 @@ class PipelineASRPathMixin:
                 or not cached_stats.get("selected_engine")
             ):
                 return False
-        if requested_path in ("global", "auto"):
+        if requested_path in ("global", "global_primary", "auto"):
             return cached_path in ("global", "global_evidence")
         # Old cache entries did not carry asr_path; retain compatibility for
         # explicitly requested segmented/legacy runs.

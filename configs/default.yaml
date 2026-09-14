@@ -232,7 +232,7 @@ pipeline:
     # 全局转录（完整音频为窗口）
     global_asr:
       enabled: true
-      routing: "segmented"                     # segmented | global (compatibility)
+      routing: "segmented"                     # segmented | global (compatibility) | global_primary (experimental, gated)
       evidence_enabled: true                   # global ASR as evidence after segmented primary
       alignment_enabled: true                  # WhisperX 词级强制对齐（仅后端支持 align() 时生效；失败自动回退 ASR 原词时间）
       backend: "faster-whisper"

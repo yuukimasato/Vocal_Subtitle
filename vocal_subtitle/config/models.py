@@ -223,8 +223,14 @@ class GlobalASRConfig:
     """全局转录配置 — 以完整音频为窗口进行 ASR"""
 
     enabled: bool = True
-    routing: str = "segmented"  # segmented | global (compatibility)
+    routing: str = "segmented"  # segmented | global (compatibility) | global_primary (experimental)
     evidence_enabled: bool = True
+    # global_primary 实验路由门禁阈值:全局转录通过物理语音覆盖与文本密度
+    # 检查后才允许作为主候选,否则记录 global_primary_fallback_reason 并回退
+    # segmented 路径。
+    global_primary_min_speech_coverage: float = 0.6
+    global_primary_min_chars_per_second: float = 0.5
+    global_primary_max_chars_per_second: float = 100.0
     # WhisperX 词级强制对齐开关。默认 True 与既有 GlobalTranscriber 行为一致
     # （后端不支持 align() 时自动跳过）；仅当后端实现 align() 时才会实际调用。
     alignment_enabled: bool = True
