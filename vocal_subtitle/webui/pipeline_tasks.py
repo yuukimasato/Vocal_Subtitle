@@ -30,6 +30,11 @@ from ..contracts.common import CONTRACT_VERSION
 
 logger = logging.getLogger(__name__)
 
+# 任务生命周期事件总线(重构计划 Task 8):与 WS 广播并存,供
+# TaskExecutor/前端订阅者按序消费。
+from .task_events import TaskEventPublisher
+task_event_bus = TaskEventPublisher()
+
 
 def _pipeline_class() -> Type[Pipeline]:
     """Resolve the legacy API override before falling back to the real class."""
@@ -194,6 +199,7 @@ def run_pipeline_in_thread(
             progress_callback = ws_manager.create_progress_callback(task_id)
 
         _ensure_task_entry(task_id, session_dir)["status"] = "running"
+        task_event_bus.publish(task_id, "start")
         ws_manager.broadcast_from_thread(
             task_id,
             {
@@ -278,6 +284,7 @@ def run_pipeline_in_thread(
             completed_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
         )
         ws_manager.broadcast_from_thread(task_id, {"type": "complete", "result": task_result})
+        task_event_bus.publish(task_id, "completion", {"result": task_result})
         ws_manager.store_task_result(task_id, task_result)
         try:
             _persistence_manager().persist_task(task_id, task_result)
@@ -297,6 +304,7 @@ def run_pipeline_in_thread(
             completed_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
         )
         ws_manager.broadcast_from_thread(task_id, {"type": "error", "message": error_msg})
+        task_event_bus.publish(task_id, "failure", {"error": error_msg})
 
 
 class PipelineTaskService:
