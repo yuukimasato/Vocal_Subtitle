@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
 from ..application.pipeline_result import PipelineStats
+from ..application.run_context import RunContext
 from ..mapping.time_mapper import SubtitleEvent
 from ..pipeline_context import ASRFragment, NoiseProfile, PipelineContext
 from ..utils.audio_utils import AudioUtils
@@ -126,6 +127,19 @@ class PipelineLifecycleMixin:
                     logger.warning("Failed to restore cached result: %s", e)
         start_time = time.time()
         stats = PipelineStats(input_path=input_path, duration_seconds=0)
+        # 显式运行上下文(2026-09-15 重构计划 Task 2):固化入口参数并
+        # 承载阶段诊断;Mixin 上的隐式状态后续任务逐步迁入。
+        self._run_context = RunContext(
+            input_path=input_path,
+            output_path=output_path,
+            output_format=output_format,
+            skip_separation=skip_separation,
+            task_id=task_id,
+            session_dir=session_dir,
+            feedback_reference=feedback_reference,
+            overrides=dict(overrides or {}),
+            stats=stats,
+        )
         self._resolved_language = None
         self._asr_route_decision = None
         self._asr_engine = None
@@ -138,8 +152,15 @@ class PipelineLifecycleMixin:
                     stats,
                     skip_separation=skip_separation,
                 )
+                self._run_context.add_diagnostic("preflight", {
+                    "status": "ok",
+                })
             except Exception as e:
                 logger.error("Preflight failed: %s", e)
+                self._run_context.add_diagnostic("preflight", {
+                    "status": "failed",
+                    "error": str(e),
+                })
                 return {
                     "subtitle_path": output_path,
                     "stats": stats,
@@ -895,6 +916,13 @@ class PipelineLifecycleMixin:
             vocals_path=vocals_result,
             accompaniment_path=accomp_result,
         )
+        # 运行摘要写入显式上下文诊断(Task 2),Task 6 将聚合为阶段质量报告。
+        self._run_context.add_diagnostic("run_summary", {
+            "status": str(getattr(stats, "status", "") or ""),
+            "quality_status": str(stats.quality_status),
+            "fallback_category": str(stats.fallback_category or ""),
+            "stage_timings": dict(stats.stage_timings or {}),
+        })
         self._finalize_task_state(stats, result_payload=result_payload)
         self._generate_run_report(
             input_path, stats, task_id,
