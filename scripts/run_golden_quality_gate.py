@@ -39,12 +39,27 @@ def main(argv: list[str] | None = None) -> int:
         default=0.0,
         help="strict match 的 expected overlap ratio 下限",
     )
+    parser.add_argument(
+        "--min-word-time-coverage",
+        type=float,
+        default=0.0,
+        help="词级时间覆盖率下限(高精度门禁;0 = 不设限)",
+    )
+    parser.add_argument(
+        "--max-subtitle-overlap-rate",
+        type=float,
+        default=1.0,
+        help="字幕重叠事件比例上限(高精度门禁;1.0 = 不设限)",
+    )
     args = parser.parse_args(argv)
     payload: dict[str, Any] = json.loads(args.input.read_text(encoding="utf-8"))
     cases = payload if isinstance(payload, list) else payload.get("cases", [])
     report = evaluate_golden_set(
         cases,
-        thresholds=GoldenQualityThresholds(),
+        thresholds=GoldenQualityThresholds(
+            min_word_time_coverage_rate=args.min_word_time_coverage,
+            max_subtitle_overlap_rate=args.max_subtitle_overlap_rate,
+        ),
         required_categories=args.required_category,
         metadata={
             "input_schema_version": payload.get("schema_version")

@@ -25,6 +25,11 @@ class GoldenQualityThresholds:
     max_drop_rate: float = 0.50
     max_trace_missing_rate: float = 0.0
     max_raw_bypass_count: int = 0
+    # 高精度门禁(Task 7):词级时间覆盖率下限与字幕重叠率上限。
+    # 默认不设限(coverage>=0 恒真、overlap<=1 恒真),保持基线行为;
+    # 高精度门禁显式传 0.95 / 0.0 启用。
+    min_word_time_coverage_rate: float = 0.0
+    max_subtitle_overlap_rate: float = 1.0
 
 
 def _matched(expected: Mapping[str, Any], predicted: Sequence[Mapping[str, Any]]) -> bool:
@@ -169,6 +174,9 @@ def evaluate_golden_set(
     }
     trace_missing = 0
     raw_bypass = 0
+    word_total = 0
+    word_timed = 0
+    overlapping_events = 0
     missing_diagnostics: dict[str, int] = {}
     categories: set[str] = set()
     case_summaries: list[dict[str, Any]] = []
@@ -260,6 +268,41 @@ def evaluate_golden_set(
         diagnostic = case.get("diagnostics", {})
         if not isinstance(diagnostic, Mapping):
             diagnostic = {}
+        # 词级时间覆盖率与字幕重叠率(高精度方案 Task 7):从预测事件
+        # 的词表与相邻关系直接统计,词时间缺失或非法即计入未覆盖。
+        case_previous_end: float | None = None
+        for predicted_item in sorted(
+            predicted,
+            key=lambda entry: (float(entry.get("start", 0.0)), float(entry.get("end", 0.0))),
+        ):
+            for word in predicted_item.get("words", ()) or ():
+                if not isinstance(word, Mapping):
+                    continue
+                word_total += 1
+                word_start = word.get("start")
+                word_end = word.get("end")
+                if (
+                    word_start is not None
+                    and word_end is not None
+                    and float(word_end) > float(word_start) >= 0.0
+                ):
+                    word_timed += 1
+            item_start = float(predicted_item.get("start", 0.0))
+            item_end = float(predicted_item.get("end", 0.0))
+            # 完全没有词级数据的事件按一个未覆盖单元计入,防止
+            # "整批无词事件"在覆盖率分母中被静默排除。
+            case_word_count = sum(
+                1
+                for word in predicted_item.get("words", ()) or ()
+                if isinstance(word, Mapping)
+            )
+            if case_word_count == 0:
+                word_total += 1
+            if case_previous_end is not None and item_start < case_previous_end - 1e-9:
+                overlapping_events += 1
+            case_previous_end = (
+                item_end if case_previous_end is None else max(case_previous_end, item_end)
+            )
         for key in ("physical_violation_count", "cross_silence_count", "raw_event_bypass_count"):
             value = diagnostic.get(key)
             if value is None:
@@ -353,6 +396,8 @@ def evaluate_golden_set(
         "strict_min_overlap_ratio": strict_min_overlap_ratio,
         "physical_violation_rate": _rate(physical_violations, event_total),
         "cross_silence_rate": _rate(cross_silence, event_total),
+        "word_time_coverage_rate": _rate(word_timed, word_total),
+        "subtitle_overlap_rate": _rate(overlapping_events, event_total),
         "unresolved_rate": _rate(action_counts["unresolved"], decision_total),
         "split_rate": _rate(action_counts["split"], decision_total),
         "drop_rate": _rate(action_counts["drop"], decision_total),
@@ -390,6 +435,8 @@ def evaluate_golden_set(
         "drop": metrics["drop_rate"] <= policy.max_drop_rate,
         "trace": metrics["trace_missing_rate"] <= policy.max_trace_missing_rate,
         "raw_bypass": metrics["raw_bypass_count"] <= policy.max_raw_bypass_count,
+        "word_time_coverage": metrics["word_time_coverage_rate"] >= policy.min_word_time_coverage_rate,
+        "subtitle_overlap": metrics["subtitle_overlap_rate"] <= policy.max_subtitle_overlap_rate,
         "diagnostics_complete": not missing_diagnostics,
         "required_categories": not missing_categories,
     }

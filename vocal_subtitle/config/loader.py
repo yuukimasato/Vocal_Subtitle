@@ -266,6 +266,8 @@ class ConfigLoader:
             shadow_mode=review_raw.get("shadow_mode", True),
             authoritative_mode=review_raw.get("authoritative_mode", False),
             context_reasr_enabled=review_raw.get("context_reasr_enabled", False),
+            context_reasr_min_level=review_raw.get("context_reasr_min_level", "medium"),
+            global_alternative_enabled=review_raw.get("global_alternative_enabled", False),
             qwen_enabled=review_raw.get("qwen_enabled", False),
             forced_aligner_enabled=review_raw.get("forced_aligner_enabled", False),
             sed_enabled=review_raw.get("sed_enabled", False),
