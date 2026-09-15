@@ -5,6 +5,7 @@
 > **核心约束**：全链路仅使用 MIT / Apache 2.0 / BSD 等宽松协议的工具，确保可自由商用，零合规风险。
 ![preview1](https://github.com/yuukimasato/Vocal_Subtitle/blob/main/resources/preview1.png)
 ![preview2](https://github.com/yuukimasato/Vocal_Subtitle/blob/main/resources/preview2.png)
+![preview3 — 字幕打轴工作台 Subtitle Timing Editor](https://github.com/yuukimasato/Vocal_Subtitle/blob/main/resources/preview3.png)
 ## 功能特性
 
 - **全链路自动化**：人声分离 → 宏观切块 → 音频预处理 → VAD 检测 → 片段合并 → 说话人分离 → ASR 识别 → 边界精修 → 时间轴映射 → 后处理 → 字幕输出
