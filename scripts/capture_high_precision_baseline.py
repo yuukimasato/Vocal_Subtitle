@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -45,11 +46,23 @@ CONFIG_SNAPSHOT_KEYS = {
     "asr.global_asr.evidence_enabled": ("asr", "global_asr", "evidence_enabled"),
     "evidence_review.enabled": ("evidence_review", "enabled"),
     "evidence_review.shadow_mode": ("evidence_review", "shadow_mode"),
-    "evidence_review.context_reasr_enabled": ("evidence_review", "context_reasr_enabled"),
+    "evidence_review.context_reasr_enabled": (
+        "evidence_review",
+        "context_reasr_enabled",
+    ),
     "acoustic_validation.enabled": ("acoustic_validation", "enabled"),
-    "acoustic_validation.timeline_arbitration": ("acoustic_validation", "timeline_arbitration"),
-    "acoustic_validation.max_snap_distance": ("acoustic_validation", "max_snap_distance"),
-    "acoustic_validation.max_start_snap_distance": ("acoustic_validation", "max_start_snap_distance"),
+    "acoustic_validation.timeline_arbitration": (
+        "acoustic_validation",
+        "timeline_arbitration",
+    ),
+    "acoustic_validation.max_snap_distance": (
+        "acoustic_validation",
+        "max_snap_distance",
+    ),
+    "acoustic_validation.max_start_snap_distance": (
+        "acoustic_validation",
+        "max_start_snap_distance",
+    ),
     "diarization.early_turns": ("diarization", "early_turns"),
     "diarization.word_split_on_turn": ("diarization", "word_split_on_turn"),
 }
@@ -85,11 +98,16 @@ def _git(args: list[str]) -> str:
 
 def _run_pytest(group: str, paths: list[str]) -> dict:
     command = [sys.executable, "-m", "pytest", *paths, "-q"]
-    result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command, cwd=REPO_ROOT, capture_output=True, text=True, check=False
+    )
     stdout_lines = (result.stdout or "").splitlines()
     summary = stdout_lines[-1] if stdout_lines else ""
+    # 记录到仓库的快照不应携带本机绝对路径：家目录前缀统一脱敏为 ~
+    home = os.path.expanduser("~")
+    command_repr = " ".join(command).replace(home, "~", 1)
     return {
-        "command": " ".join(command),
+        "command": command_repr,
         "exit_code": result.returncode,
         "summary": summary,
         "passed": result.returncode == 0,
@@ -98,9 +116,13 @@ def _run_pytest(group: str, paths: list[str]) -> dict:
 
 def main() -> int:
     config = _load_pipeline_config()
-    config_snapshot = {name: _dig(config, path) for name, path in CONFIG_SNAPSHOT_KEYS.items()}
+    config_snapshot = {
+        name: _dig(config, path) for name, path in CONFIG_SNAPSHOT_KEYS.items()
+    }
 
-    groups = {name: _run_pytest(name, paths) for name, paths in BASELINE_TEST_GROUPS.items()}
+    groups = {
+        name: _run_pytest(name, paths) for name, paths in BASELINE_TEST_GROUPS.items()
+    }
 
     snapshot = {
         "captured_at": datetime.now(timezone.utc).isoformat(),

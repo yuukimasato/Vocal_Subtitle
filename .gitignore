@@ -128,3 +128,7 @@ gh.tar.gz
 # 面板组件源依赖(floating-panel-kit 仅入库源码)
 tools/floating-panel-kit/node_modules/
 tools/floating-panel-kit/无标题文档
+
+# 本地生成的基线快照（含工作树状态与解释器路径），不入库
+test/baselines/
+gui-test-screenshots/
