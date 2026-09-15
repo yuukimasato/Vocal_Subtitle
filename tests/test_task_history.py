@@ -13,17 +13,18 @@ import pytest
 
 from vocal_subtitle.utils.task_history import (
     ALLOWED_TRANSITIONS,
+    TERMINAL_STATUSES,
+    VALID_TASK_STATUSES,
     ErrorCategory,
     PreflightChecklist,
     TaskHistoryManager,
-    TERMINAL_STATUSES,
-    VALID_TASK_STATUSES,
 )
 
 
 @dataclass
 class _FakeConfig:
     """用于测试的最小化 dataclass config，满足 asdict(config) 调用。"""
+
     mode: str = "offline"
     degradation_mode: str = "full"
     asr_engine: str = "auto"
@@ -34,8 +35,15 @@ class TestTaskStateMachine:
 
     def test_all_statuses_in_valid_set(self):
         """所有 7 个状态都在 VALID_TASK_STATUSES 中"""
-        expected = {"pending", "preflight", "running", "completed",
-                    "degraded_completed", "failed", "cancelled"}
+        expected = {
+            "pending",
+            "preflight",
+            "running",
+            "completed",
+            "degraded_completed",
+            "failed",
+            "cancelled",
+        }
         assert VALID_TASK_STATUSES == expected
 
     def test_terminal_statuses_are_subset_of_valid(self):
@@ -94,10 +102,16 @@ class TestErrorCategory:
             ErrorCategory.UNRECOVERABLE_FAILURE,
         ]
         for cat in categories:
-            msg = ErrorCategory.user_message(cat, path="x", format="x",
-                                              model="x", dep="x",
-                                              engine="x", timeout="60",
-                                              reason="x")
+            msg = ErrorCategory.user_message(
+                cat,
+                path="x",
+                format="x",
+                model="x",
+                dep="x",
+                engine="x",
+                timeout="60",
+                reason="x",
+            )
             assert msg
             assert len(msg) > 0
 
@@ -106,7 +120,9 @@ class TestErrorCategory:
         msg = ErrorCategory.user_message("input_missing", path="/tmp/test.wav")
         assert "/tmp/test.wav" in msg
 
-        msg = ErrorCategory.user_message("engine_timeout", engine="faster-whisper", timeout="60")
+        msg = ErrorCategory.user_message(
+            "engine_timeout", engine="faster-whisper", timeout="60"
+        )
         assert "faster-whisper" in msg
         assert "60" in msg
 
@@ -122,8 +138,15 @@ class TestPreflightChecklist:
     def test_all_seven_checks_present(self):
         """TASK_STATE_MACHINE.md 定义 7 项预检"""
         keys = {c["key"] for c in PreflightChecklist.checks}
-        expected = {"input_exists", "format_supported", "separation_available",
-                    "vad_available", "asr_available", "disk_space", "output_writable"}
+        expected = {
+            "input_exists",
+            "format_supported",
+            "separation_available",
+            "vad_available",
+            "asr_available",
+            "disk_space",
+            "output_writable",
+        }
         assert keys == expected
 
     def test_critical_checks_marked(self):
@@ -136,7 +159,9 @@ class TestPreflightChecklist:
 
     def test_separation_is_non_critical(self):
         """分离引擎是可降级的"""
-        sep_check = [c for c in PreflightChecklist.checks if c["key"] == "separation_available"][0]
+        sep_check = [
+            c for c in PreflightChecklist.checks if c["key"] == "separation_available"
+        ][0]
         assert sep_check["critical"] is False
 
 
@@ -215,8 +240,11 @@ class TestTaskHistoryManager:
         mgr.create("task-cached", "test.wav", "sha256:abc123", 2048, "default", config)
         mgr.update("task-cached", status="preflight")
         mgr.update("task-cached", status="running")
-        mgr.update("task-cached", status="completed",
-                   result_json=json.dumps({"subtitle_path": "/tmp/out.srt"}))
+        mgr.update(
+            "task-cached",
+            status="completed",
+            result_json=json.dumps({"subtitle_path": "/tmp/out.srt"}),
+        )
 
         found = mgr.find_by_hash("sha256:abc123", config_hash)
         assert found is not None
@@ -236,11 +264,12 @@ class TestTaskHistoryManager:
 
     def test_fixup_stale_running_tasks(self, mgr):
         """归属进程已死亡的残留 running 任务修复为 failed"""
-        import os
         import subprocess
         import sys
 
-        mgr.create("task-stale", "test.wav", "sha256:abc", 1024, "default", _FakeConfig())
+        mgr.create(
+            "task-stale", "test.wav", "sha256:abc", 1024, "default", _FakeConfig()
+        )
         mgr.update("task-stale", status="preflight")
         mgr.update("task-stale", status="running")
         # 将归属进程改写为一个已退出的 PID，模拟进程中断后的残留任务
@@ -263,7 +292,9 @@ class TestTaskHistoryManager:
 
     def test_fixup_spares_running_task_of_live_process(self, mgr):
         """存活进程（如正在执行的 CLI）拥有的 running 任务不被误标为 failed"""
-        mgr.create("task-live", "test.wav", "sha256:abc", 1024, "default", _FakeConfig())
+        mgr.create(
+            "task-live", "test.wav", "sha256:abc", 1024, "default", _FakeConfig()
+        )
         mgr.update("task-live", status="preflight")
         mgr.update("task-live", status="running")
         with mgr._lock:
@@ -282,7 +313,9 @@ class TestTaskHistoryManager:
 
     def test_fixup_marks_legacy_rows_without_owner(self, mgr):
         """无归属进程（owner_pid=0，旧版本遗留）的 running 任务仍被修复"""
-        mgr.create("task-legacy", "test.wav", "sha256:abc", 1024, "default", _FakeConfig())
+        mgr.create(
+            "task-legacy", "test.wav", "sha256:abc", 1024, "default", _FakeConfig()
+        )
         mgr.update("task-legacy", status="running")
         with mgr._lock:
             conn = mgr._get_conn()
@@ -298,15 +331,23 @@ class TestTaskHistoryManager:
 
     def test_completed_task_clears_stale_error(self, mgr):
         """completed 状态不应残留 error（如重启 fixup 误标后任务仍正常完成）"""
-        mgr.create("task-cleared", "test.wav", "sha256:abc", 1024, "default", _FakeConfig())
+        mgr.create(
+            "task-cleared", "test.wav", "sha256:abc", 1024, "default", _FakeConfig()
+        )
         mgr.update("task-cleared", status="running")
         # 模拟重启 fixup 误标
-        mgr.update("task-cleared", status="failed",
-                   error="Server restarted during task execution",
-                   error_category="unrecoverable_failure")
+        mgr.update(
+            "task-cleared",
+            status="failed",
+            error="Server restarted during task execution",
+            error_category="unrecoverable_failure",
+        )
         # 任务实际完成（外部进程继续执行到完成）
-        mgr.update("task-cleared", status="completed",
-                   result_json=json.dumps({"subtitle_count": 3}))
+        mgr.update(
+            "task-cleared",
+            status="completed",
+            result_json=json.dumps({"subtitle_count": 3}),
+        )
         task = mgr.get("task-cleared")
         assert task["status"] == "completed"
         assert not task["error"]

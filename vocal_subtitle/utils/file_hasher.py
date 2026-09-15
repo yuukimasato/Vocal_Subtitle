@@ -6,7 +6,6 @@
 import hashlib
 import json
 from pathlib import Path
-from typing import Optional
 
 # 分块读取大小 (8KB)
 _CHUNK_SIZE = 8192
@@ -15,7 +14,7 @@ _CHUNK_SIZE = 8192
 def compute_file_hash(
     path: Path,
     algorithm: str = "sha256",
-    max_size_mb: Optional[float] = None,
+    max_size_mb: float | None = None,
 ) -> str:
     """计算文件内容的哈希值
 
@@ -87,7 +86,7 @@ def compute_config_hash(config) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-_PIPELINE_FINGERPRINT_CACHE: Optional[str] = None
+_PIPELINE_FINGERPRINT_CACHE: str | None = None
 
 
 def _pipeline_code_fingerprint() -> str:
@@ -117,6 +116,7 @@ def _pipeline_code_fingerprint() -> str:
 
     # 查找项目根目录（包含 vocal_subtitle 包的目录）
     import vocal_subtitle
+
     project_root = Path(vocal_subtitle.__file__).parent.parent
 
     for rel_path in core_files:

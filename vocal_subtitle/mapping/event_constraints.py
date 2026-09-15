@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 HARD_BOUNDARY_WARNINGS = frozenset(
     {
         "physical_envelope_conflict",
@@ -44,7 +43,11 @@ def physical_owner_compatible(
 
     left_clip_ids = {_clip_id(span) for span in left_spans if _clip_id(span)}
     right_clip_ids = {_clip_id(span) for span in right_spans if _clip_id(span)}
-    if left_clip_ids and right_clip_ids and not left_clip_ids.intersection(right_clip_ids):
+    if (
+        left_clip_ids
+        and right_clip_ids
+        and not left_clip_ids.intersection(right_clip_ids)
+    ):
         return False
 
     ordered = sorted(
@@ -148,7 +151,9 @@ def merge_event_metadata(left: Any, right: Any) -> None:
         left.physical_end = max(left.physical_end, right.physical_end)
     if getattr(left, "physical_region_id", None) is None:
         left.physical_region_id = getattr(right, "physical_region_id", None)
-    if getattr(left, "physical_bin_id", None) and getattr(right, "physical_bin_id", None):
+    if getattr(left, "physical_bin_id", None) and getattr(
+        right, "physical_bin_id", None
+    ):
         if left.physical_bin_id != right.physical_bin_id:
             left.physical_bin_id = f"{left.physical_bin_id}+{right.physical_bin_id}"
     elif getattr(left, "physical_bin_id", None) is None:

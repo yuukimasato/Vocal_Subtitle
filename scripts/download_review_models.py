@@ -14,9 +14,9 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -82,13 +82,27 @@ def _default_cache_dir() -> Path:
 def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--all", action="store_true", help="download every registered review model")
-    group.add_argument("--model", choices=sorted(MODEL_BY_KEY), help="download one registered model")
-    parser.add_argument("--list", action="store_true", help="list model IDs and official URLs")
+    group.add_argument(
+        "--all", action="store_true", help="download every registered review model"
+    )
+    group.add_argument(
+        "--model", choices=sorted(MODEL_BY_KEY), help="download one registered model"
+    )
+    parser.add_argument(
+        "--list", action="store_true", help="list model IDs and official URLs"
+    )
     parser.add_argument("--cache-dir", type=Path, default=_default_cache_dir())
-    parser.add_argument("--mirror", action="store_true", help="use hf-mirror.com as the HF endpoint")
-    parser.add_argument("--force", action="store_true", help="force re-download of existing snapshots")
-    parser.add_argument("--dry-run", action="store_true", help="print planned downloads without network access")
+    parser.add_argument(
+        "--mirror", action="store_true", help="use hf-mirror.com as the HF endpoint"
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="force re-download of existing snapshots"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print planned downloads without network access",
+    )
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
@@ -112,10 +126,14 @@ def _snapshot_is_ready(target: Path) -> bool:
     if not (target / "config.json").is_file():
         return False
     weight_suffixes = (".safetensors", ".bin", ".pt", ".pth")
-    return any(path.is_file() and path.suffix in weight_suffixes for path in target.rglob("*"))
+    return any(
+        path.is_file() and path.suffix in weight_suffixes for path in target.rglob("*")
+    )
 
 
-def download_model(model: ReviewModel, cache_dir: Path, *, mirror: bool, force: bool, dry_run: bool) -> Path:
+def download_model(
+    model: ReviewModel, cache_dir: Path, *, mirror: bool, force: bool, dry_run: bool
+) -> Path:
     target = cache_dir / model.target_dir
     print(f"{model.key}: {model.repo_url}")
     print(f"  target: {target}")

@@ -50,23 +50,31 @@ def _diagnostic_paths(summary: dict[str, Any], summary_path: Path):
 def calibrate(summary: dict[str, Any], summary_path: Path) -> dict[str, Any]:
     scenes = [item for item in summary.get("scenes", []) if item.get("success")]
     comparisons = [item.get("comparison") for item in scenes if item.get("comparison")]
-    coverage = _finite([
-        item.get("text_metrics", {}).get("reference_content_coverage")
-        for item in comparisons
-    ])
-    start_mae = _finite([
-        item.get("statistics", {}).get("start", {}).get("mae_ms")
-        for item in comparisons
-    ])
-    end_mae = _finite([
-        item.get("statistics", {}).get("end", {}).get("mae_ms")
-        for item in comparisons
-    ])
+    coverage = _finite(
+        [
+            item.get("text_metrics", {}).get("reference_content_coverage")
+            for item in comparisons
+        ]
+    )
+    start_mae = _finite(
+        [
+            item.get("statistics", {}).get("start", {}).get("mae_ms")
+            for item in comparisons
+        ]
+    )
+    end_mae = _finite(
+        [
+            item.get("statistics", {}).get("end", {}).get("mae_ms")
+            for item in comparisons
+        ]
+    )
     elapsed = _finite([item.get("elapsed_sec") for item in scenes])
-    physical_violations = _finite([
-        item.get("diagnostic", {}).get("physical_violation_count", 0)
-        for item in scenes
-    ])
+    physical_violations = _finite(
+        [
+            item.get("diagnostic", {}).get("physical_violation_count", 0)
+            for item in scenes
+        ]
+    )
 
     risk_scores: list[float] = []
     evidence_reports = 0
@@ -75,9 +83,15 @@ def calibrate(summary: dict[str, Any], summary_path: Path) -> dict[str, Any]:
             payload = json.loads(diagnostic_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        risk = payload.get("quality_diagnostics", {}).get("evidence_review", {}).get("risk", [])
+        risk = (
+            payload.get("quality_diagnostics", {})
+            .get("evidence_review", {})
+            .get("risk", [])
+        )
         if isinstance(risk, list):
-            risk_scores.extend(_finite([item.get("score") for item in risk if isinstance(item, dict)]))
+            risk_scores.extend(
+                _finite([item.get("score") for item in risk if isinstance(item, dict)])
+            )
             evidence_reports += bool(risk)
 
     # The selected values describe the observed gold-set envelope. They are
@@ -90,18 +104,26 @@ def calibrate(summary: dict[str, Any], summary_path: Path) -> dict[str, Any]:
         "status": "calibrated" if comparisons else "uncalibrated",
         "gold_scene_count": len(comparisons),
         "min_reference_content_coverage": (
-            round(max(0.0, min_coverage - 0.01), 3) if min_coverage is not None else None
+            round(max(0.0, min_coverage - 0.01), 3)
+            if min_coverage is not None
+            else None
         ),
-        "max_start_mae_ms": round(max_start * 1.10, 1) if max_start is not None else None,
+        "max_start_mae_ms": round(max_start * 1.10, 1)
+        if max_start is not None
+        else None,
         "max_end_mae_ms": round(max_end * 1.10, 1) if max_end is not None else None,
         "max_physical_violation_count": 0,
-        "p95_latency_seconds": round(p95_elapsed * 1.25, 3) if p95_elapsed is not None else None,
+        "p95_latency_seconds": round(p95_elapsed * 1.25, 3)
+        if p95_elapsed is not None
+        else None,
     }
     risk = {
         "status": "calibrated" if risk_scores else "uncalibrated",
         "evidence_report_count": evidence_reports,
         "sample_count": len(risk_scores),
-        "observed_p95": round(_percentile(risk_scores, 0.95), 6) if risk_scores else None,
+        "observed_p95": round(_percentile(risk_scores, 0.95), 6)
+        if risk_scores
+        else None,
         "thresholds": {
             "medium": 0.25,
             "high": 0.50,
@@ -128,13 +150,16 @@ def calibrate(summary: dict[str, Any], summary_path: Path) -> dict[str, Any]:
             "physical_violation_count": physical_violations,
             "elapsed_seconds": elapsed,
         },
-        "publishable": quality_gate["status"] == "calibrated" and risk["status"] == "calibrated",
+        "publishable": quality_gate["status"] == "calibrated"
+        and risk["status"] == "calibrated",
         "blocking_reasons": [
-            reason for reason in (
+            reason
+            for reason in (
                 "no_reference_gold_metrics" if not comparisons else None,
                 "risk_thresholds_uncalibrated" if not risk_scores else None,
                 "acoustic_thresholds_uncalibrated",
-            ) if reason
+            )
+            if reason
         ],
     }
 
@@ -151,7 +176,9 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         parser.error(str(exc))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    args.output.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 3 if args.ci and not report["publishable"] else 0
 

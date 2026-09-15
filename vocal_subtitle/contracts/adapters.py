@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Optional
+from typing import Any
 
 from .common import ErrorInfo
 from .engine import (
@@ -43,7 +44,7 @@ class TaskHistoryAdapter(TaskPort):
     def __init__(self, manager: Any):
         self.manager = manager
 
-    def get(self, task_id: str) -> Optional[TaskSnapshot]:
+    def get(self, task_id: str) -> TaskSnapshot | None:
         row = self.manager.get(task_id)
         return TaskSnapshot.from_legacy_row(row) if row else None
 
@@ -91,7 +92,9 @@ class TaskHistoryAdapter(TaskPort):
         elif state == TaskState.COMPLETED:
             self.manager.set_completed(task_id)
         elif state == TaskState.DEGRADED_COMPLETED:
-            self.manager.set_degraded_completed(task_id, reason=message, category=category)
+            self.manager.set_degraded_completed(
+                task_id, reason=message, category=category
+            )
         elif state == TaskState.FAILED:
             self.manager.set_failed(
                 task_id,
@@ -166,7 +169,7 @@ class EngineRegistryAdapter(EngineRegistryPort):
             device=str(getattr(status, "device", "") or ""),
         )
 
-    def get(self, engine: str) -> Optional[EngineAvailability]:
+    def get(self, engine: str) -> EngineAvailability | None:
         status = self.registry.get(engine)
         return self._convert(status) if status is not None else None
 
@@ -288,7 +291,9 @@ class RunReportAdapter(ReportPort):
         self._builders[result.task.run_id or ""] = builder
         return builder
 
-    def build(self, result: RunResult, *, config_snapshot: Optional[Mapping[str, Any]] = None) -> RunReport:
+    def build(
+        self, result: RunResult, *, config_snapshot: Mapping[str, Any] | None = None
+    ) -> RunReport:
         if isinstance(result.report, RunReport):
             return result.report
         builder = self._builder(result)
@@ -323,5 +328,5 @@ class ArtifactRegistryAdapter(ArtifactPort):
         path = self.get(name)
         return path is not None and path.exists()
 
-    def get(self, name: str) -> Optional[Path]:
+    def get(self, name: str) -> Path | None:
         return self._artifacts.get(name)

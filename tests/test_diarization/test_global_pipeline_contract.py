@@ -12,7 +12,10 @@ from vocal_subtitle.vad.base import SpeechSegment
 def test_pipeline_projects_complex_alternation_without_local_renumbering():
     pipeline = Pipeline(PipelineConfig())
     pipeline._global_diarization = DiarizationResult(
-        turns=[], exclusive_turns=[], speaker_count=3, backend="test",
+        turns=[],
+        exclusive_turns=[],
+        speaker_count=3,
+        backend="test",
     )
     pipeline._global_turns = [
         SpeakerTurn(0.0, 1.0, 0),
@@ -25,16 +28,22 @@ def test_pipeline_projects_complex_alternation_without_local_renumbering():
     ]
 
     segments, speaker_ids = pipeline._project_global_speakers(
-        [SpeechSegment(0.0, 7.0)], time_offset=0.0, duration=7.0,
+        [SpeechSegment(0.0, 7.0)],
+        time_offset=0.0,
+        duration=7.0,
     )
 
     projected_times = [
-        (round(segment.start, 3), round(segment.end, 3))
-        for segment in segments
+        (round(segment.start, 3), round(segment.end, 3)) for segment in segments
     ]
     assert projected_times == [
-        (0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0),
-        (4.0, 5.0), (5.0, 6.0), (6.0, 7.0),
+        (0.0, 1.0),
+        (1.0, 2.0),
+        (2.0, 3.0),
+        (3.0, 4.0),
+        (4.0, 5.0),
+        (5.0, 6.0),
+        (6.0, 7.0),
     ]
     assert speaker_ids == [0, 1, 0, 0, 1, 2, 1]
 
@@ -42,7 +51,10 @@ def test_pipeline_projects_complex_alternation_without_local_renumbering():
 def test_single_speaker_projection_envelope_does_not_split_on_pause_turns():
     pipeline = Pipeline(PipelineConfig())
     pipeline._global_diarization = DiarizationResult(
-        turns=[], exclusive_turns=[], speaker_count=1, backend="test",
+        turns=[],
+        exclusive_turns=[],
+        speaker_count=1,
+        backend="test",
     )
     pipeline._global_turns = [SpeakerTurn(0.0, 10.0, 0)]
 
@@ -53,7 +65,8 @@ def test_single_speaker_projection_envelope_does_not_split_on_pause_turns():
     )
 
     assert [(segment.start, segment.end) for segment in segments] == [
-        (2.0, 2.8), (5.0, 5.4),
+        (2.0, 2.8),
+        (5.0, 5.4),
     ]
     assert speaker_ids == [0, 0]
 
@@ -62,13 +75,21 @@ def test_merge_engine_rejects_different_numeric_speakers():
     engine = LLMMergeEngine(MergeDecisionConfig(llm_tier="rule_only"))
     fragments = [
         {
-            "id": 1, "start": 0.0, "end": 1.0, "text": "A",
-            "speaker": "Speaker A", "speaker_id": 0,
+            "id": 1,
+            "start": 0.0,
+            "end": 1.0,
+            "text": "A",
+            "speaker": "Speaker A",
+            "speaker_id": 0,
             "gap_to_next_sec": 0.05,
         },
         {
-            "id": 2, "start": 1.05, "end": 2.0, "text": "B",
-            "speaker": "Speaker B", "speaker_id": 1,
+            "id": 2,
+            "start": 1.05,
+            "end": 2.0,
+            "text": "B",
+            "speaker": "Speaker B",
+            "speaker_id": 1,
             "gap_to_next_sec": None,
         },
     ]
@@ -142,7 +163,8 @@ def test_final_boundary_check_marks_wordless_cross_speaker_event_unknown():
     ]
     stats = PipelineStats(input_path=None, duration_seconds=2.0)
     result = pipeline._enforce_speaker_boundaries(
-        [SubtitleEvent(1, 0.0, 2.0, "无法按词分配")], stats,
+        [SubtitleEvent(1, 0.0, 2.0, "无法按词分配")],
+        stats,
     )
 
     assert len(result) == 1

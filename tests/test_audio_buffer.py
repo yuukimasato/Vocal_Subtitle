@@ -1,11 +1,9 @@
 """只读音频缓冲契约(2026-09-15 重构计划 Task 7)。"""
 
 import numpy as np
-
 import pytest
 
 from vocal_subtitle.utils.audio_buffer import (
-    AudioBuffer,
     audio_buffer_from_array,
 )
 

@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 from ..application.run_context import RunContext
 
@@ -22,9 +22,9 @@ class StageReport:
     stage: str
     status: str
     elapsed_seconds: float
-    detail: Dict[str, Any] = field(default_factory=dict)
+    detail: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "stage": self.stage,
             "status": self.status,
@@ -37,15 +37,15 @@ class StageReport:
 class StageReportAggregator:
     """按阶段收集 StageReport 并输出汇总。"""
 
-    reports: List[StageReport] = field(default_factory=list)
+    reports: list[StageReport] = field(default_factory=list)
 
     def add(self, report: StageReport) -> None:
         self.reports.append(report)
 
-    def to_dict(self) -> Dict[str, Any]:
-        status_counts: Dict[str, int] = {}
+    def to_dict(self) -> dict[str, Any]:
+        status_counts: dict[str, int] = {}
         total_elapsed = 0.0
-        serialized: List[Dict[str, Any]] = []
+        serialized: list[dict[str, Any]] = []
         for report in self.reports:
             status_counts[report.status] = status_counts.get(report.status, 0) + 1
             total_elapsed += report.elapsed_seconds
@@ -58,7 +58,7 @@ class StageReportAggregator:
         }
 
 
-def aggregate_run_diagnostics(context: RunContext) -> Dict[str, Any]:
+def aggregate_run_diagnostics(context: RunContext) -> dict[str, Any]:
     """把 RunContext 的阶段诊断折叠为 stage_reports 聚合。"""
     aggregator = StageReportAggregator()
     for stage, entries in context.diagnostics.items():
@@ -68,12 +68,16 @@ def aggregate_run_diagnostics(context: RunContext) -> Dict[str, Any]:
                 for key, value in dict(entry or {}).items()
                 if key not in {"status", "elapsed_seconds"}
             }
-            aggregator.add(StageReport(
-                stage=stage,
-                status=str((entry or {}).get("status", STATUS_OK)),
-                elapsed_seconds=float((entry or {}).get("elapsed_seconds", 0.0) or 0.0),
-                detail=detail,
-            ))
+            aggregator.add(
+                StageReport(
+                    stage=stage,
+                    status=str((entry or {}).get("status", STATUS_OK)),
+                    elapsed_seconds=float(
+                        (entry or {}).get("elapsed_seconds", 0.0) or 0.0
+                    ),
+                    detail=detail,
+                )
+            )
     return aggregator.to_dict()
 
 

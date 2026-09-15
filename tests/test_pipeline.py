@@ -1,9 +1,7 @@
 """管道集成测试"""
 
-import tempfile
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from vocal_subtitle.config import ConfigLoader, PipelineConfig
@@ -152,7 +150,9 @@ class TestPipelineDiarizationConfig:
 
         # 模拟 CLI 传入 --diarization --speaker-role
         overridden = loader.merge_with_overrides(
-            config, diarization=True, speaker_role=True,
+            config,
+            diarization=True,
+            speaker_role=True,
         )
         assert overridden.diarization.enabled is True
         assert overridden.speaker_role.enabled is True

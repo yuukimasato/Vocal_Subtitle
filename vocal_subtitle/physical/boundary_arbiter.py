@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -26,9 +27,7 @@ class BoundaryCandidate:
             "evidence_ids": list(self.evidence_ids),
             "rejection_reasons": list(self.rejection_reasons),
             "features": {key: value for key, value in self.features},
-            "score_components": {
-                key: value for key, value in self.score_components
-            },
+            "score_components": {key: value for key, value in self.score_components},
         }
 
 
@@ -70,7 +69,7 @@ class BoundaryDecision:
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "BoundaryDecision":
+    def from_dict(cls, payload: Mapping[str, Any]) -> BoundaryDecision:
         return cls(
             accepted=bool(payload["accepted"]),
             boundary_time=float(payload["boundary_time"]),

@@ -21,15 +21,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
 
-from .scene_slicer import MAX_SINGLE_DIMENSION_RATIO, SceneSlicer
+from .scene_slicer import SceneSlicer
 
 logger = logging.getLogger(__name__)
 
 
 class DatasetTier(str, Enum):
     """数据集层级"""
+
     D0 = "D0"  # 工程诊断集
     D1 = "D1"  # 参考回归集
     D2 = "D2"  # 候选反馈集
@@ -39,6 +39,7 @@ class DatasetTier(str, Enum):
 
 class DatasetVersionStatus(str, Enum):
     """数据集版本状态"""
+
     ACTIVE = "active"
     SUPERSEDED = "superseded"
     ARCHIVED = "archived"
@@ -46,16 +47,31 @@ class DatasetVersionStatus(str, Enum):
 
 # 各层级的保留策略 (§8)
 RETENTION_POLICIES: dict[DatasetTier, dict] = {
-    DatasetTier.D0: {"strategy": "never_archive", "retention_days": 0,
-                     "description": "不归档，随功能演进增减"},
-    DatasetTier.D1: {"strategy": "quarterly_review", "retention_days": 0,
-                     "description": "每季度审查，移除不再有代表性的样本"},
-    DatasetTier.D2: {"strategy": "auto_cleanup", "retention_days": 365,
-                     "description": "超过保留期限自动清理"},
-    DatasetTier.D3: {"strategy": "append_only", "retention_days": 0,
-                     "description": "版本冻结后只增量，不删除"},
-    DatasetTier.D4: {"strategy": "supersede", "retention_days": 0,
-                     "description": "按场景更新，旧样本标记为 superseded"},
+    DatasetTier.D0: {
+        "strategy": "never_archive",
+        "retention_days": 0,
+        "description": "不归档，随功能演进增减",
+    },
+    DatasetTier.D1: {
+        "strategy": "quarterly_review",
+        "retention_days": 0,
+        "description": "每季度审查，移除不再有代表性的样本",
+    },
+    DatasetTier.D2: {
+        "strategy": "auto_cleanup",
+        "retention_days": 365,
+        "description": "超过保留期限自动清理",
+    },
+    DatasetTier.D3: {
+        "strategy": "append_only",
+        "retention_days": 0,
+        "description": "版本冻结后只增量，不删除",
+    },
+    DatasetTier.D4: {
+        "strategy": "supersede",
+        "retention_days": 0,
+        "description": "按场景更新，旧样本标记为 superseded",
+    },
 }
 
 
@@ -64,7 +80,7 @@ class DatasetVersion:
     """单个数据集版本记录"""
 
     tier: DatasetTier
-    version_id: str                # "D0-20260802-001"
+    version_id: str  # "D0-20260802-001"
     freeze_date: str = ""
     sample_count: int = 0
     description: str = ""
@@ -113,10 +129,10 @@ class DataVersionManager:
         removed = mgr.cleanup_expired()
     """
 
-    def __init__(self, storage_dir: Optional[Path] = None):
-        self._storage_dir = Path(storage_dir or (
-            Path(__file__).parent.parent.parent / "cache" / "datasets"
-        ))
+    def __init__(self, storage_dir: Path | None = None):
+        self._storage_dir = Path(
+            storage_dir or (Path(__file__).parent.parent.parent / "cache" / "datasets")
+        )
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._registry_path = self._storage_dir / "dataset_registry.json"
         self._registry: dict[str, dict[str, dict]] = self._load()
@@ -128,7 +144,7 @@ class DataVersionManager:
         if self._registry_path.exists():
             try:
                 return json.loads(self._registry_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 pass
         return {t.value: {} for t in DatasetTier}
 
@@ -159,26 +175,46 @@ class DataVersionManager:
             ("D0-003", "test/培训测试-双人.wav", 139.52, "mixed", 2),
             ("D0-004", "test/中文多人员测试音频.wav", 13.28, "zh", 3),
             ("D0-005", "test/英文多人员测试音频.wav", 18.64, "en", 3),
-            ("D0-006", "test/video_英国老头评测中国美的移动空调_1MIN_real-人声.wav", 53.89, "en", 1),
+            (
+                "D0-006",
+                "test/video_英国老头评测中国美的移动空调_1MIN_real-人声.wav",
+                53.89,
+                "en",
+                1,
+            ),
             ("D0-007", "test/TTS中文朗读测试-双人.wav", 157.93, "zh", 2),
             ("D0-008", "test/简单三步就能复刻巧乐兹？-人声.wav", 216.23, "zh", 1),
-            ("D0-009", "test/Grow Up Show ～向日葵馬戲團-4min-人声.wav", 249.30, "zh", 2),
+            (
+                "D0-009",
+                "test/Grow Up Show ～向日葵馬戲團-4min-人声.wav",
+                249.30,
+                "zh",
+                2,
+            ),
             ("D0-010", "test/40011894204-1-192--英语多人.wav", 46.34, "en", 2),
             ("D0-011", "test/20260428_214253_0043_KyGLgfKX.wav", 5.84, "zh", 1),
             ("D0-G01", "test/golden/non_speech_tone.wav", 4.00, "none", 0),
             ("D0-G02", "test/golden/repeated_phrase_me.wav", 2.80, "zh", 1),
         ]
         for sid, path, dur, lang, spk in d0_audio:
-            entries.append({
-                "sample_id": sid,
-                "path": path,
-                "duration_seconds": dur,
-                "language": lang,
-                "speaker_count": spk,
-                "scene_tags": {"language": lang if lang in ("zh", "en", "mixed") else "none",
-                               "speaker_count": "single" if spk == 1 else "dual" if spk == 2 else "multi",
-                               "audio_length": "short" if dur < 180 else "medium"},
-            })
+            entries.append(
+                {
+                    "sample_id": sid,
+                    "path": path,
+                    "duration_seconds": dur,
+                    "language": lang,
+                    "speaker_count": spk,
+                    "scene_tags": {
+                        "language": lang if lang in ("zh", "en", "mixed") else "none",
+                        "speaker_count": "single"
+                        if spk == 1
+                        else "dual"
+                        if spk == 2
+                        else "multi",
+                        "audio_length": "short" if dur < 180 else "medium",
+                    },
+                }
+            )
 
         self._registry["D0"][version_id] = {
             "tier": "D0",
@@ -237,7 +273,9 @@ class DataVersionManager:
         self._save()
         logger.info(
             "Dataset registered: %s (%s, %d entries)",
-            version_id, tier.value, len(entries),
+            version_id,
+            tier.value,
+            len(entries),
         )
         return version
 
@@ -271,7 +309,9 @@ class DataVersionManager:
             if balance["warnings"]:
                 warning_msgs = [w["message"] for w in balance["warnings"]]
                 logger.warning(
-                    "Balance warnings for %s: %s", version_id, "; ".join(warning_msgs),
+                    "Balance warnings for %s: %s",
+                    version_id,
+                    "; ".join(warning_msgs),
                 )
 
         return self.register(
@@ -301,13 +341,15 @@ class DataVersionManager:
         self._save()
         logger.info(
             "Dataset superseded: %s/%s (reason: %s)",
-            tier_key, version_id, reason or "N/A",
+            tier_key,
+            version_id,
+            reason or "N/A",
         )
         return True
 
     # ---- 查询 ----
 
-    def current(self, tier: DatasetTier) -> Optional[DatasetVersion]:
+    def current(self, tier: DatasetTier) -> DatasetVersion | None:
         """获取指定层级的当前活跃版本。
 
         Args:
@@ -319,8 +361,7 @@ class DataVersionManager:
         tier_key = tier.value
         versions = self._registry.get(tier_key, {})
         active = [
-            (vid, v) for vid, v in versions.items()
-            if v.get("status") == "active"
+            (vid, v) for vid, v in versions.items() if v.get("status") == "active"
         ]
         if not active:
             return None
@@ -328,9 +369,7 @@ class DataVersionManager:
         active.sort(key=lambda x: x[0], reverse=True)
         return DatasetVersion.from_dict(active[0][1])
 
-    def list_versions(
-        self, tier: Optional[DatasetTier] = None
-    ) -> list[DatasetVersion]:
+    def list_versions(self, tier: DatasetTier | None = None) -> list[DatasetVersion]:
         """列出数据集版本。
 
         Args:
@@ -349,7 +388,7 @@ class DataVersionManager:
     def samples(
         self,
         tier: DatasetTier,
-        version_id: Optional[str] = None,
+        version_id: str | None = None,
     ) -> list[dict]:
         """获取指定层级/版本的样本条目。
 
@@ -375,7 +414,7 @@ class DataVersionManager:
     def check_balance(
         self,
         tier: DatasetTier,
-        version_id: Optional[str] = None,
+        version_id: str | None = None,
     ) -> dict:
         """检查数据集版本的维度平衡性。
 
@@ -391,7 +430,7 @@ class DataVersionManager:
 
     # ---- 清理 ----
 
-    def cleanup_expired(self, now: Optional[str] = None) -> list[str]:
+    def cleanup_expired(self, now: str | None = None) -> list[str]:
         """清理超过保留期限的 D2 样本。
 
         D2 样本的 retention_days 默认为 365。
@@ -416,7 +455,9 @@ class DataVersionManager:
             if vdata.get("status") != "active":
                 continue
 
-            retention = vdata.get("retention_days", RETENTION_POLICIES[DatasetTier.D2]["retention_days"])
+            retention = vdata.get(
+                "retention_days", RETENTION_POLICIES[DatasetTier.D2]["retention_days"]
+            )
             if retention <= 0:
                 continue
 

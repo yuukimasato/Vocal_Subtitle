@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any
 
 SCHEMA_VERSION = "cache-key-v1"
 
 
-def normalize_params(params: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+def normalize_params(params: Mapping[str, Any] | None) -> dict[str, Any]:
     """参数规范化:排序、去 None、数值/路径统一字符串化。"""
-    normalized: Dict[str, Any] = {}
+    normalized: dict[str, Any] = {}
     for key in sorted(dict(params or {}).keys()):
         value = params[key]
         if value is None:
@@ -32,10 +33,10 @@ def build_cache_key(
     content_hash: str,
     stage: str,
     stage_version: str,
-    engine: Optional[str] = None,
-    model: Optional[str] = None,
-    config: Optional[Mapping[str, Any]] = None,
-    params: Optional[Mapping[str, Any]] = None,
+    engine: str | None = None,
+    model: str | None = None,
+    config: Mapping[str, Any] | None = None,
+    params: Mapping[str, Any] | None = None,
     schema_version: str = SCHEMA_VERSION,
 ) -> str:
     """内容 + 版本身份键。
@@ -63,7 +64,7 @@ def build_cache_key(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def key_identity(key: str) -> Dict[str, str]:
+def key_identity(key: str) -> dict[str, str]:
     """诊断用:返回键的前缀指纹(不含原始内容)。"""
     return {"schema_version": SCHEMA_VERSION, "key_prefix": key[:16]}
 

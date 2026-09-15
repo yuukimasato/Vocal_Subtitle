@@ -1,13 +1,12 @@
 """Task-level ASR language probing and engine routing."""
 
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from math import ceil
-from typing import Callable, Iterable, Optional, Sequence
 
 import numpy as np
 
 from .base import LanguageDetection
-
 
 SUPPORTED_ENGINES = ("auto", "faster-whisper", "funasr", "qwen", "whisper-cpp")
 
@@ -23,12 +22,12 @@ class ASRRouteDecision:
     language_probability: float
     window_evidence: tuple = field(default_factory=tuple)
     decision_reason: str = ""
-    fallback_engine: Optional[str] = None
+    fallback_engine: str | None = None
     route_version: str = "asr-route-v1"
     quality_gate_version: str = "asr-quality-v1"
 
     @property
-    def language(self) -> Optional[str]:
+    def language(self) -> str | None:
         if self.detected_language in {"unknown", "mixed", "other"}:
             return None
         return self.detected_language or None
@@ -59,7 +58,9 @@ def _normalise_detection(value, source: str = "unknown") -> LanguageDetection:
         language = value
     return LanguageDetection(
         language=str(language or "unknown").lower(),
-        probability=max(0.0, min(1.0, float(probability if probability is not None else 0.0))),
+        probability=max(
+            0.0, min(1.0, float(probability if probability is not None else 0.0))
+        ),
         source=getattr(value, "source", source) or source,
     )
 
@@ -81,7 +82,7 @@ def merge_intervals(intervals: Iterable[Sequence[float]]) -> list[tuple[float, f
 
 def build_probe_windows(
     duration_seconds: float,
-    speech_intervals: Optional[Iterable[Sequence[float]]] = None,
+    speech_intervals: Iterable[Sequence[float]] | None = None,
     window_seconds: float = 8.0,
     max_windows: int = 8,
 ) -> list[tuple[float, float]]:
@@ -136,7 +137,7 @@ class ASRRouter:
         self,
         audio: np.ndarray,
         sample_rate: int,
-        speech_intervals: Optional[Iterable[Sequence[float]]] = None,
+        speech_intervals: Iterable[Sequence[float]] | None = None,
     ) -> ASRRouteDecision:
         asr = self.config.asr
         policy = asr.auto_routing
@@ -150,14 +151,18 @@ class ASRRouter:
             selected = requested if requested != "auto" else "faster-whisper"
             language = str(asr.language or "unknown").lower()
             if selected == "funasr" and language not in {"unknown", "", "zh"}:
-                raise ValueError("FunASR 为中文专用引擎，请将语言改为 zh 或选择 faster-whisper")
+                raise ValueError(
+                    "FunASR 为中文专用引擎，请将语言改为 zh 或选择 faster-whisper"
+                )
             return ASRRouteDecision(
                 requested_engine=requested,
                 selected_engine=selected,
                 selected_model=self._model_for(selected),
                 detected_language=language or "unknown",
                 language_probability=1.0 if language not in {"unknown", ""} else 0.0,
-                decision_reason="explicit_engine" if requested != "auto" else "auto_routing_disabled",
+                decision_reason="explicit_engine"
+                if requested != "auto"
+                else "auto_routing_disabled",
                 fallback_engine=self._fallback_engine(selected),
                 route_version=policy.route_version,
                 quality_gate_version=policy.quality_gate_version,
@@ -180,7 +185,8 @@ class ASRRouter:
             )
 
         windows = build_probe_windows(
-            len(audio) / max(sample_rate, 1), speech_intervals,
+            len(audio) / max(sample_rate, 1),
+            speech_intervals,
             policy.language_probe_window_seconds,
             policy.language_probe_max_windows,
         )
@@ -197,9 +203,7 @@ class ASRRouter:
             )
 
         for index, (start, end) in enumerate(windows):
-            chunk = np.asarray(audio)[
-                int(start * sample_rate): int(end * sample_rate)
-            ]
+            chunk = np.asarray(audio)[int(start * sample_rate) : int(end * sample_rate)]
             try:
                 detector = getattr(probe, "detect_language_info", None)
                 if callable(detector):
@@ -210,27 +214,32 @@ class ASRRouter:
                     detection = _normalise_detection(
                         probe.detect_language(chunk, sample_rate), probe.model_name
                     )
-                evidence.append({
-                    "window_id": f"probe-{index:02d}",
-                    "start": start,
-                    "end": end,
-                    "duration": round(end - start, 6),
-                    **detection.to_dict(),
-                    "status": "ok",
-                })
+                evidence.append(
+                    {
+                        "window_id": f"probe-{index:02d}",
+                        "start": start,
+                        "end": end,
+                        "duration": round(end - start, 6),
+                        **detection.to_dict(),
+                        "status": "ok",
+                    }
+                )
             except Exception as exc:
-                evidence.append({
-                    "window_id": f"probe-{index:02d}",
-                    "start": start,
-                    "end": end,
-                    "duration": round(end - start, 6),
-                    "status": "error",
-                    "error": str(exc),
-                })
+                evidence.append(
+                    {
+                        "window_id": f"probe-{index:02d}",
+                        "start": start,
+                        "end": end,
+                        "duration": round(end - start, 6),
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                )
 
         valid = [item for item in evidence if item.get("status") == "ok"]
         zh_valid = [
-            item for item in valid
+            item
+            for item in valid
             if item.get("language") == "zh"
             and float(item.get("probability", 0.0)) >= policy.zh_min_probability
         ]
@@ -287,8 +296,11 @@ class ASRRouter:
             return self.config.asr.model
         return self.config.asr.model
 
-    def _fallback_engine(self, selected: str) -> Optional[str]:
-        if selected == "funasr" and self.config.asr.auto_routing.fallback_on_quality_failure:
+    def _fallback_engine(self, selected: str) -> str | None:
+        if (
+            selected == "funasr"
+            and self.config.asr.auto_routing.fallback_on_quality_failure
+        ):
             return self.config.asr.auto_routing.fallback_engine
         return None
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Optional, Sequence
+from typing import Any
 
 from ..asr.contracts import (
     EvidenceReviewRequest,
@@ -51,8 +52,8 @@ class OfflineProductionCoordinator:
 
     def __init__(
         self,
-        review_service: Optional[EvidenceReviewService] = None,
-        projector: Optional[DecisionEventProjector] = None,
+        review_service: EvidenceReviewService | None = None,
+        projector: DecisionEventProjector | None = None,
     ) -> None:
         self.review_service = review_service or EvidenceReviewService()
         self.projector = projector or DecisionEventProjector()
@@ -72,7 +73,11 @@ class OfflineProductionCoordinator:
                     "production_path": "review_disabled",
                 },
             )
-        authoritative = bool(getattr(config, "authoritative_mode", not getattr(config, "shadow_mode", True)))
+        authoritative = bool(
+            getattr(
+                config, "authoritative_mode", not getattr(config, "shadow_mode", True)
+            )
+        )
         shadow = bool(getattr(config, "shadow_mode", False)) or not authoritative
         if not baseline_events:
             return OfflineProductionResult(
@@ -111,10 +116,18 @@ class OfflineProductionCoordinator:
             review_policy=getattr(request.pair_decision, "policy", "risk_only"),
             secondary_engine=request.secondary_engine,
             pair_route_version=request.pair_route_version,
-            review_policy_version=getattr(config, "review_policy_version", "review-policy-v1"),
-            risk_policy_version=getattr(config, "risk_policy_version", "risk-policy-v1"),
-            decision_policy_version=getattr(config, "decision_policy_version", "decision-policy-v1"),
-            evidence_schema_version=getattr(config, "evidence_schema_version", "evidence-v1"),
+            review_policy_version=getattr(
+                config, "review_policy_version", "review-policy-v1"
+            ),
+            risk_policy_version=getattr(
+                config, "risk_policy_version", "risk-policy-v1"
+            ),
+            decision_policy_version=getattr(
+                config, "decision_policy_version", "decision-policy-v1"
+            ),
+            evidence_schema_version=getattr(
+                config, "evidence_schema_version", "evidence-v1"
+            ),
         )
         try:
             review_result = self.review_service.run(review_request, ports)
@@ -150,10 +163,7 @@ class OfflineProductionCoordinator:
             diagnostics = {
                 **dict(review_result.diagnostics or {}),
                 "status": "completed",
-                "production_path": (
-                    "shadow" if shadow
-                    else "authoritative"
-                ),
+                "production_path": ("shadow" if shadow else "authoritative"),
                 "review_status": "ok",
                 "decision_count": len(review_result.decisions),
                 "actions": self._decision_action_counts(review_result.decisions),
@@ -212,9 +222,7 @@ class OfflineProductionCoordinator:
             max_attempts_per_range=int(
                 getattr(config, "local_recovery_max_attempts", 3)
             ),
-            min_confidence=float(
-                getattr(config, "local_recovery_min_confidence", 0.5)
-            ),
+            min_confidence=float(getattr(config, "local_recovery_min_confidence", 0.5)),
             context_window=float(
                 getattr(config, "local_recovery_context_seconds", 0.5)
             ),
@@ -294,13 +302,15 @@ class OfflineProductionCoordinator:
         outcomes: list[dict[str, Any]] = []
         for index, result in enumerate(results, start=1):
             request_metadata = dict(result.request.metadata or {})
-            outcomes.append({
-                "start": result.request.start,
-                "end": result.request.end,
-                "outcome": result.outcome,
-                "attempt_count": result.attempt_count,
-                "candidate_count": len(result.candidates),
-            })
+            outcomes.append(
+                {
+                    "start": result.request.start,
+                    "end": result.request.end,
+                    "outcome": result.outcome,
+                    "attempt_count": result.attempt_count,
+                    "candidate_count": len(result.candidates),
+                }
+            )
             if not result.success:
                 continue
             words = tuple(
@@ -331,9 +341,8 @@ class OfflineProductionCoordinator:
                     end=max(float(item.end) for item in words),
                     engine=getattr(request.recovery_engine, "name", None),
                     words=words,
-                    confidence=sum(
-                        float(item.confidence or 0.0) for item in words
-                    ) / len(words),
+                    confidence=sum(float(item.confidence or 0.0) for item in words)
+                    / len(words),
                     physical_clip_id=request_metadata.get("physical_clip_id"),
                     language=request.recovery_language,
                     diagnostics={
@@ -396,10 +405,17 @@ class OfflineProductionCoordinator:
                     end = getattr(word, "end", None)
                     confidence = getattr(word, "confidence", None)
                     speaker_id = getattr(word, "speaker_id", None)
-                if not text or start is None or end is None or float(end) <= float(start):
+                if (
+                    not text
+                    or start is None
+                    or end is None
+                    or float(end) <= float(start)
+                ):
                     continue
-                word_id = source_ids[word_index] if word_index < len(source_ids) else (
-                    f"{candidate_id}:word:{word_index:04d}"
+                word_id = (
+                    source_ids[word_index]
+                    if word_index < len(source_ids)
+                    else (f"{candidate_id}:word:{word_index:04d}")
                 )
                 words.append(
                     EvidenceWord(
@@ -422,7 +438,11 @@ class OfflineProductionCoordinator:
                     time_source=(
                         getattr(event, "time_source", "")
                         if getattr(event, "time_source", "")
-                        in {"native_word_timestamp", "segment_boundary", "physical_acoustic_boundary"}
+                        in {
+                            "native_word_timestamp",
+                            "segment_boundary",
+                            "physical_acoustic_boundary",
+                        }
                         else "segment_boundary"
                     ),
                     confidence=0.0,
@@ -450,7 +470,11 @@ class OfflineProductionCoordinator:
         audio: Any = None,
         sample_rate: int = 16000,
     ) -> tuple[list[SubtitleEvent], dict[str, Any]]:
-        authoritative = bool(getattr(config, "authoritative_mode", not getattr(config, "shadow_mode", True)))
+        authoritative = bool(
+            getattr(
+                config, "authoritative_mode", not getattr(config, "shadow_mode", True)
+            )
+        )
         if getattr(config, "shadow_mode", False) or not authoritative:
             # Shadow is diagnostic-only: project the decisions to validate
             # physical invariants, but keep the segmented baseline as output.

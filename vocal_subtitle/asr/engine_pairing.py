@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
-
 
 ENGINE_FAMILIES = {
     "faster-whisper": "whisper",
@@ -18,14 +16,14 @@ ENGINE_FAMILIES = {
 @dataclass(frozen=True)
 class EnginePairDecision:
     primary: str
-    secondary: Optional[str]
+    secondary: str | None
     primary_family: str
-    secondary_family: Optional[str]
-    language: Optional[str]
+    secondary_family: str | None
+    language: str | None
     policy: str
     decision_reason: str
     degraded: bool = False
-    fallback_reason: Optional[str] = None
+    fallback_reason: str | None = None
     route_version: str = "asr-pair-v1"
 
     def to_dict(self) -> dict[str, object]:
@@ -52,11 +50,11 @@ class EnginePairRouter:
     def route(
         self,
         *,
-        language: Optional[str],
+        language: str | None,
         primary: str = "auto",
         secondary: str = "auto",
         policy: str = "risk_only",
-        selected_primary: Optional[str] = None,
+        selected_primary: str | None = None,
         same_family_policy: str = "reject",
     ) -> EnginePairDecision:
         if policy not in {"risk_only", "full_quality"}:
@@ -85,7 +83,9 @@ class EnginePairRouter:
         if secondary_name is not None and secondary_name not in ENGINE_FAMILIES:
             raise ValueError(f"unsupported secondary engine: {secondary}")
 
-        secondary_family = ENGINE_FAMILIES.get(secondary_name) if secondary_name else None
+        secondary_family = (
+            ENGINE_FAMILIES.get(secondary_name) if secondary_name else None
+        )
         if (
             secondary_name
             and secondary_family == primary_family
@@ -115,7 +115,7 @@ class EnginePairRouter:
         )
 
     @staticmethod
-    def _normalize(name: Optional[str]) -> Optional[str]:
+    def _normalize(name: str | None) -> str | None:
         if name is None:
             return None
         value = str(name).strip().casefold()
@@ -123,11 +123,11 @@ class EnginePairRouter:
         return aliases.get(value, value)
 
     @staticmethod
-    def _is_chinese(language: Optional[str]) -> bool:
+    def _is_chinese(language: str | None) -> bool:
         return language is None or language in {"zh", "cmn", "yue", "chinese"}
 
     @staticmethod
-    def _default_primary(language: Optional[str], selected_primary: Optional[str]) -> str:
+    def _default_primary(language: str | None, selected_primary: str | None) -> str:
         # ``selected_primary`` is the authoritative task-level route.  The
         # pairing layer must not promote an optional review engine to the
         # primary role merely because the language is non-Chinese.
@@ -136,11 +136,13 @@ class EnginePairRouter:
         return "faster-whisper"
 
     @staticmethod
-    def _default_secondary(primary: str, language: Optional[str]) -> Optional[str]:
+    def _default_secondary(primary: str, language: str | None) -> str | None:
         if primary == "funasr":
             return "qwen"
         if primary == "qwen":
-            return "funasr" if EnginePairRouter._is_chinese(language) else "faster-whisper"
+            return (
+                "funasr" if EnginePairRouter._is_chinese(language) else "faster-whisper"
+            )
         return "qwen"
 
 

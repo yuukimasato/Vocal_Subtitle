@@ -17,8 +17,9 @@ from __future__ import annotations
 import copy
 import logging
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any
 
 from ..mapping.time_mapper import SubtitleEvent
 
@@ -42,8 +43,7 @@ _MAX_DISPLAY_WIDTH = 84
 
 def _display_width(text: str) -> int:
     return sum(
-        2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
-        for char in text
+        2 if unicodedata.east_asian_width(char) in ("W", "F") else 1 for char in text
     )
 
 
@@ -71,7 +71,7 @@ class MemberProjectionStats:
         }
 
 
-def _word_field(word: Any, name: str) -> Optional[float]:
+def _word_field(word: Any, name: str) -> float | None:
     value = getattr(word, name, None)
     if value is None and isinstance(word, dict):
         value = word.get(name)
@@ -90,9 +90,9 @@ def _word_text(word: Any) -> str:
     return str(text) if text is not None else ""
 
 
-def _absolute_word_spans(event: SubtitleEvent) -> List[Tuple[Any, float, float]]:
+def _absolute_word_spans(event: SubtitleEvent) -> list[tuple[Any, float, float]]:
     """词时间相对 event.start；换算回事件所在坐标系的绝对时间。"""
-    spans: List[Tuple[Any, float, float]] = []
+    spans: list[tuple[Any, float, float]] = []
     for word in event.words or []:
         start = _word_field(word, "start")
         end = _word_field(word, "end")
@@ -105,11 +105,11 @@ def _absolute_word_spans(event: SubtitleEvent) -> List[Tuple[Any, float, float]]
 def _assign_member(
     word_start: float,
     word_end: float,
-    members: Sequence[Tuple[float, float]],
+    members: Sequence[tuple[float, float]],
 ) -> int:
     """按最大重叠归属词；无重叠时归属最近成员（silencedetect 边缘抖动）。"""
     best_index = 0
-    best_key: Optional[Tuple[bool, float]] = None
+    best_key: tuple[bool, float] | None = None
     for index, (start, end) in enumerate(members):
         overlap = min(word_end, end) - max(word_start, start)
         distance = max(start - word_end, word_start - end, 0.0)
@@ -126,10 +126,10 @@ def _join_word_text(words: Sequence[Any]) -> str:
 
 
 def _relative_words(
-    spans: Sequence[Tuple[Any, float, float]],
+    spans: Sequence[tuple[Any, float, float]],
     event_start: float,
-) -> List[Any]:
-    relative: List[Any] = []
+) -> list[Any]:
+    relative: list[Any] = []
     for word, abs_start, abs_end in spans:
         copied = copy.copy(word)
         copied.start = abs_start - event_start
@@ -138,7 +138,7 @@ def _relative_words(
     return relative
 
 
-def _trace(event: SubtitleEvent, reason: str, detail: dict) -> List[dict]:
+def _trace(event: SubtitleEvent, reason: str, detail: dict) -> list[dict]:
     entry = {"stage": "member_reprojection", "source": reason, **detail}
     return list(event.revision_trace) + [entry]
 
@@ -160,17 +160,21 @@ def _clamped_copy(
     event: SubtitleEvent,
     new_start: float,
     new_end: float,
-    member: Tuple[float, float],
+    member: tuple[float, float],
 ) -> SubtitleEvent:
     fields: dict = {
         "start": new_start,
         "end": new_end,
-        "revision_trace": _trace(event, "clamp_to_member", {
-            "original_start": round(event.start, 6),
-            "original_end": round(event.end, 6),
-            "member_start": round(member[0], 6),
-            "member_end": round(member[1], 6),
-        }),
+        "revision_trace": _trace(
+            event,
+            "clamp_to_member",
+            {
+                "original_start": round(event.start, 6),
+                "original_end": round(event.end, 6),
+                "member_start": round(member[0], 6),
+                "member_end": round(member[1], 6),
+            },
+        ),
     }
     if event.physical_start is not None:
         fields["physical_start"] = max(event.physical_start, member[0])
@@ -180,7 +184,7 @@ def _clamped_copy(
 
 
 def _entries_over_limit(
-    entries: List[Tuple[Tuple[Any, float, float], int]],
+    entries: list[tuple[tuple[Any, float, float], int]],
     max_duration: float,
 ) -> bool:
     """词条组是否超出时长/显示宽度限制（``max_duration <= 0`` 视为不限制）。"""
@@ -190,17 +194,14 @@ def _entries_over_limit(
     span_end = entries[-1][0][2]
     if span_end - span_start > max_duration:
         return True
-    width = sum(
-        _display_width(_word_text(span[0]))
-        for span, _ in entries
-    )
+    width = sum(_display_width(_word_text(span[0])) for span, _ in entries)
     return width > _MAX_DISPLAY_WIDTH
 
 
 def _split_entries_over_limit(
-    entries: List[Tuple[Tuple[Any, float, float], int]],
+    entries: list[tuple[tuple[Any, float, float], int]],
     max_duration: float,
-) -> List[List[Tuple[Tuple[Any, float, float], int]]]:
+) -> list[list[tuple[tuple[Any, float, float], int]]]:
     """把同一拆分组的词条按成员间隙贪心切成不超过限制的片段。
 
     切分点只允许落在成员索引变化处（真实的静音间隙）；单个成员内部的
@@ -210,8 +211,8 @@ def _split_entries_over_limit(
     if not entries or max_duration is None or max_duration <= 0:
         return [entries]
 
-    pieces: List[List[Tuple[Tuple[Any, float, float], int]]] = []
-    current: List[Tuple[Tuple[Any, float, float], int]] = [entries[0]]
+    pieces: list[list[tuple[tuple[Any, float, float], int]]] = []
+    current: list[tuple[tuple[Any, float, float], int]] = [entries[0]]
     current_width = _display_width(_word_text(entries[0][0][0]))
 
     for entry in entries[1:]:
@@ -220,8 +221,7 @@ def _split_entries_over_limit(
         piece_start = current[0][0][1]
         width_next = current_width + _display_width(_word_text(span[0]))
         over_limit = (
-            span[2] - piece_start > max_duration
-            or width_next > _MAX_DISPLAY_WIDTH
+            span[2] - piece_start > max_duration or width_next > _MAX_DISPLAY_WIDTH
         )
         if at_member_gap and over_limit and current:
             pieces.append(current)
@@ -236,12 +236,12 @@ def _split_entries_over_limit(
 
 
 def reproject_events_to_members(
-    events: List[SubtitleEvent],
-    members: Sequence[Tuple[float, float]],
+    events: list[SubtitleEvent],
+    members: Sequence[tuple[float, float]],
     *,
     split_min_gap: float = DEFAULT_MEMBER_SPLIT_MIN_GAP,
     max_duration: float = DEFAULT_MEMBER_SPLIT_MAX_DURATION,
-) -> Tuple[List[SubtitleEvent], MemberProjectionStats]:
+) -> tuple[list[SubtitleEvent], MemberProjectionStats]:
     """把事件拆分/钳制到不相交的物理成员段上。
 
     Args:
@@ -270,7 +270,7 @@ def reproject_events_to_members(
     for index, span in enumerate(ordered):
         group_member_ranges.setdefault(group_of[index], []).append(span)
 
-    projected: List[SubtitleEvent] = []
+    projected: list[SubtitleEvent] = []
 
     for event in events:
         spans = _absolute_word_spans(event)
@@ -279,7 +279,8 @@ def reproject_events_to_members(
             # 无词级时间戳：无法可靠拆分文本，只钳制到重叠成员段的包络。
             stats.unworded_events += 1
             overlapped = [
-                member for member in ordered
+                member
+                for member in ordered
                 if member[0] < event.end and member[1] > event.start
             ]
             if not overlapped:
@@ -294,9 +295,14 @@ def reproject_events_to_members(
                 projected.append(event)
                 continue
             stats.clamped_events += 1
-            projected.append(_clamped_copy(
-                event, new_start, new_end, overlapped[-1],
-            ))
+            projected.append(
+                _clamped_copy(
+                    event,
+                    new_start,
+                    new_end,
+                    overlapped[-1],
+                )
+            )
             continue
 
         assignments = [
@@ -311,7 +317,8 @@ def reproject_events_to_members(
         # 单组且不超限：微停顿合并成立，端点钳制到组成员包络后透传；
         # 超限（单一大组）时继续走下方的成员间隙拆分，避免整段长字幕。
         if len(groups) <= 1 and not _entries_over_limit(
-            groups[group_of[assignments[0]]], max_duration,
+            groups[group_of[assignments[0]]],
+            max_duration,
         ):
             # 同一组可能覆盖多个相邻成员（句内微停顿未拆分），
             # 端点钳制到该组成员范围的包络，而不是首个词的成员端点。
@@ -327,14 +334,18 @@ def reproject_events_to_members(
                 stats.dropped_events += 1
                 continue
             stats.clamped_events += 1
-            projected.append(_clamped_copy(
-                event, new_start, new_end,
-                (envelope_start, envelope_end),
-            ))
+            projected.append(
+                _clamped_copy(
+                    event,
+                    new_start,
+                    new_end,
+                    (envelope_start, envelope_end),
+                )
+            )
             continue
 
         def _emit_piece(
-            entries: List[Tuple[Tuple[Any, float, float], int]],
+            entries: list[tuple[tuple[Any, float, float], int]],
             *,
             hard_before: bool,
             over_limit: bool,
@@ -358,16 +369,18 @@ def reproject_events_to_members(
             }
             if over_limit:
                 detail["over_limit"] = True
-            projected.append(_copy_event(
-                event,
-                start=start,
-                end=end,
-                text=_join_word_text([span[0] for span in piece_spans])
-                or event.text,
-                words=_relative_words(piece_spans, start),
-                hard_split_before=hard_before,
-                revision_trace=_trace(event, "split_across_members", detail),
-            ))
+            projected.append(
+                _copy_event(
+                    event,
+                    start=start,
+                    end=end,
+                    text=_join_word_text([span[0] for span in piece_spans])
+                    or event.text,
+                    words=_relative_words(piece_spans, start),
+                    hard_split_before=hard_before,
+                    revision_trace=_trace(event, "split_across_members", detail),
+                )
+            )
 
         stats.split_events += 1
         for group_id in sorted(groups):
@@ -379,8 +392,7 @@ def reproject_events_to_members(
                 _emit_piece(
                     piece,
                     hard_before=(
-                        piece_index > 0
-                        or group_id != group_of[assignments[0]]
+                        piece_index > 0 or group_id != group_of[assignments[0]]
                     ),
                     over_limit=len(pieces) > 1,
                 )

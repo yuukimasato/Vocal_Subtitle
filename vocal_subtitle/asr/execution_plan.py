@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 ROUTE_VERSION = "asr-plan-v1"
 
@@ -23,14 +23,14 @@ class ASRExecutionPlan:
     requested_path: str = "segmented"
     requested_engine: str = "auto"
     primary_engine: str = "faster-whisper"
-    fallback_engine: Optional[str] = None
+    fallback_engine: str | None = None
     fallback_trigger: str = FALLBACK_TRIGGER_NONE
     # 用户显式要求 global 路径时,主路径失败不允许静默降级。
     hard_fail_on_primary_error: bool = False
     route_version: str = ROUTE_VERSION
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "requested_path": self.requested_path,
             "requested_engine": self.requested_engine,
@@ -55,15 +55,13 @@ def build_execution_plan(
     requested_engine / selected_engine / fallback_engine);缺失时按
     faster-whisper 主引擎的保守计划处理。
     """
-    requested_engine = str(
-        getattr(decision, "requested_engine", "auto") or "auto"
-    )
+    requested_engine = str(getattr(decision, "requested_engine", "auto") or "auto")
     selected_engine = str(
         getattr(decision, "selected_engine", "faster-whisper") or "faster-whisper"
     )
     route_fallback = getattr(decision, "fallback_engine", None)
 
-    fallback_engine: Optional[str] = None
+    fallback_engine: str | None = None
     fallback_trigger = FALLBACK_TRIGGER_NONE
     hard_fail = False
 

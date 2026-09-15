@@ -5,12 +5,23 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from ..config import FeedbackConfig
-from .models import *
+from .models import (
+    ApplyOverridesToggleRequest,
+    ConflictInfo,
+    ConflictResolutionRequest,
+    FingerprintInfo,
+    FingerprintListResponse,
+    FingerprintMatchResponse,
+    HealthScoreDetail,
+    HealthTrendEntry,
+    ImpactPredictionInfo,
+    ShadowModeStatus,
+    ShadowModeToggleRequest,
+)
 from .runtime_state import state
 
 logger = logging.getLogger(__name__)
@@ -38,16 +49,18 @@ async def list_feedback_profiles():
     profiles = []
     for name in profile_names:
         p = mgr.load(name)
-        profiles.append({
-            "profile_id": name,
-            "base_profile": p.get("base_profile", "default"),
-            "feedback_count": p.get("feedback_count", 0),
-            "created_at": p.get("created_at", ""),
-            "updated_at": p.get("updated_at", ""),
-            "is_active": p.get("is_active", True),
-            "overrides": p.get("overrides", {}),
-            "history_count": len(p.get("history", [])),
-        })
+        profiles.append(
+            {
+                "profile_id": name,
+                "base_profile": p.get("base_profile", "default"),
+                "feedback_count": p.get("feedback_count", 0),
+                "created_at": p.get("created_at", ""),
+                "updated_at": p.get("updated_at", ""),
+                "is_active": p.get("is_active", True),
+                "overrides": p.get("overrides", {}),
+                "history_count": len(p.get("history", [])),
+            }
+        )
 
     return {"profiles": profiles, "total": len(profiles)}
 
@@ -95,7 +108,9 @@ async def rollback_feedback_profile(name: str):
             "feedback_count": profile.get("feedback_count", 0),
         }
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"No backup found for profile: {name}")
+        raise HTTPException(
+            status_code=404, detail=f"No backup found for profile: {name}"
+        )
 
 
 @router.delete("/feedback/profile/{name}")
@@ -125,7 +140,11 @@ async def get_overrides_apply():
     from ..config import ConfigLoader, FeedbackConfig
     from ..feedback.user_profile import load_apply_overrides_on_run
 
-    return {"apply_overrides_on_run": load_apply_overrides_on_run(_toggle_config(ConfigLoader, FeedbackConfig))}
+    return {
+        "apply_overrides_on_run": load_apply_overrides_on_run(
+            _toggle_config(ConfigLoader, FeedbackConfig)
+        )
+    }
 
 
 @router.post("/feedback/overrides-apply")
@@ -134,11 +153,15 @@ async def set_overrides_apply(body: ApplyOverridesToggleRequest):
     from ..config import ConfigLoader, FeedbackConfig
     from ..feedback.user_profile import save_apply_overrides_on_run
 
-    enabled = save_apply_overrides_on_run(body.enabled, _toggle_config(ConfigLoader, FeedbackConfig))
+    enabled = save_apply_overrides_on_run(
+        body.enabled, _toggle_config(ConfigLoader, FeedbackConfig)
+    )
     return {
         "status": "ok",
         "apply_overrides_on_run": enabled,
-        "message": "新任务将合并反馈档案的学习参数" if enabled else "新任务保持默认参数，不合并学习参数",
+        "message": "新任务将合并反馈档案的学习参数"
+        if enabled
+        else "新任务保持默认参数，不合并学习参数",
     }
 
 
@@ -186,7 +209,6 @@ async def match_fingerprint(
     Returns:
         匹配结果（含 profile_id 和 confidence）
     """
-    import tempfile
 
     from ..config import FeedbackConfig
     from ..feedback import AudioFingerprinter
@@ -294,9 +316,8 @@ async def compute_health(
     Returns:
         HealthScoreDetail 包含综合评分和各子项得分
     """
-    import tempfile
 
-    from ..feedback.aligner import SubtitleAligner, parse_subtitle_file
+    from ..feedback.aligner import parse_subtitle_file
     from ..feedback.health_scorer import health_score_result
 
     # 保存文件
@@ -328,6 +349,7 @@ async def compute_health(
         )
     finally:
         import shutil
+
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
@@ -336,11 +358,9 @@ async def compute_health(
 # ---------------------------------------------------------------------------
 
 
-
 @router.get("/feedback/shadow/{profile_name}")
 async def get_shadow_status(profile_name: str):
     """获取影子模式状态"""
-    from ..feedback import ShadowModeEvaluator
 
     evaluator = state.shadow_evaluators.get(profile_name)
     if evaluator is None:
@@ -410,10 +430,12 @@ async def record_shadow_run(
         )
         state.shadow_evaluators[profile_name] = evaluator
 
-    evaluator.add_run(ShadowRunResult(
-        health_current=health_current,
-        health_shadow=health_shadow,
-    ))
+    evaluator.add_run(
+        ShadowRunResult(
+            health_current=health_current,
+            health_shadow=health_shadow,
+        )
+    )
 
     eval_result = evaluator.should_upgrade()
     return {
@@ -599,10 +621,7 @@ async def feedback_review_queue(status: str = Query(default="pending")):
     queue = mgr.list_pending_review()
 
     if status != "pending":
-        queue = [
-            item for item in queue
-            if item.get("status", "pending") == status
-        ]
+        queue = [item for item in queue if item.get("status", "pending") == status]
 
     return {
         "samples": queue,
@@ -629,7 +648,9 @@ async def feedback_review_detail(sample_id: str):
 
 
 @router.post("/feedback/review/{sample_id}")
-async def feedback_review(sample_id: str, result: str = Form(...), notes: str = Form(default="")):
+async def feedback_review(
+    sample_id: str, result: str = Form(...), notes: str = Form(default="")
+):
     """审核一个反馈样本。
 
     对应 FEEDBACK_LOOP.md §7:
@@ -693,7 +714,8 @@ async def feedback_d3_sample(
         )
 
     plan = sampler.build_plan(
-        pool, strata=strata_list,
+        pool,
+        strata=strata_list,
         description=description or "WebUI D3 分层抽样",
     )
 

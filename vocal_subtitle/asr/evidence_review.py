@@ -3,26 +3,31 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, replace
 from collections import defaultdict
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
-from typing import Any, Optional
+from typing import Any
 
 from .contracts import EvidenceReviewRequest, EvidenceReviewResult
+from .evidence import (
+    DECISION_POLICY_VERSION,
+    EVIDENCE_SCHEMA_VERSION,
+    RISK_POLICY_VERSION,
+    CandidateEvidence,
+    DecisionEvidenceBundle,
+    candidate_from_subtitle_event,
+)
 from .evidence_cache import (
     EVIDENCE_CACHE_STAGE,
     EvidenceCacheKeyContext,
     EvidenceCachePort,
     audio_fingerprint,
 )
-from .evidence import (
-    DECISION_POLICY_VERSION,
-    EVIDENCE_SCHEMA_VERSION,
-    RISK_POLICY_VERSION,
-    CandidateEvidence,
-    candidate_from_subtitle_event,
+from .evidence_decision import (
+    DecisionConfig,
+    EvidenceDecisionEngine,
+    decisions_to_subtitle_events,
 )
-from .evidence_decision import DecisionConfig, EvidenceDecisionEngine, decisions_to_subtitle_events
 from .review_engines import (
     ForcedAlignerPort,
     ReviewEnginePort,
@@ -30,11 +35,15 @@ from .review_engines import (
     SemanticReviewPort,
 )
 from .review_scheduler import ReviewScheduler, ReviewSchedulerConfig
-from .risk_scoring import EvidenceRiskScorer, RiskAssessment, RiskScoringConfig, normalize_text
-from .review_telemetry import resource_snapshot, timed_call
+from .review_telemetry import resource_snapshot
+from .risk_scoring import (
+    EvidenceRiskScorer,
+    RiskAssessment,
+    RiskScoringConfig,
+    normalize_text,
+)
 from .secondary_evidence import SecondaryEvidenceCollector
 from .window_execution import WindowExecutionCoordinator
-from .evidence import DecisionEvidenceBundle
 
 
 @dataclass(frozen=True)
@@ -42,17 +51,17 @@ class EvidenceReviewRuntimePorts:
     """Optional runtime capabilities supplied by the application layer."""
 
     config: Any
-    context_reasr: Optional[ReviewEnginePort] = None
-    qwen: Optional[ReviewEnginePort] = None
-    forced_aligner: Optional[ForcedAlignerPort] = None
-    sed: Optional[SEDPort] = None
-    semantic_review: Optional[SemanticReviewPort] = None
-    language: Optional[str] = None
-    cache: Optional[EvidenceCachePort] = None
-    cache_ttl: Optional[int] = None
-    secondary: Optional[ReviewEnginePort] = None
-    secondary_name: Optional[str] = None
-    window_executor: Optional[WindowExecutionCoordinator] = None
+    context_reasr: ReviewEnginePort | None = None
+    qwen: ReviewEnginePort | None = None
+    forced_aligner: ForcedAlignerPort | None = None
+    sed: SEDPort | None = None
+    semantic_review: SemanticReviewPort | None = None
+    language: str | None = None
+    cache: EvidenceCachePort | None = None
+    cache_ttl: int | None = None
+    secondary: ReviewEnginePort | None = None
+    secondary_name: str | None = None
+    window_executor: WindowExecutionCoordinator | None = None
 
 
 class EvidenceReviewService:
@@ -84,25 +93,32 @@ class EvidenceReviewService:
         global_evidence = tuple(request.global_evidence or ())
         recovery_evidence = tuple(request.recovery_evidence or ())
         primary_candidates = [*segmented, *recovery_evidence]
-        scorer = EvidenceRiskScorer(RiskScoringConfig(
-            medium_threshold=config.medium_threshold,
-            high_threshold=config.high_threshold,
-            critical_threshold=config.critical_threshold,
-        ))
+        scorer = EvidenceRiskScorer(
+            RiskScoringConfig(
+                medium_threshold=config.medium_threshold,
+                high_threshold=config.high_threshold,
+                critical_threshold=config.critical_threshold,
+            )
+        )
         assessments = scorer.score_bundle(
             primary_candidates,
             global_evidence=global_evidence,
             physical_timeline=request.physical_timeline,
         )
-        scheduler = ReviewScheduler(ReviewSchedulerConfig(
-            left_context=config.left_context,
-            right_context=config.right_context,
-            max_group_duration=config.max_group_duration,
-            max_window_duration=config.max_window_duration,
-            # 风险门控下限(高精度方案 Task 6):默认 medium 保持既有行为,
-            # high_precision 配置可提升为 high,只复核 high/critical/冲突窗口。
-            min_level=str(getattr(config, "context_reasr_min_level", "medium") or "") or None,
-        ))
+        scheduler = ReviewScheduler(
+            ReviewSchedulerConfig(
+                left_context=config.left_context,
+                right_context=config.right_context,
+                max_group_duration=config.max_group_duration,
+                max_window_duration=config.max_window_duration,
+                # 风险门控下限(高精度方案 Task 6):默认 medium 保持既有行为,
+                # high_precision 配置可提升为 high,只复核 high/critical/冲突窗口。
+                min_level=str(
+                    getattr(config, "context_reasr_min_level", "medium") or ""
+                )
+                or None,
+            )
+        )
         review_policy = getattr(request, "review_policy", "risk_only")
         windows = scheduler.schedule(
             primary_candidates,
@@ -144,7 +160,8 @@ class EvidenceReviewService:
                 # 耗时与调用比例;替换收益在决策后回填。
                 review_diagnostics.setdefault("windows", [])
                 review_diagnostics["reasr_failed_count"] = sum(
-                    1 for item in review_diagnostics["windows"]
+                    1
+                    for item in review_diagnostics["windows"]
                     if item.get("status") not in {"ok", "cache_hit"}
                 )
                 review_diagnostics["reasr_time_ms"] = round(
@@ -168,7 +185,7 @@ class EvidenceReviewService:
                 "reason": "context_reasr_disabled_or_audio_missing",
                 "windows": len(windows),
                 "reviewed_window_count": 0,
-                }
+            }
 
         # global 候选角色路由（优化方案 8.1）：默认只把 global 证据传给风险
         # 评分；显式准入后才生成 global_alternative 参与替换决策。缺失该字段
@@ -222,8 +239,7 @@ class EvidenceReviewService:
         )
         secondary_engine = ports.secondary or ports.qwen
         secondary_enabled = bool(
-            getattr(config, "qwen_enabled", False)
-            or ports.secondary is not None
+            getattr(config, "qwen_enabled", False) or ports.secondary is not None
         )
         if (
             qwen_windows
@@ -245,30 +261,34 @@ class EvidenceReviewService:
             )
             review_candidates.extend(qwen_candidates)
             secondary_key = ports.secondary_name or (
-                "qwen" if ports.qwen is secondary_engine
+                "qwen"
+                if ports.qwen is secondary_engine
                 else getattr(secondary_engine, "name", "qwen")
             )
             optional_diagnostics[secondary_key] = qwen_diagnostics
             optional_diagnostics[secondary_key]["policy"] = review_policy
         elif secondary_enabled:
             secondary_key = ports.secondary_name or (
-                "qwen" if ports.qwen is secondary_engine
+                "qwen"
+                if ports.qwen is secondary_engine
                 else getattr(secondary_engine, "name", "qwen")
             )
             optional_diagnostics.setdefault(secondary_key, {})
-            optional_diagnostics[secondary_key].update({
-                "status": "unavailable",
-                "reason": (
-                    "secondary_port_missing"
-                    if secondary_engine is None
-                    else (
-                        "residual_risk_gate"
-                        if review_policy == "risk_only" and not qwen_windows
-                        else "audio_or_review_window_missing"
-                    )
-                ),
-                "policy": review_policy,
-            })
+            optional_diagnostics[secondary_key].update(
+                {
+                    "status": "unavailable",
+                    "reason": (
+                        "secondary_port_missing"
+                        if secondary_engine is None
+                        else (
+                            "residual_risk_gate"
+                            if review_policy == "risk_only" and not qwen_windows
+                            else "audio_or_review_window_missing"
+                        )
+                    ),
+                    "policy": review_policy,
+                }
+            )
         elif getattr(config, "qwen_enabled", False):
             optional_diagnostics["qwen"]["status"] = "unavailable"
             optional_diagnostics["qwen"]["reason"] = "qwen_port_missing"
@@ -293,7 +313,9 @@ class EvidenceReviewService:
         decisions = EvidenceDecisionEngine(
             DecisionConfig(
                 unresolved_keeps_candidate=config.unresolved_keeps_candidate,
-                require_multi_source_drop=getattr(config, "require_multi_source_drop", True),
+                require_multi_source_drop=getattr(
+                    config, "require_multi_source_drop", True
+                ),
             )
         ).decide_bundle(
             primary_candidates,
@@ -313,8 +335,11 @@ class EvidenceReviewService:
             ],
         )
         candidate_by_id = {
-            item.id: item for item in (
-                list(primary_candidates) + list(review_candidates) + list(global_evidence)
+            item.id: item
+            for item in (
+                list(primary_candidates)
+                + list(review_candidates)
+                + list(global_evidence)
             )
         }
         selected_global_ids = [
@@ -342,9 +367,11 @@ class EvidenceReviewService:
         }
         diagnostics = {
             "status": "ok",
-            "evidence_schema_version": request.evidence_schema_version or EVIDENCE_SCHEMA_VERSION,
+            "evidence_schema_version": request.evidence_schema_version
+            or EVIDENCE_SCHEMA_VERSION,
             "risk_policy_version": request.risk_policy_version or RISK_POLICY_VERSION,
-            "decision_policy_version": request.decision_policy_version or DECISION_POLICY_VERSION,
+            "decision_policy_version": request.decision_policy_version
+            or DECISION_POLICY_VERSION,
             "review_policy_version": request.review_policy_version,
             "pair_route_version": request.pair_route_version or request.route_version,
             "secondary_engine": request.secondary_engine or ports.secondary_name,
@@ -365,7 +392,9 @@ class EvidenceReviewService:
             "secondary_evidence": secondary_evidence,
             "cache": {
                 "enabled": ports.cache is not None,
-                "usable": bool(ports.cache is not None and (request.input_hash or audio_hash)),
+                "usable": bool(
+                    ports.cache is not None and (request.input_hash or audio_hash)
+                ),
                 "stage": EVIDENCE_CACHE_STAGE,
             },
             "decisions": [item.to_dict() for item in decisions],
@@ -407,7 +436,9 @@ class EvidenceReviewService:
             for observation in global_evidence:
                 if observation.source != "global":
                     continue
-                if min(candidate.end, observation.end) <= max(candidate.start, observation.start):
+                if min(candidate.end, observation.end) <= max(
+                    candidate.start, observation.start
+                ):
                     continue
                 considered += 1
                 reasons: list[str] = []
@@ -426,7 +457,9 @@ class EvidenceReviewService:
                     physical_timeline,
                 )
                 if not physical["valid"]:
-                    reasons.append(str(physical.get("status", "physical_validation_failed")))
+                    reasons.append(
+                        str(physical.get("status", "physical_validation_failed"))
+                    )
                 if clips:
                     overlapping_clip_ids = {
                         clip.id
@@ -439,11 +472,13 @@ class EvidenceReviewService:
                 if normalize_text(candidate.text) == normalize_text(observation.text):
                     reasons.append("no_text_change")
                 if reasons:
-                    rejected.append({
-                        "candidate_id": observation.id,
-                        "segmented_candidate_id": candidate.id,
-                        "reasons": list(dict.fromkeys(reasons)),
-                    })
+                    rejected.append(
+                        {
+                            "candidate_id": observation.id,
+                            "segmented_candidate_id": candidate.id,
+                            "reasons": list(dict.fromkeys(reasons)),
+                        }
+                    )
                     continue
                 if observation.id in accepted_ids:
                     continue
@@ -499,15 +534,15 @@ class EvidenceReviewService:
                 updated.append(assessment)
                 continue
             alternatives = [
-                item for item in review_candidates
+                item
+                for item in review_candidates
                 if min(candidate.end, item.end) > max(candidate.start, item.start)
             ]
             if not alternatives:
                 updated.append(assessment)
                 continue
             similarity = max(
-                _text_similarity(candidate.text, item.text)
-                for item in alternatives
+                _text_similarity(candidate.text, item.text) for item in alternatives
             )
             if similarity >= 0.75:
                 delta = -0.25
@@ -517,14 +552,18 @@ class EvidenceReviewService:
                 code = "context_reasr_conflict"
             score = min(1.0, max(0.0, assessment.score + delta))
             level = _risk_level(score, config)
-            updated.append(replace(
-                assessment,
-                score=round(score, 6),
-                level=level,
-                evidence_codes=tuple(dict.fromkeys((*assessment.evidence_codes, code))),
-                factors={**assessment.factors, "context_reasr_residual": delta},
-                review_required=level in {"medium", "high", "critical"},
-            ))
+            updated.append(
+                replace(
+                    assessment,
+                    score=round(score, 6),
+                    level=level,
+                    evidence_codes=tuple(
+                        dict.fromkeys((*assessment.evidence_codes, code))
+                    ),
+                    factors={**assessment.factors, "context_reasr_residual": delta},
+                    review_required=level in {"medium", "high", "critical"},
+                )
+            )
         return updated
 
     @staticmethod
@@ -553,7 +592,8 @@ class EvidenceReviewService:
             label = str(evidence.get("label", evidence.get("class", ""))).casefold()
             score = float(evidence.get("score", evidence.get("confidence", 0.0)) or 0.0)
             if score < 0.7 or not any(
-                token in label for token in ("breath", "music", "noise", "non_speech", "non-speech")
+                token in label
+                for token in ("breath", "music", "noise", "non_speech", "non-speech")
             ):
                 continue
             for candidate_id in candidate_ids_by_window.get(item.get("window_id"), ()):
@@ -566,7 +606,9 @@ class EvidenceReviewService:
             risk = str(
                 evidence.get("risk", evidence.get("class", evidence.get("label", "")))
             ).casefold()
-            if any(token in risk for token in ("non_speech", "non-speech", "hallucination")):
+            if any(
+                token in risk for token in ("non_speech", "non-speech", "hallucination")
+            ):
                 candidate_id = item.get("candidate_id")
                 if candidate_id:
                     codes_by_candidate[candidate_id].add("semantic_non_speech")
@@ -587,18 +629,24 @@ class EvidenceReviewService:
                 level = "medium"
             else:
                 level = "low"
-            updated.append(replace(
-                assessment,
-                score=round(score, 6),
-                level=level,
-                evidence_codes=tuple(dict.fromkeys((*assessment.evidence_codes, *sorted(codes)))),
-                factors={**assessment.factors, "secondary_evidence": bump},
-                review_required=level in {"medium", "high", "critical"},
-            ))
+            updated.append(
+                replace(
+                    assessment,
+                    score=round(score, 6),
+                    level=level,
+                    evidence_codes=tuple(
+                        dict.fromkeys((*assessment.evidence_codes, *sorted(codes)))
+                    ),
+                    factors={**assessment.factors, "secondary_evidence": bump},
+                    review_required=level in {"medium", "high", "critical"},
+                )
+            )
         return updated
 
     @staticmethod
-    def _optional_capabilities(config: Any, ports: EvidenceReviewRuntimePorts) -> dict[str, dict[str, Any]]:
+    def _optional_capabilities(
+        config: Any, ports: EvidenceReviewRuntimePorts
+    ) -> dict[str, dict[str, Any]]:
         capabilities = {
             "qwen": ("qwen_enabled", ports.qwen),
             "forced_aligner": ("forced_aligner_enabled", ports.forced_aligner),
@@ -623,13 +671,21 @@ class EvidenceReviewService:
                 "status": (
                     availability.get("status")
                     if availability is not None
-                    else "ready" if enabled and port is not None else "disabled" if not enabled else "unavailable"
+                    else "ready"
+                    if enabled and port is not None
+                    else "disabled"
+                    if not enabled
+                    else "unavailable"
                 ),
                 "engine": getattr(port, "name", None),
                 "reason": (
                     availability.get("reason")
                     if availability is not None
-                    else None if enabled and port is not None else "feature_disabled" if not enabled else "port_missing"
+                    else None
+                    if enabled and port is not None
+                    else "feature_disabled"
+                    if not enabled
+                    else "port_missing"
                 ),
             }
             if availability:
@@ -644,7 +700,7 @@ class EvidenceReviewService:
         windows: list[Any],
         engine: ReviewEnginePort,
         *,
-        language: Optional[str],
+        language: str | None,
         request: EvidenceReviewRequest,
         ports: EvidenceReviewRuntimePorts,
         audio_hash: str,
@@ -659,7 +715,9 @@ class EvidenceReviewService:
             "phase": phase,
         }
         stage_started = time.perf_counter()
-        cache_usable = ports.cache is not None and bool(request.input_hash or audio_hash)
+        cache_usable = ports.cache is not None and bool(
+            request.input_hash or audio_hash
+        )
         pending_windows = []
         cache_diagnostics: dict[str, dict[str, Any]] = {}
         for window in windows:
@@ -672,14 +730,23 @@ class EvidenceReviewService:
                     window_start=window.start,
                     window_end=window.end,
                     phase=phase,
-                    engine=(request.engine if phase == "context_reasr" else getattr(engine, "name", "")),
-                    model=(request.model if phase == "context_reasr" else getattr(engine, "model_name", None) or request.model),
+                    engine=(
+                        request.engine
+                        if phase == "context_reasr"
+                        else getattr(engine, "name", "")
+                    ),
+                    model=(
+                        request.model
+                        if phase == "context_reasr"
+                        else getattr(engine, "model_name", None) or request.model
+                    ),
                     language=language,
                     route_version=request.route_version,
                     sample_rate=sample_rate,
                     physical_clip_id=window.physical_clip_id or "",
                     review_policy_version=request.review_policy_version,
-                    pair_route_version=request.pair_route_version or request.route_version,
+                    pair_route_version=request.pair_route_version
+                    or request.route_version,
                     evidence_schema_version=request.evidence_schema_version,
                 )
                 cache_key = context.key()
@@ -727,13 +794,23 @@ class EvidenceReviewService:
                 # Test ports and third-party adapters may omit window_id.  A
                 # bounded result can still be assigned by absolute overlap.
                 for pending_window, _cache_key in pending_windows:
-                    if min(candidate.end, pending_window.end) > max(candidate.start, pending_window.start):
+                    if min(candidate.end, pending_window.end) > max(
+                        candidate.start, pending_window.start
+                    ):
                         candidates_by_window[pending_window.id].append(candidate)
                         break
             for window, cache_key in pending_windows:
                 item_diag = next(
-                    (item for item in batch_diagnostics.get("windows", ()) if item["window_id"] == window.id),
-                    {"window_id": window.id, "status": "cancelled", "reason": "batch_cancelled"},
+                    (
+                        item
+                        for item in batch_diagnostics.get("windows", ())
+                        if item["window_id"] == window.id
+                    ),
+                    {
+                        "window_id": window.id,
+                        "status": "cancelled",
+                        "reason": "batch_cancelled",
+                    },
                 )
                 candidates = candidates_by_window.get(window.id, [])
                 item_diag = dict(item_diag)
@@ -749,7 +826,9 @@ class EvidenceReviewService:
                                 cache_key,
                                 {
                                     "schema_version": EVIDENCE_SCHEMA_VERSION,
-                                    "candidates": [item.to_dict() for item in candidates],
+                                    "candidates": [
+                                        item.to_dict() for item in candidates
+                                    ],
                                 },
                                 ttl=ports.cache_ttl,
                             )
@@ -779,8 +858,11 @@ class EvidenceReviewService:
         return all_candidates, diagnostics
 
     @staticmethod
-    def _decode_cached_candidates(value: Any) -> Optional[list[CandidateEvidence]]:
-        if not isinstance(value, dict) or value.get("schema_version") != EVIDENCE_SCHEMA_VERSION:
+    def _decode_cached_candidates(value: Any) -> list[CandidateEvidence] | None:
+        if (
+            not isinstance(value, dict)
+            or value.get("schema_version") != EVIDENCE_SCHEMA_VERSION
+        ):
             return None
         payload = value.get("candidates")
         if not isinstance(payload, list):

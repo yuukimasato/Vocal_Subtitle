@@ -1,34 +1,37 @@
 """Main offline pipeline lifecycle component."""
+
 from __future__ import annotations
+
 import json
 import logging
-import tempfile
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
-import numpy as np
+from typing import Any
+
 from ..application.pipeline_result import PipelineStats
 from ..application.run_context import RunContext
 from ..application.stages.asr_stage import ASRStage
 from ..application.stages.audio_stage import AudioStage
 from ..application.stages.preflight_stage import PreflightStage
 from ..mapping.time_mapper import SubtitleEvent
-from ..pipeline_context import ASRFragment, NoiseProfile, PipelineContext
 from ..utils.audio_utils import AudioUtils
 from ..utils.file_hasher import compute_config_hash, compute_file_hash
 from ..utils.progress import ProgressManager
+
 logger = logging.getLogger(__name__)
+
+
 class PipelineLifecycleMixin:
     def run(
         self,
         input_path: Path,
-        output_path: Optional[Path] = None,
+        output_path: Path | None = None,
         output_format: str = "srt",
-        progress_callback: Optional[callable] = None,
+        progress_callback: callable | None = None,
         skip_separation: bool = False,
-        task_id: Optional[str] = None,
-        session_dir: Optional[Path] = None,
-        feedback_reference: Optional[Path] = None,  # ★ 反馈学习：用户修订字幕路径
+        task_id: str | None = None,
+        session_dir: Path | None = None,
+        feedback_reference: Path | None = None,  # ★ 反馈学习：用户修订字幕路径
         **overrides,
     ) -> dict:
         """执行全链路处理
@@ -74,9 +77,7 @@ class PipelineLifecycleMixin:
         cache_cfg = self.config.cache
         if cache_cfg.enabled and cache_cfg.full_pipeline_cache and not skip_separation:
             history = self._get_history()
-            cached_task = history.find_by_hash(
-                self._file_hash, self._config_hash
-            )
+            cached_task = history.find_by_hash(self._file_hash, self._config_hash)
             if cached_task and cached_task.get("result_json"):
                 try:
                     cached_result = json.loads(cached_task["result_json"])
@@ -87,7 +88,8 @@ class PipelineLifecycleMixin:
                     ):
                         logger.info(
                             "Full pipeline cache HIT for %s (task: %s)",
-                            input_path.name, cached_task["id"],
+                            input_path.name,
+                            cached_task["id"],
                         )
                         subtitle_text = cached_subtitle_path.read_text(encoding="utf-8")
                         output_path.write_text(subtitle_text, encoding="utf-8")
@@ -114,7 +116,9 @@ class PipelineLifecycleMixin:
                         ]
                         stats.subtitle_count = len(cached_events)
                         self._generate_run_report(
-                            input_path, stats, task_id,
+                            input_path,
+                            stats,
+                            task_id,
                             sample_rate=cached_result.get("sample_rate", 0),
                             skip_separation=skip_separation,
                         )
@@ -147,7 +151,8 @@ class PipelineLifecycleMixin:
         if preflight_failure is not None:
             return preflight_failure
         AudioStage(self).execute(
-            self._run_context, progress_callback=progress_callback,
+            self._run_context,
+            progress_callback=progress_callback,
         )
         ASRStage(self).execute(self._run_context)
         _state = self._run_context.state
@@ -172,16 +177,20 @@ class PipelineLifecycleMixin:
                 from ..acoustic import AcousticValidator
                 from ..merging.fragment_absorber import resolve_speech_skeleton
 
-                _validator = AcousticValidator(
-                    self.config.acoustic_validation
-                )
+                _validator = AcousticValidator(self.config.acoustic_validation)
                 _skeleton = resolve_speech_skeleton(
-                    vocals_path, None,
-                    self.config.acoustic_validation, audio, sample_rate,
+                    vocals_path,
+                    None,
+                    self.config.acoustic_validation,
+                    audio,
+                    sample_rate,
                 )
                 if _skeleton:
                     events, _align_report = _validator._physical_snap_validation(
-                        events, _skeleton, audio=audio, sample_rate=sample_rate,
+                        events,
+                        _skeleton,
+                        audio=audio,
+                        sample_rate=sample_rate,
                     )
                     stats.quality_diagnostics["display_energy_alignment"] = {
                         "snapped_starts": _align_report["snapped_starts"],
@@ -196,14 +205,17 @@ class PipelineLifecycleMixin:
         # quality_diagnostics），不被静默吞掉——告警意味着上游
         # 又出现了新的倒置来源，需要回源头修。
         from ..mapping.final_validator import enforce_non_overlap
+
         events, overlap_diag = enforce_non_overlap(
-            events, source="post_display_alignment",
+            events,
+            source="post_display_alignment",
         )
         if overlap_diag["overlap_count"]:
             stats.quality_diagnostics["final_overlap_repair"] = overlap_diag
         # 导出前只读时间轴校验(Task 5):修复 Owner 是 enforce_non_overlap,
         # 此处只验证并记录,不修改事件。
         from ..mapping.timeline_result import validate_timeline
+
         timeline_report = validate_timeline(events)
         stats.quality_diagnostics["timeline_invariant"] = timeline_report.to_dict()
         export_label = "llm" if self.config.llm_optimize.enabled else "asr"
@@ -221,23 +233,36 @@ class PipelineLifecycleMixin:
             clean_subtitle_path = final_subtitle_path
         logger.info(
             "Final subtitle exported: %s (%d events)",
-            final_subtitle_path, len(events),
+            final_subtitle_path,
+            len(events),
         )
         if session_dir and separation_result:
             import shutil
+
             from ..utils.session_manager import OUTPUT_NAMES
+
             vocals_dest = session_dir / OUTPUT_NAMES["vocals"]
             accomp_dest = session_dir / OUTPUT_NAMES["accompaniment"]
-            if separation_result.vocals_path and Path(separation_result.vocals_path).exists():
+            if (
+                separation_result.vocals_path
+                and Path(separation_result.vocals_path).exists()
+            ):
                 shutil.copy2(separation_result.vocals_path, vocals_dest)
-            if separation_result.accompaniment_path and Path(separation_result.accompaniment_path).exists():
+            if (
+                separation_result.accompaniment_path
+                and Path(separation_result.accompaniment_path).exists()
+            ):
                 shutil.copy2(separation_result.accompaniment_path, accomp_dest)
         if session_dir:
             try:
                 from ..utils.session_manager import SessionManager
+
                 mgr = SessionManager(session_dir.parent)
                 outputs_info = {}
-                for fmt_key, path in {**clean_subtitle_paths, **llm_subtitle_paths}.items():
+                for fmt_key, path in {
+                    **clean_subtitle_paths,
+                    **llm_subtitle_paths,
+                }.items():
                     p = Path(path)
                     if p.exists():
                         outputs_info[p.name] = {
@@ -248,7 +273,7 @@ class PipelineLifecycleMixin:
                     session_dir,
                     original_filename="",
                     input_sha256=self._file_hash,
-                    profile=getattr(self.config, '_profile_name', ''),
+                    profile=getattr(self.config, "_profile_name", ""),
                     config_hash=self._config_hash,
                     task_id=task_id or "",
                     outputs=outputs_info,
@@ -267,15 +292,20 @@ class PipelineLifecycleMixin:
                 if stage_name not in stats.stage_timings:
                     stats.stage_timings[stage_name] = elapsed
         from ..utils.session_manager import OUTPUT_NAMES
+
         vocals_result = (
             str(session_dir / OUTPUT_NAMES["vocals"])
             if session_dir and (session_dir / OUTPUT_NAMES["vocals"]).exists()
-            else str(separation_result.vocals_path) if separation_result else None
+            else str(separation_result.vocals_path)
+            if separation_result
+            else None
         )
         accomp_result = (
             str(session_dir / OUTPUT_NAMES["accompaniment"])
             if session_dir and (session_dir / OUTPUT_NAMES["accompaniment"]).exists()
-            else str(separation_result.accompaniment_path) if separation_result else None
+            else str(separation_result.accompaniment_path)
+            if separation_result
+            else None
         )
         feedback_report = None
         if feedback_reference and self.config.feedback.enabled:
@@ -289,7 +319,10 @@ class PipelineLifecycleMixin:
         from .run_finalizer import build_result_payload
 
         result_payload = build_result_payload(
-            task_id=getattr(self, "_effective_task_id", None) or stats.task_id or task_id or "",
+            task_id=getattr(self, "_effective_task_id", None)
+            or stats.task_id
+            or task_id
+            or "",
             stats=stats,
             events=events,
             input_path=input_path,
@@ -300,21 +333,27 @@ class PipelineLifecycleMixin:
             accompaniment_path=accomp_result,
         )
         # 运行摘要写入显式上下文诊断(Task 2),Task 6 将聚合为阶段质量报告。
-        self._run_context.add_diagnostic("run_summary", {
-            "status": str(getattr(stats, "status", "") or ""),
-            "quality_status": str(stats.quality_status),
-            "fallback_category": str(stats.fallback_category or ""),
-            "stage_timings": dict(stats.stage_timings or {}),
-        })
+        self._run_context.add_diagnostic(
+            "run_summary",
+            {
+                "status": str(getattr(stats, "status", "") or ""),
+                "quality_status": str(stats.quality_status),
+                "fallback_category": str(stats.fallback_category or ""),
+                "stage_timings": dict(stats.stage_timings or {}),
+            },
+        )
         # 阶段质量报告聚合(Task 6):每个任务的阶段耗时、状态与降级原因。
         from ..quality.stage_report import aggregate_run_diagnostics
+
         stats.quality_diagnostics["stage_reports"] = aggregate_run_diagnostics(
             self._run_context,
         )
         self._report_legacy_usage(stats)
         self._finalize_task_state(stats, result_payload=result_payload)
         self._generate_run_report(
-            input_path, stats, task_id,
+            input_path,
+            stats,
+            task_id,
             sample_rate=sample_rate if "sample_rate" in dir() else 0,
             final_subtitle_path=final_subtitle_path,
         )
@@ -355,17 +394,24 @@ class PipelineLifecycleMixin:
                     stats,
                     skip_separation=context.skip_separation,
                 )
-                context.add_diagnostic("preflight", {
-                    "status": "ok",
-                })
+                context.add_diagnostic(
+                    "preflight",
+                    {
+                        "status": "ok",
+                    },
+                )
             except Exception as e:
                 from ..contracts.errors import classify_exception
+
                 logger.error("Preflight failed: %s", e)
-                context.add_diagnostic("preflight", {
-                    "status": "failed",
-                    "category": classify_exception(e),
-                    "error": str(e),
-                })
+                context.add_diagnostic(
+                    "preflight",
+                    {
+                        "status": "failed",
+                        "category": classify_exception(e),
+                        "error": str(e),
+                    },
+                )
                 return {
                     "subtitle_path": context.output_path,
                     "stats": stats,
@@ -380,15 +426,21 @@ class PipelineLifecycleMixin:
             try:
                 from ..reporting import RunReportBuilder
                 from ..utils.session_manager import create_run_id, create_task_id
-                effective_task_id = context.task_id or create_task_id(context.input_path)
+
+                effective_task_id = context.task_id or create_task_id(
+                    context.input_path
+                )
                 effective_run_id = create_run_id(effective_task_id)
                 stats.run_id = effective_run_id
                 stats.task_id = effective_task_id
                 self._report_builder = RunReportBuilder(
-                    run_id=effective_run_id, task_id=effective_task_id,
+                    run_id=effective_run_id,
+                    task_id=effective_task_id,
                 )
                 try:
-                    self._services.attach_degradation_logger(self._report_builder.degradation_logger)
+                    self._services.attach_degradation_logger(
+                        self._report_builder.degradation_logger
+                    )
                 except Exception:
                     pass
             except Exception as e:
@@ -401,7 +453,6 @@ class PipelineLifecycleMixin:
         session_dir = context.session_dir
         skip_separation = context.skip_separation
         output_path = context.output_path
-        task_id = context.task_id
         state = context.state
         active = self._resolve_active_modules()
         if self.config.degradation.mode != "full":
@@ -439,6 +490,7 @@ class PipelineLifecycleMixin:
         _cached_accomp_path = None
         if session_dir and not skip_separation:
             from ..utils.session_manager import OUTPUT_NAMES
+
             _cv = session_dir / OUTPUT_NAMES["vocals"]
             _ca = session_dir / OUTPUT_NAMES["accompaniment"]
             if _cv.exists():
@@ -450,15 +502,16 @@ class PipelineLifecycleMixin:
                 _cached_accomp_path = _ca if _ca.exists() else None
                 skip_separation = True
         if not skip_separation:
-            self._progress.start_stage(
-                "separation", description="人声分离"
-            )
+            self._progress.start_stage("separation", description="人声分离")
+
             def _sep_progress(current: int, total: int) -> None:
                 if self._progress:
                     self._progress.report_progress(
-                        current, total,
+                        current,
+                        total,
                         extra={"detail": f"处理音频块: {current}/{total}"},
                     )
+
             separation_result = self._run_separation(
                 input_path, progress_callback=_sep_progress
             )
@@ -472,26 +525,32 @@ class PipelineLifecycleMixin:
             vocals_path = input_path
         macro_chunks = None
         if self.config.macro_chunking.enabled:
-            from ..macro_chunker import MacroChunker, MacroChunkConfig
+            from ..macro_chunker import MacroChunker
+
             chunker = MacroChunker(self.config.macro_chunking)
             audio, sample_rate = AudioUtils.load_audio(vocals_path)
             stats.duration_seconds = len(audio) / sample_rate
             if chunker.should_split(stats.duration_seconds):
                 self._progress.start_stage(
-                    "macro_chunk", description="宏观切块", total_items=1,
+                    "macro_chunk",
+                    description="宏观切块",
+                    total_items=1,
                 )
                 try:
                     macro_chunks = chunker.split(vocals_path, audio, sample_rate)
                     logger.info(
                         "Macro chunking: %d chunks from %.1fs audio",
-                        len(macro_chunks), stats.duration_seconds,
+                        len(macro_chunks),
+                        stats.duration_seconds,
                     )
                     self._progress.update_stage(
                         1, extra={"detail": f"切分为 {len(macro_chunks)} 块"}
                     )
                     stats.stage_timings["macro_chunk"] = self._progress.finish_stage()
                 except Exception as e:
-                    logger.warning("Macro chunking failed, treating as single chunk: %s", e)
+                    logger.warning(
+                        "Macro chunking failed, treating as single chunk: %s", e
+                    )
                     macro_chunks = None
                     self._progress.finish_stage()
         if audio is None or sample_rate is None:
@@ -503,7 +562,7 @@ class PipelineLifecycleMixin:
         # （事件标签来源）。early_turns=false 时此处仅记 disabled，
         # 后续行为与现状完全一致（后处理事件级聚类照常运行）。
         self._early_turns_state = None
-        self._early_turn_spans: List[Any] = []
+        self._early_turn_spans: list[Any] = []
         self._run_early_global_turns(audio, sample_rate, stats)
         requested_asr_path = self._resolve_asr_path()
         stats.asr_path = requested_asr_path
@@ -512,6 +571,7 @@ class PipelineLifecycleMixin:
         state["requested_asr_path"] = requested_asr_path
         # 只读音频缓冲(Task 7):一次解码,后续阶段复用切片视图。
         from ..utils.audio_buffer import audio_buffer_from_array
+
         state["audio_buffer"] = audio_buffer_from_array(audio, sample_rate)
         state["vocals_path"] = vocals_path
         state["macro_chunks"] = macro_chunks
@@ -531,7 +591,6 @@ class PipelineLifecycleMixin:
         output_path = context.output_path
         output_format = context.output_format
         session_dir = context.session_dir
-        task_id = context.task_id
         global_completed = False
         self._global_evidence = ()
         self._global_evidence_attempted = False
@@ -564,9 +623,8 @@ class PipelineLifecycleMixin:
                 decision = self._prepare_asr_route(
                     audio,
                     sample_rate,
-                    speech_intervals=[
-                        (item.start, item.end) for item in shadow_vad
-                    ] + list((shadow_ffmpeg or {}).get("skeleton", [])),
+                    speech_intervals=[(item.start, item.end) for item in shadow_vad]
+                    + list((shadow_ffmpeg or {}).get("skeleton", [])),
                 )
                 stats.requested_engine = decision.requested_engine
                 stats.selected_engine = decision.selected_engine
@@ -640,7 +698,9 @@ class PipelineLifecycleMixin:
                     "failure_reason": reason,
                 }
                 logger.warning(
-                    "Global ASR failed (%s): %s", category, reason,
+                    "Global ASR failed (%s): %s",
+                    category,
+                    reason,
                 )
                 decision = self._asr_route_decision
                 can_fallback = bool(
@@ -652,10 +712,10 @@ class PipelineLifecycleMixin:
                 )
                 if can_fallback:
                     try:
-                        logger.warning("Falling back once from FunASR to faster-whisper")
-                        self._asr_engine = self._get_asr_engine_for(
-                            "faster-whisper"
+                        logger.warning(
+                            "Falling back once from FunASR to faster-whisper"
                         )
+                        self._asr_engine = self._get_asr_engine_for("faster-whisper")
                         fallback_events, fallback_diag, fallback_transcript = (
                             self._run_global_transcription_path(
                                 audio=audio,
@@ -743,14 +803,18 @@ class PipelineLifecycleMixin:
             if audio is None or sample_rate is None:
                 audio, sample_rate = AudioUtils.load_audio(vocals_path)
                 stats.duration_seconds = len(audio) / sample_rate
-            events, seg_count, skeleton_ffmpeg_result = self._process_skeleton_segmented(
-                audio=audio,
-                sample_rate=sample_rate,
-                vocals_path=vocals_path,
+            events, seg_count, skeleton_ffmpeg_result = (
+                self._process_skeleton_segmented(
+                    audio=audio,
+                    sample_rate=sample_rate,
+                    vocals_path=vocals_path,
+                )
             )
             stats.segment_count = seg_count
             stats.subtitle_count = len(events)
-            quality_speech_intervals = (skeleton_ffmpeg_result or {}).get("skeleton", [])
+            quality_speech_intervals = (skeleton_ffmpeg_result or {}).get(
+                "skeleton", []
+            )
             if getattr(self.config, "evidence_review", None) is not None:
                 events = self._run_offline_production_review(
                     events,
@@ -761,15 +825,23 @@ class PipelineLifecycleMixin:
                 )
                 stats.subtitle_count = len(events)
             events = self._post_process_events(
-                events, vocals_path, audio, sample_rate, stats,
+                events,
+                vocals_path,
+                audio,
+                sample_rate,
+                stats,
                 ffmpeg_unified_result=skeleton_ffmpeg_result,
             )
             from ..asr.quality_gate import evaluate_asr_quality
+
             quality = evaluate_asr_quality(
                 events,
-                quality_speech_intervals or [
-                    (getattr(item, "physical_start", item.start),
-                     getattr(item, "physical_end", item.end))
+                quality_speech_intervals
+                or [
+                    (
+                        getattr(item, "physical_start", item.start),
+                        getattr(item, "physical_end", item.end),
+                    )
                     for item in events
                 ],
                 stats.duration_seconds,
@@ -785,12 +857,16 @@ class PipelineLifecycleMixin:
                 and decision.selected_engine == "funasr"
                 and decision.fallback_engine == "faster-whisper"
             ):
-                logger.warning("Segmented FunASR quality gate failed; retrying with faster-whisper")
+                logger.warning(
+                    "Segmented FunASR quality gate failed; retrying with faster-whisper"
+                )
                 self._asr_engine = self._get_asr_engine_for("faster-whisper")
-                events, seg_count, skeleton_ffmpeg_result = self._process_skeleton_segmented(
-                    audio=audio,
-                    sample_rate=sample_rate,
-                    vocals_path=vocals_path,
+                events, seg_count, skeleton_ffmpeg_result = (
+                    self._process_skeleton_segmented(
+                        audio=audio,
+                        sample_rate=sample_rate,
+                        vocals_path=vocals_path,
+                    )
                 )
                 stats.segment_count = seg_count
                 stats.subtitle_count = len(events)
@@ -799,7 +875,9 @@ class PipelineLifecycleMixin:
                         events,
                         audio=audio,
                         sample_rate=sample_rate,
-                        physical_timeline=getattr(self, "_global_review_timeline", None),
+                        physical_timeline=getattr(
+                            self, "_global_review_timeline", None
+                        ),
                         stats=stats,
                     )
                     stats.subtitle_count = len(events)
@@ -825,9 +903,10 @@ class PipelineLifecycleMixin:
                 }
         elif macro_chunks is not None and len(macro_chunks) > 1:
             logger.info(
-                "Multi-chunk path: processing %d chunks", len(macro_chunks),
+                "Multi-chunk path: processing %d chunks",
+                len(macro_chunks),
             )
-            all_chunk_events: List[SubtitleEvent] = []
+            all_chunk_events: list[SubtitleEvent] = []
             total_segments = 0
             speaker_offset = 0
             max_speaker_per_chunk = 0
@@ -840,23 +919,30 @@ class PipelineLifecycleMixin:
                 chunk_duration = len(chunk_audio) / chunk_sr
                 logger.info(
                     "Chunk %d/%d: %.1fs → %.1fs (duration=%.1fs)",
-                    idx + 1, len(macro_chunks),
-                    chunk.start, chunk.end, chunk_duration,
+                    idx + 1,
+                    len(macro_chunks),
+                    chunk.start,
+                    chunk.end,
+                    chunk_duration,
                 )
                 import tempfile
+
                 with tempfile.NamedTemporaryFile(
-                    suffix=".wav", delete=False,
+                    suffix=".wav",
+                    delete=False,
                 ) as tmp_f:
                     tmp_path = Path(tmp_f.name)
                 try:
                     AudioUtils.save_audio(chunk_audio, tmp_path, chunk_sr)
-                    chunk_events, chunk_seg_count, _chunk_ctx = self._process_chunk_pipeline(
-                        audio=chunk_audio,
-                        sample_rate=chunk_sr,
-                        vocals_path=tmp_path,
-                        chunk_label=f"Chunk {idx+1}/{len(macro_chunks)}",
-                        parallel_vad=False,  # 多块嵌套线程，避免 PyTorch 死锁
-                        time_offset=chunk.start,
+                    chunk_events, chunk_seg_count, _chunk_ctx = (
+                        self._process_chunk_pipeline(
+                            audio=chunk_audio,
+                            sample_rate=chunk_sr,
+                            vocals_path=tmp_path,
+                            chunk_label=f"Chunk {idx + 1}/{len(macro_chunks)}",
+                            parallel_vad=False,  # 多块嵌套线程，避免 PyTorch 死锁
+                            time_offset=chunk.start,
+                        )
                     )
                 finally:
                     tmp_path.unlink(missing_ok=True)
@@ -874,6 +960,7 @@ class PipelineLifecycleMixin:
                     speaker_offset += max_speaker_per_chunk + 1
                 for evt in chunk_events:
                     from ..mapping.time_mapper import offset_subtitle_event
+
                     offset_subtitle_event(
                         evt,
                         chunk.start,
@@ -884,7 +971,8 @@ class PipelineLifecycleMixin:
             all_chunk_events.sort(key=lambda e: e.start)
             if len(macro_chunks) > 1:
                 from ..mapping.time_mapper import _merge_distinct_texts
-                stitched_events: List[SubtitleEvent] = []
+
+                stitched_events: list[SubtitleEvent] = []
                 for i in range(len(all_chunk_events)):
                     evt = all_chunk_events[i]
                     if stitched_events:
@@ -911,23 +999,31 @@ class PipelineLifecycleMixin:
                                         and last_spk != evt_spk
                                     )
                                     if same_or_unknown:
-                                        if last.start <= evt.start and last.end >= evt.end:
+                                        if (
+                                            last.start <= evt.start
+                                            and last.end >= evt.end
+                                        ):
                                             last.text = _merge_distinct_texts(
                                                 last.text, evt.text
                                             )
                                             logger.debug(
                                                 "Cross-chunk merge: #%d absorbs #%d",
-                                                last.index, evt.index,
+                                                last.index,
+                                                evt.index,
                                             )
                                             continue
-                                        elif evt.start <= last.start and evt.end >= last.end:
+                                        elif (
+                                            evt.start <= last.start
+                                            and evt.end >= last.end
+                                        ):
                                             evt.text = _merge_distinct_texts(
                                                 evt.text, last.text
                                             )
                                             stitched_events[-1] = evt
                                             logger.debug(
                                                 "Cross-chunk merge: #%d absorbs #%d",
-                                                evt.index, last.index,
+                                                evt.index,
+                                                last.index,
                                             )
                                             continue
                     stitched_events.append(evt)
@@ -949,11 +1045,16 @@ class PipelineLifecycleMixin:
             multi_ffmpeg_result = None
             try:
                 from ..vad.ffmpeg_vad import unified_ffmpeg_pass
+
                 multi_ffmpeg_result = unified_ffmpeg_pass(vocals_path)
             except Exception:
                 pass
             events = self._post_process_events(
-                events, vocals_path, audio, sample_rate, stats,
+                events,
+                vocals_path,
+                audio,
+                sample_rate,
+                stats,
                 ffmpeg_unified_result=multi_ffmpeg_result,
             )
         else:
@@ -985,19 +1086,24 @@ class PipelineLifecycleMixin:
                 )
                 stats.subtitle_count = len(events)
             events = self._post_process_events(
-                events, vocals_path, audio, sample_rate, stats,
+                events,
+                vocals_path,
+                audio,
+                sample_rate,
+                stats,
                 ffmpeg_unified_result=ctx.ffmpeg_unified_result,
             )
         if stats.detected_language == "unknown" and self._resolved_language:
             stats.detected_language = str(self._resolved_language)
         try:
             from ..mapping.end_time_validator import EndTimePostValidator
+
             validator = EndTimePostValidator()
             events = validator.validate(events)
         except Exception as e:
             logger.warning("EndTimePostValidator failed: %s", e)
         builder = self._get_subtitle_builder()
-        clean_subtitle_paths: Dict[str, str] = {}
+        clean_subtitle_paths: dict[str, str] = {}
         clean_subtitle_path = str(output_path)
         if self.config.llm_optimize.enabled:
             clean_subtitle_paths = self._export_subtitles_multi_format(
@@ -1010,6 +1116,7 @@ class PipelineLifecycleMixin:
         if self.config.acoustic_validation.export_skeleton_segments:
             try:
                 from ..acoustic import export_skeleton_segments
+
                 export_dir = self.config.acoustic_validation.export_skeleton_dir
                 if not export_dir:
                     export_dir = str(output_path.parent / "skeleton_export")
@@ -1030,11 +1137,9 @@ class PipelineLifecycleMixin:
             except Exception as e:
                 logger.warning("Skeleton segment export failed: %s", e)
         llm_subtitle_path = None
-        llm_subtitle_paths: Dict[str, str] = {}
+        llm_subtitle_paths: dict[str, str] = {}
         if self.config.llm_optimize.enabled:
-            self._progress.start_stage(
-                "llm", description="LLM 优化", total_items=1
-            )
+            self._progress.start_stage("llm", description="LLM 优化", total_items=1)
             events = self._run_llm_optimize(events)
             self._progress.update_stage(
                 1, extra={"detail": f"LLM 优化完成，共 {len(events)} 条字幕"}

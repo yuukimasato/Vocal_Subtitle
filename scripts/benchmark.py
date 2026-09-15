@@ -6,23 +6,22 @@
 
 import argparse
 import time
-from pathlib import Path
-from typing import Dict
 
 import numpy as np
 
 from vocal_subtitle.utils.gpu_detector import GPUDetector
 
 
-def generate_test_audio(duration_seconds: float = 30.0, sample_rate: int = 16000) -> np.ndarray:
+def generate_test_audio(
+    duration_seconds: float = 30.0, sample_rate: int = 16000
+) -> np.ndarray:
     """生成测试用音频（白噪声 + 正弦波混合，模拟语音）"""
     num_samples = int(duration_seconds * sample_rate)
     t = np.linspace(0, duration_seconds, num_samples, endpoint=False)
 
     # 模拟语音：440Hz 正弦波 + 白噪声
     audio = (
-        0.5 * np.sin(2 * np.pi * 440 * t)
-        + 0.02 * np.random.randn(num_samples)
+        0.5 * np.sin(2 * np.pi * 440 * t) + 0.02 * np.random.randn(num_samples)
     ).astype(np.float32)
 
     # 归一化
@@ -30,7 +29,7 @@ def generate_test_audio(duration_seconds: float = 30.0, sample_rate: int = 16000
     return audio
 
 
-def benchmark_asr_models() -> Dict[str, float]:
+def benchmark_asr_models() -> dict[str, float]:
     """测试 ASR 模型加载和推理速度"""
     print("=" * 60)
     print("ASR 模型基准测试")
@@ -86,7 +85,7 @@ def benchmark_asr_models() -> Dict[str, float]:
     return results
 
 
-def benchmark_vad() -> Dict[str, float]:
+def benchmark_vad() -> dict[str, float]:
     """测试 VAD 引擎性能"""
     print("=" * 60)
     print("VAD 引擎基准测试")
@@ -139,15 +138,9 @@ def benchmark_vad() -> Dict[str, float]:
 
 def main():
     parser = argparse.ArgumentParser(description="性能基准测试")
-    parser.add_argument(
-        "--asr", action="store_true", help="测试 ASR 模型性能"
-    )
-    parser.add_argument(
-        "--vad", action="store_true", help="测试 VAD 引擎性能"
-    )
-    parser.add_argument(
-        "--all", action="store_true", help="运行所有测试"
-    )
+    parser.add_argument("--asr", action="store_true", help="测试 ASR 模型性能")
+    parser.add_argument("--vad", action="store_true", help="测试 VAD 引擎性能")
+    parser.add_argument("--all", action="store_true", help="运行所有测试")
     args = parser.parse_args()
 
     run_all = args.all or (not args.asr and not args.vad)

@@ -1,9 +1,9 @@
 """Configuration models and profile loading compatibility API."""
 
 from .loader import (
+    AcousticValidationConfig,
     ASRAutoRoutingConfig,
     ASRConfig,
-    AcousticValidationConfig,
     BoundaryRedundancyConfig,
     BoundaryRefinementConfig,
     CacheConfig,
@@ -11,8 +11,8 @@ from .loader import (
     DegradationConfig,
     DiarizationConfig,
     EvidenceReviewConfig,
-    FFmpegVADConfig,
     FeedbackConfig,
+    FFmpegVADConfig,
     FusionConfig,
     GapHandlingConfig,
     GlobalASRConfig,

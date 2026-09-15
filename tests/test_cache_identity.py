@@ -7,8 +7,6 @@
 
 import hashlib
 
-import pytest
-
 from vocal_subtitle.utils.cache_key import (
     SCHEMA_VERSION,
     build_cache_key,
@@ -32,11 +30,17 @@ def test_same_content_different_path_hits(tmp_path):
 
     key_a = build_cache_key(
         content_hash=compute_file_hash(first),
-        stage="asr", stage_version="v1", engine="faster-whisper", model="large-v3",
+        stage="asr",
+        stage_version="v1",
+        engine="faster-whisper",
+        model="large-v3",
     )
     key_b = build_cache_key(
         content_hash=compute_file_hash(second),
-        stage="asr", stage_version="v1", engine="faster-whisper", model="large-v3",
+        stage="asr",
+        stage_version="v1",
+        engine="faster-whisper",
+        model="large-v3",
     )
 
     assert key_a == key_b
@@ -64,11 +68,15 @@ def test_model_or_stage_version_change_invalidates():
 
 def test_config_change_invalidates():
     key_a = build_cache_key(
-        content_hash="abc", stage="asr", stage_version="v1",
+        content_hash="abc",
+        stage="asr",
+        stage_version="v1",
         config={"beam_size": 5},
     )
     key_b = build_cache_key(
-        content_hash="abc", stage="asr", stage_version="v1",
+        content_hash="abc",
+        stage="asr",
+        stage_version="v1",
         config={"beam_size": 1},
     )
 
@@ -80,17 +88,28 @@ def test_param_normalization_is_order_and_none_insensitive():
     assert normalize_params({"a": 1, "b": None}) == normalize_params({"a": 1})
 
     key_a = build_cache_key(
-        content_hash="abc", stage="asr", stage_version="v1", params={"a": 1, "b": 2},
+        content_hash="abc",
+        stage="asr",
+        stage_version="v1",
+        params={"a": 1, "b": 2},
     )
     key_b = build_cache_key(
-        content_hash="abc", stage="asr", stage_version="v1", params={"b": 2, "a": 1},
+        content_hash="abc",
+        stage="asr",
+        stage_version="v1",
+        params={"b": 2, "a": 1},
     )
     key_c = build_cache_key(
-        content_hash="abc", stage="asr", stage_version="v1",
+        content_hash="abc",
+        stage="asr",
+        stage_version="v1",
         params={"a": 1, "b": None},
     )
     key_a_only = build_cache_key(
-        content_hash="abc", stage="asr", stage_version="v1", params={"a": 1},
+        content_hash="abc",
+        stage="asr",
+        stage_version="v1",
+        params={"a": 1},
     )
 
     assert key_a == key_b
@@ -100,11 +119,15 @@ def test_param_normalization_is_order_and_none_insensitive():
 
 def test_schema_version_change_invalidates_everything():
     key_old = build_cache_key(
-        content_hash="abc", stage="asr", stage_version="v1",
+        content_hash="abc",
+        stage="asr",
+        stage_version="v1",
         schema_version="cache-key-v0",
     )
     key_new = build_cache_key(
-        content_hash="abc", stage="asr", stage_version="v1",
+        content_hash="abc",
+        stage="asr",
+        stage_version="v1",
         schema_version=SCHEMA_VERSION,
     )
 
@@ -117,6 +140,9 @@ def test_bounded_cleanup_of_normalized_params():
 
     assert len(normalized) == 200
     key = build_cache_key(
-        content_hash="abc", stage="asr", stage_version="v1", params=params,
+        content_hash="abc",
+        stage="asr",
+        stage_version="v1",
+        params=params,
     )
     assert len(key) == 64  # sha256 hex 长度有界

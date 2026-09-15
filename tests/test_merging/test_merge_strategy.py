@@ -26,9 +26,7 @@ class TestMergeStrategy:
 
     def test_merge_adjacent_within_gap(self):
         """间隔小于 min_silence_gap 的片段应合并"""
-        strategy = MergeStrategy(
-            MergeConfig(min_silence_gap=0.5, padding=0.0)
-        )
+        strategy = MergeStrategy(MergeConfig(min_silence_gap=0.5, padding=0.0))
         segments = [
             SpeechSegment(start=0.0, end=2.0),
             SpeechSegment(start=2.2, end=4.0),  # gap = 0.2 < 0.5
@@ -40,9 +38,7 @@ class TestMergeStrategy:
 
     def test_keep_adjacent_beyond_gap(self):
         """间隔大于 min_silence_gap 的片段应保留"""
-        strategy = MergeStrategy(
-            MergeConfig(min_silence_gap=0.5, padding=0.0)
-        )
+        strategy = MergeStrategy(MergeConfig(min_silence_gap=0.5, padding=0.0))
         segments = [
             SpeechSegment(start=0.0, end=2.0),
             SpeechSegment(start=3.0, end=5.0),  # gap = 1.0 > 0.5
@@ -69,9 +65,7 @@ class TestMergeStrategy:
 
     def test_filter_short_segments(self):
         """过短片段应被过滤"""
-        strategy = MergeStrategy(
-            MergeConfig(min_segment_length=1.0, padding=0.0)
-        )
+        strategy = MergeStrategy(MergeConfig(min_segment_length=1.0, padding=0.0))
         segments = [
             SpeechSegment(start=0.0, end=0.3),  # 太短，丢弃
             SpeechSegment(start=1.0, end=3.0),  # 保留
@@ -108,7 +102,7 @@ class TestMergeStrategy:
             MergeConfig(
                 max_segment_length=25.0,
                 padding=0.0,
-                pre_split_silence=False,   # 禁用预切分，专注测试超长段切分
+                pre_split_silence=False,  # 禁用预切分，专注测试超长段切分
                 adaptive_padding=False,
             )
         )

@@ -23,7 +23,6 @@ from vocal_subtitle.utils.task_history import TaskHistoryManager
 from vocal_subtitle.webui import api
 from vocal_subtitle.webui.app import create_app
 
-
 TASK_STATS = {
     "detected_language": "zh",
     "speaker_count": 2,
@@ -56,14 +55,7 @@ def _sha(text: str) -> str:
 def _srt(events) -> str:
     blocks = []
     for idx, (start, end, text) in enumerate(events, 1):
-        blocks.append(
-            "%d\n%s --> %s\n%s\n" % (
-                idx,
-                _ts(start),
-                _ts(end),
-                text,
-            )
-        )
+        blocks.append(f"{idx}\n{_ts(start)} --> {_ts(end)}\n{text}\n")
     return "\n".join(blocks)
 
 
@@ -72,7 +64,7 @@ def _ts(seconds: float) -> str:
     h, rem = divmod(ms, 3600000)
     m, rem = divmod(rem, 60000)
     s, ms = divmod(rem, 1000)
-    return "%02d:%02d:%02d,%03d" % (h, m, s, ms)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 def _serialized_event(index, start, end, text):
@@ -174,7 +166,9 @@ def captured_samples(monkeypatch):
             ingested.append(kwargs)
             return SimpleNamespace(sample_id="sample-1")
 
-    monkeypatch.setattr(sample_manager_module, "FeedbackSampleManager", FakeSampleManager)
+    monkeypatch.setattr(
+        sample_manager_module, "FeedbackSampleManager", FakeSampleManager
+    )
     return ingested
 
 
@@ -306,14 +300,26 @@ class TestFindByFileHashUnit:
 
 
 def _post_learn(client, events, **data):
-    files = {"reference": ("corrected.srt", _srt(events).encode("utf-8"), "application/octet-stream")}
+    files = {
+        "reference": (
+            "corrected.srt",
+            _srt(events).encode("utf-8"),
+            "application/octet-stream",
+        )
+    }
     return client.post("/api/feedback/learn", data=data, files=files)
 
 
 class TestUploadLearnFlow:
     def test_full_flow_hash_lookup_learn_and_report_then_cleaned_session_410(
-        self, client, history, session_dir, pipeline_calls, captured_samples,
-        stub_semantic_scorer, monkeypatch,
+        self,
+        client,
+        history,
+        session_dir,
+        pipeline_calls,
+        captured_samples,
+        stub_semantic_scorer,
+        monkeypatch,
     ):
         # 确认学习（dry_run=false）且归因非空 → 阻断参数写档，专注验证 D2 入库元数据
         from vocal_subtitle.webui import feedback_services as fbs
@@ -365,10 +371,15 @@ class TestUploadLearnFlow:
         assert matched["id"] == "task-flow"
 
         # 3. 上传修正字幕（整体后移 0.15s 的时间修正）→ external-correction 引用学习
-        corrected = [(start + 0.15, end + 0.15, text) for (start, end, text) in AUTO_EVENTS]
+        corrected = [
+            (start + 0.15, end + 0.15, text) for (start, end, text) in AUTO_EVENTS
+        ]
         resp = _post_learn(
-            client, corrected,
-            task_id=matched["id"], scenario="external-correction", dry_run="true",
+            client,
+            corrected,
+            task_id=matched["id"],
+            scenario="external-correction",
+            dry_run="true",
         )
         assert resp.status_code == 200
         report = resp.json()
@@ -390,8 +401,11 @@ class TestUploadLearnFlow:
         assert captured_samples == []
         # 确认学习：场景标签与任务 stats 元数据入库
         resp = _post_learn(
-            client, corrected,
-            task_id=matched["id"], scenario="external-correction", dry_run="false",
+            client,
+            corrected,
+            task_id=matched["id"],
+            scenario="external-correction",
+            dry_run="false",
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
@@ -402,19 +416,27 @@ class TestUploadLearnFlow:
         # 5. 来源任务会话产物被清理 → 报错并提示改走音频上传学习
         shutil.rmtree(session_dir)
         resp = _post_learn(
-            client, corrected,
-            task_id="task-flow", scenario="external-correction", dry_run="true",
+            client,
+            corrected,
+            task_id="task-flow",
+            scenario="external-correction",
+            dry_run="true",
         )
         assert resp.status_code == 410
         detail = resp.json()["detail"]
         assert "已清理" in detail
         assert "音频" in detail
 
-    def test_unknown_task_hint_after_hash_gone(self, client, history, session_dir, pipeline_calls, stub_semantic_scorer):
+    def test_unknown_task_hint_after_hash_gone(
+        self, client, history, session_dir, pipeline_calls, stub_semantic_scorer
+    ):
         """任务记录被清理（历史中无此任务）→ 404，同样提示音频路径"""
         resp = _post_learn(
-            client, AUTO_EVENTS,
-            task_id="ghost", scenario="external-correction", dry_run="true",
+            client,
+            AUTO_EVENTS,
+            task_id="ghost",
+            scenario="external-correction",
+            dry_run="true",
         )
         assert resp.status_code == 404
         assert "音频" in resp.json()["detail"]
@@ -427,7 +449,12 @@ class TestUploadLearnFlow:
 
 class TestLowCoverageWarnButProceed:
     def test_below_50_percent_warns_and_still_learns(
-        self, client, history, session_dir, pipeline_calls, captured_samples,
+        self,
+        client,
+        history,
+        session_dir,
+        pipeline_calls,
+        captured_samples,
         stub_semantic_scorer,
     ):
         """2/12 配对（覆盖率 <50%）：警告但放行，6 行重构行不进时间轴学习"""
@@ -446,8 +473,11 @@ class TestLowCoverageWarnButProceed:
             (75.0, 77.0, "重写的新内容己"),
         ]
         resp = _post_learn(
-            client, corrected,
-            task_id="task-low", scenario="external-correction", dry_run="false",
+            client,
+            corrected,
+            task_id="task-low",
+            scenario="external-correction",
+            dry_run="false",
         )
         assert resp.status_code == 200
         report = resp.json()

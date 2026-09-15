@@ -4,15 +4,15 @@
 因此可以同时用于新识别结果和磁盘缓存命中结果。
 """
 
-from dataclasses import dataclass, field
 import math
 import re
 import unicodedata
 from collections import Counter
-from typing import Any, Dict, List, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from typing import Any
 
 from .base import TranscriptionSegment
-
 
 _MIN_WORD_CONFIDENCE = 0.35
 _ADJACENT_DUPLICATE_GAP = 0.20
@@ -79,10 +79,10 @@ class HallucinationFilterPolicy:
 class HallucinationFilterResult:
     """过滤结果和可序列化诊断。"""
 
-    segments: List[TranscriptionSegment]
-    dropped: List[Dict[str, Any]] = field(default_factory=list)
-    warnings: List[Dict[str, Any]] = field(default_factory=list)
-    counts: Dict[str, int] = field(default_factory=dict)
+    segments: list[TranscriptionSegment]
+    dropped: list[dict[str, Any]] = field(default_factory=list)
+    warnings: list[dict[str, Any]] = field(default_factory=list)
+    counts: dict[str, int] = field(default_factory=dict)
     filter_version: str = "v1"
 
 
@@ -101,8 +101,8 @@ def filter_transcription_segments(
             filter_version=policy.version,
         )
 
-    dropped: List[Dict[str, Any]] = []
-    warnings: List[Dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
     candidates = []
 
     for index, segment in enumerate(segments):
@@ -123,10 +123,7 @@ def filter_transcription_segments(
 
         has_word_evidence = _has_valid_word_evidence(segment)
         no_speech_prob = _finite_number(getattr(segment, "no_speech_prob", None))
-        if (
-            no_speech_prob is not None
-            and no_speech_prob >= policy.no_speech_threshold
-        ):
+        if no_speech_prob is not None and no_speech_prob >= policy.no_speech_threshold:
             if not has_word_evidence:
                 _record(dropped, base, "high_no_speech_without_word_evidence")
                 continue
@@ -139,9 +136,7 @@ def filter_transcription_segments(
                 continue
             _record(warnings, base, "low_logprob_with_word_evidence")
 
-        compression_ratio = _finite_number(
-            getattr(segment, "compression_ratio", None)
-        )
+        compression_ratio = _finite_number(getattr(segment, "compression_ratio", None))
         if (
             compression_ratio is not None
             and compression_ratio > policy.compression_ratio_threshold
@@ -157,7 +152,7 @@ def filter_transcription_segments(
         candidates, duplicate_drops = _deduplicate_adjacent(candidates)
         dropped.extend(duplicate_drops)
 
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for item in dropped:
         counts[item["reason"]] = counts.get(item["reason"], 0) + 1
     for item in warnings:
@@ -198,7 +193,9 @@ def _deduplicate_adjacent(candidates):
             kept.append(candidate)
         else:
             dropped.append(
-                _diagnostic(candidate[0], candidate[1], candidate[3], "adjacent_duplicate")
+                _diagnostic(
+                    candidate[0], candidate[1], candidate[3], "adjacent_duplicate"
+                )
             )
     return kept, dropped
 

@@ -1,17 +1,15 @@
 """Tests for overlap export module."""
 
-import pytest
-
 from vocal_subtitle.mapping.overlap_export import (
-    OverlapTrack,
-    OverlapGroup,
     OverlapExportConfig,
+    OverlapGroup,
+    OverlapTrack,
     group_overlapping_events,
     render_overlap_srt,
 )
 
-
 # ── OverlapTrack ─────────────────────────────────────────────────────
+
 
 def test_track_formats_srt_line_name_only():
     track = OverlapTrack(text="Hello world", speaker_id=1, speaker_label="Alice")
@@ -37,6 +35,7 @@ def test_track_fallback_label():
 
 
 # ── OverlapGroup ─────────────────────────────────────────────────────
+
 
 def test_group_srt_text_two_tracks():
     group = OverlapGroup(
@@ -87,8 +86,14 @@ def test_group_to_dict():
     group = OverlapGroup(
         group_id="og-1",
         tracks=[
-            OverlapTrack(text="hello", speaker_id=1, speaker_label="Alice",
-                         source_word_ids=["w1"], start=1.0, end=2.0),
+            OverlapTrack(
+                text="hello",
+                speaker_id=1,
+                speaker_label="Alice",
+                source_word_ids=["w1"],
+                start=1.0,
+                end=2.0,
+            ),
         ],
         start=1.0,
         end=2.0,
@@ -102,6 +107,7 @@ def test_group_to_dict():
 
 # ── OverlapExportConfig ──────────────────────────────────────────────
 
+
 def test_config_defaults():
     cfg = OverlapExportConfig()
     assert cfg.max_tracks == 2
@@ -109,6 +115,7 @@ def test_config_defaults():
 
 
 # ── group_overlapping_events ─────────────────────────────────────────
+
 
 class _FakeEvent:
     def __init__(self, **kwargs):
@@ -126,12 +133,30 @@ def test_group_returns_empty_for_no_overlap():
 
 def test_group_creates_group_for_overlapping_events():
     events = [
-        _FakeEvent(start=1.0, end=2.5, text="Speaker A", genuine_overlap=True,
-                   overlap_group_id="og-1", speaker_id=1, speaker_label="Alice",
-                   physical_start=1.0, physical_end=2.5, speaker_source="diarization"),
-        _FakeEvent(start=1.2, end=2.7, text="Speaker B", genuine_overlap=True,
-                   overlap_group_id="og-1", speaker_id=2, speaker_label="Bob",
-                   physical_start=1.2, physical_end=2.7, speaker_source="diarization"),
+        _FakeEvent(
+            start=1.0,
+            end=2.5,
+            text="Speaker A",
+            genuine_overlap=True,
+            overlap_group_id="og-1",
+            speaker_id=1,
+            speaker_label="Alice",
+            physical_start=1.0,
+            physical_end=2.5,
+            speaker_source="diarization",
+        ),
+        _FakeEvent(
+            start=1.2,
+            end=2.7,
+            text="Speaker B",
+            genuine_overlap=True,
+            overlap_group_id="og-1",
+            speaker_id=2,
+            speaker_label="Bob",
+            physical_start=1.2,
+            physical_end=2.7,
+            speaker_source="diarization",
+        ),
     ]
     groups = group_overlapping_events(events)
 
@@ -142,12 +167,30 @@ def test_group_creates_group_for_overlapping_events():
 
 def test_group_deduplicates_same_speaker():
     events = [
-        _FakeEvent(start=1.0, end=2.5, text="A1", genuine_overlap=True,
-                   overlap_group_id="og-1", speaker_id=1, speaker_label="Alice",
-                   physical_start=1.0, physical_end=2.5, speaker_source="diarization"),
-        _FakeEvent(start=1.2, end=2.7, text="A2", genuine_overlap=True,
-                   overlap_group_id="og-1", speaker_id=1, speaker_label="Alice",
-                   physical_start=1.2, physical_end=2.7, speaker_source="diarization"),
+        _FakeEvent(
+            start=1.0,
+            end=2.5,
+            text="A1",
+            genuine_overlap=True,
+            overlap_group_id="og-1",
+            speaker_id=1,
+            speaker_label="Alice",
+            physical_start=1.0,
+            physical_end=2.5,
+            speaker_source="diarization",
+        ),
+        _FakeEvent(
+            start=1.2,
+            end=2.7,
+            text="A2",
+            genuine_overlap=True,
+            overlap_group_id="og-1",
+            speaker_id=1,
+            speaker_label="Alice",
+            physical_start=1.2,
+            physical_end=2.7,
+            speaker_source="diarization",
+        ),
     ]
     groups = group_overlapping_events(events)
 
@@ -156,9 +199,18 @@ def test_group_deduplicates_same_speaker():
 
 def test_group_flags_unverified():
     events = [
-        _FakeEvent(start=1.0, end=2.5, text="X", genuine_overlap=True,
-                   overlap_group_id="og-1", speaker_id=1, speaker_label="Unknown",
-                   physical_start=1.0, physical_end=2.5, speaker_source="unknown"),
+        _FakeEvent(
+            start=1.0,
+            end=2.5,
+            text="X",
+            genuine_overlap=True,
+            overlap_group_id="og-1",
+            speaker_id=1,
+            speaker_label="Unknown",
+            physical_start=1.0,
+            physical_end=2.5,
+            speaker_source="unknown",
+        ),
     ]
     groups = group_overlapping_events(events)
 
@@ -167,6 +219,7 @@ def test_group_flags_unverified():
 
 
 # ── render_overlap_srt ───────────────────────────────────────────────
+
 
 def test_render_srt_empty_groups():
     result = render_overlap_srt([])
@@ -197,12 +250,14 @@ def test_render_srt_multiple_groups():
         OverlapGroup(
             group_id="og-1",
             tracks=[OverlapTrack(text="A", speaker_id=1, speaker_label="S1")],
-            start=1.0, end=2.0,
+            start=1.0,
+            end=2.0,
         ),
         OverlapGroup(
             group_id="og-2",
             tracks=[OverlapTrack(text="B", speaker_id=2, speaker_label="S2")],
-            start=3.0, end=4.0,
+            start=3.0,
+            end=4.0,
         ),
     ]
     srt = render_overlap_srt(groups)

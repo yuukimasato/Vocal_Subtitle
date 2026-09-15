@@ -5,24 +5,22 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from ..asr.base import ASREngine, ASRInvalidResultError, TranscriptionSegment
+from ..asr.base import ASRInvalidResultError, TranscriptionSegment
 from ..merging.merge_strategy import MergeConfig, MergeStrategy
-from ..pipeline_context import ASRFragment, NoiseProfile, PipelineContext
-from ..separation.base import SeparationEngine, SeparationResult
+from ..separation.base import SeparationResult
 from ..utils.audio_utils import AudioUtils
 from ..utils.file_hasher import compute_file_hash
-from ..vad.base import SpeechSegment, VADEngine
+from ..vad.base import SpeechSegment
 
 logger = logging.getLogger(__name__)
 
 
 class PipelineStageMixin:
     def _run_separation(
-        self, input_path: Path, progress_callback: Optional[callable] = None
+        self, input_path: Path, progress_callback: callable | None = None
     ) -> SeparationResult:
         """Stage 1: 执行人声分离（支持文件内容哈希缓存和持久化存储）
 
@@ -41,7 +39,9 @@ class PipelineStageMixin:
         # 检查持久化文件缓存
         if self.config.cache.enabled:
             cache = self._get_cache()
-            vocals_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._get_sep_model_name()}:vocals"
+            vocals_cache_key = (
+                f"{file_hash}:{sep_cfg.engine}:{self._get_sep_model_name()}:vocals"
+            )
             accomp_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._get_sep_model_name()}:accompaniment"
             cached_vocals = cache.get_file(vocals_cache_key)
             cached_accomp = cache.get_file(accomp_cache_key)
@@ -81,7 +81,9 @@ class PipelineStageMixin:
 
             # 复制到持久化缓存目录
             if self.config.cache.enabled:
-                vocals_cache_key = f"{file_hash}:{sep_cfg.engine}:{self._get_sep_model_name()}:vocals"
+                vocals_cache_key = (
+                    f"{file_hash}:{sep_cfg.engine}:{self._get_sep_model_name()}:vocals"
+                )
                 persistent_vocals = cache.set_file(vocals_cache_key, normalized_vocals)
                 result.vocals_path = persistent_vocals
 
@@ -112,9 +114,7 @@ class PipelineStageMixin:
 
         return result
 
-    def _run_vad(
-        self, audio: np.ndarray, sample_rate: int
-    ) -> List[SpeechSegment]:
+    def _run_vad(self, audio: np.ndarray, sample_rate: int) -> list[SpeechSegment]:
         """Stage 2: 执行 VAD 检测"""
         vad_cfg = self.config.vad
 
@@ -136,16 +136,16 @@ class PipelineStageMixin:
         vocals_path: Path,
         ctx,
         prefix: str = "",
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """Stage 2.5: 执行 ffmpeg VAD（与 Silero VAD 并行调用）
 
         在独立线程中运行，返回 unified_ffmpeg_pass 的结果。
         提取的声学骨架写入 ctx 供全链路复用。
         """
         try:
-            from ..vad.ffmpeg_vad import unified_ffmpeg_pass
-            from ..config import AcousticValidationConfig
             from ..acoustic.skeleton import adaptive_silence_threshold_db
+            from ..config import AcousticValidationConfig
+            from ..vad.ffmpeg_vad import unified_ffmpeg_pass
 
             acoustic_cfg = self.config.acoustic_validation
             noise_db = (
@@ -185,18 +185,19 @@ class PipelineStageMixin:
         except Exception as e:
             logger.warning(
                 "%sffmpeg VAD failed, continuing with Silero only: %s",
-                prefix, e,
+                prefix,
+                e,
             )
             ctx.add_diagnostic(f"FFmpeg VAD FAILED: {e}")
             return None
 
     def _run_merging(
         self,
-        segments: List[SpeechSegment],
+        segments: list[SpeechSegment],
         audio: np.ndarray,
         sample_rate: int,
         total_duration: float,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """Stage 3: 执行片段合并"""
         merge_cfg = self.config.merging
 
@@ -235,7 +236,7 @@ class PipelineStageMixin:
     _SPEAKER_LABEL_DEFAULT = "Speaker"
 
     @staticmethod
-    def _make_speaker_label(language: Optional[str], speaker_id: int) -> str:
+    def _make_speaker_label(language: str | None, speaker_id: int) -> str:
         """根据语言生成说话人标签（如 "说话人A" / "Speaker A" / "話者A"）
 
         Args:
@@ -257,9 +258,9 @@ class PipelineStageMixin:
         # 拉丁语言 / 默认：标签与字母之间加空格（如 "Speaker A"）
         return f"{PipelineStageMixin._SPEAKER_LABEL_DEFAULT} {letter}"
 
-    def _resolved_language_or_config(self) -> Optional[str]:
+    def _resolved_language_or_config(self) -> str | None:
         """获取当前任务的解析语言（已检测或用户配置）"""
-        return getattr(self, '_resolved_language', None) or self.config.asr.language
+        return getattr(self, "_resolved_language", None) or self.config.asr.language
 
     @staticmethod
     def _filter_asr_results(seg_results: list) -> list:
@@ -273,10 +274,15 @@ class PipelineStageMixin:
         VAD chunk, or an empty list when every segment is filtered.
         """
         # Common training/evaluation phrases that Whisper often hallucinates
-        _TRAINING_PHRASES = frozenset({
-            "感谢观看", "感谢大家观看", "Thanks for watching",
-            "谢谢观看", "Please subscribe",
-        })
+        training_phrases = frozenset(
+            {
+                "感谢观看",
+                "感谢大家观看",
+                "Thanks for watching",
+                "谢谢观看",
+                "Please subscribe",
+            }
+        )
         filtered = []
         _dropped = 0
         from ..asr.hallucination import collapse_repeated_cjk_tokens
@@ -289,12 +295,14 @@ class PipelineStageMixin:
             if not getattr(seg, "words", None):
                 collapsed = collapse_repeated_cjk_tokens(text)
                 if collapsed != text:
-                    logger.info("Collapsed repeated CJK ASR tokens: %r -> %r", text, collapsed)
+                    logger.info(
+                        "Collapsed repeated CJK ASR tokens: %r -> %r", text, collapsed
+                    )
                     seg.text = collapsed
                     text = collapsed
             # Strip trailing punctuation that text normalizer may have added
             cleaned = text.rstrip(".,!?;:，。！？；：")
-            if cleaned in _TRAINING_PHRASES:
+            if cleaned in training_phrases:
                 _dropped += 1
                 continue
             filtered.append(seg)
@@ -311,8 +319,8 @@ class PipelineStageMixin:
         self,
         audio: np.ndarray,
         sample_rate: int,
-        segments: List[SpeechSegment],
-    ) -> List[List[TranscriptionSegment]]:
+        segments: list[SpeechSegment],
+    ) -> list[list[TranscriptionSegment]]:
         """Stage 4: 执行 ASR 识别（每个片段独立识别）
 
         关键优化：当 asr_cfg.language 为 None 时，先从完整音频中
@@ -334,9 +342,13 @@ class PipelineStageMixin:
         # 在 VAD 切分后的短片段（1-10s）上逐段自动检测极为不可靠，
         # 经常将英文/日文误判为中文。解决方案：从完整音频
         # 中一次性检测语言，然后应用于所有片段。
-        resolved_language: Optional[str] = asr_cfg.language
+        resolved_language: str | None = asr_cfg.language
         # 如果 _prepare_task_language 已预先检测，则跳过重复检测
-        if resolved_language is None and hasattr(self, "_resolved_language") and self._resolved_language is not None:
+        if (
+            resolved_language is None
+            and hasattr(self, "_resolved_language")
+            and self._resolved_language is not None
+        ):
             resolved_language = self._resolved_language
         route_decision = getattr(self, "_asr_route_decision", None)
         if resolved_language is None and route_decision is None:
@@ -348,7 +360,8 @@ class PipelineStageMixin:
             if resolved_language:
                 logger.info(
                     "Global language detected: %s (will use for all %d segments)",
-                    resolved_language, len(segments),
+                    resolved_language,
+                    len(segments),
                 )
             else:
                 logger.warning(
@@ -374,11 +387,11 @@ class PipelineStageMixin:
         fallback_count = 0
         failed_segments = 0
         recognized_segments = 0
-        first_failure: Optional[Exception] = None
+        first_failure: Exception | None = None
         for i, seg in enumerate(segments):
             self._progress.update_stage(
                 1,
-                extra={"detail": f"Seg {i+1}/{len(segments)} 语音识别"},
+                extra={"detail": f"Seg {i + 1}/{len(segments)} 语音识别"},
             )
 
             # 检查缓存（使用解析后的语言，而非原始的 None，确保缓存正确分区）
@@ -414,7 +427,9 @@ class PipelineStageMixin:
                     self._apply_text_normalization(cached)
                     cached = self._dedup_overlapping_segments(cached)
                     cached, _dropped = self._filter_asr_results(cached)
-                    self._hallucination_dropped_count = getattr(self, "_hallucination_dropped_count", 0) + _dropped
+                    self._hallucination_dropped_count = (
+                        getattr(self, "_hallucination_dropped_count", 0) + _dropped
+                    )
                     # A cached empty list can be the intentional result of
                     # filtering a previously successful recognition (for
                     # example a known hallucination phrase). It must not be
@@ -426,9 +441,7 @@ class PipelineStageMixin:
             # 提取片段音频
             start_sample = AudioUtils.time_to_sample(seg.start, sample_rate)
             end_sample = AudioUtils.time_to_sample(seg.end, sample_rate)
-            segment_audio = AudioUtils.extract_segment(
-                audio, start_sample, end_sample
-            )
+            segment_audio = AudioUtils.extract_segment(audio, start_sample, end_sample)
 
             if len(segment_audio) == 0:
                 results.append([])
@@ -469,9 +482,12 @@ class PipelineStageMixin:
                             language=None,  # 自动检测
                         )
                         # 取置信度更高的结果，但只在回退结果有语言证据时才接受
-                        if (
-                            self._segment_confidence(fallback_results) > self._segment_confidence(seg_results)
-                            and self._should_accept_fallback_language(fallback_results, self.config.asr.language_mode)
+                        if self._segment_confidence(
+                            fallback_results
+                        ) > self._segment_confidence(
+                            seg_results
+                        ) and self._should_accept_fallback_language(
+                            fallback_results, self.config.asr.language_mode
                         ):
                             logger.info(
                                 "Segment %d: fallback accepted (auto-detect better)",
@@ -486,7 +502,9 @@ class PipelineStageMixin:
                             )
                     except Exception as e:
                         logger.warning(
-                            "Segment %d fallback transcription failed: %s", i, e,
+                            "Segment %d fallback transcription failed: %s",
+                            i,
+                            e,
                         )
 
                 # ASR 文本后处理规范化（数字编号恢复、专有名词纠错等）
@@ -497,7 +515,9 @@ class PipelineStageMixin:
 
                 # ★ 幻觉过滤：移除训练短语、重复模式等
                 seg_results, _dropped = self._filter_asr_results(seg_results)
-                self._hallucination_dropped_count = getattr(self, "_hallucination_dropped_count", 0) + _dropped
+                self._hallucination_dropped_count = (
+                    getattr(self, "_hallucination_dropped_count", 0) + _dropped
+                )
 
                 results.append(seg_results)
 
@@ -517,7 +537,8 @@ class PipelineStageMixin:
             logger.info(
                 "Language fallback: %d/%d segments re-transcribed "
                 "with auto-detect (possible code-switching)",
-                fallback_count, len(segments),
+                fallback_count,
+                len(segments),
             )
 
         if segments and recognized_segments == 0:
@@ -532,7 +553,9 @@ class PipelineStageMixin:
         return results
 
     @staticmethod
-    def _should_accept_fallback_language(fallback_results: list, language_mode: str) -> bool:
+    def _should_accept_fallback_language(
+        fallback_results: list, language_mode: str
+    ) -> bool:
         """Only accept fallback if the results carry language evidence.
 
         In ``mixed`` mode, auto-detected language evidence is the signal to switch;
@@ -540,9 +563,7 @@ class PipelineStageMixin:
         """
         if language_mode != "mixed":
             return True
-        return all(
-            getattr(s, "language", None) is not None for s in fallback_results
-        )
+        return all(getattr(s, "language", None) is not None for s in fallback_results)
 
     @staticmethod
     def _build_safe_optimizer(llm_cfg, update_callback=None):
@@ -581,12 +602,16 @@ class PipelineStageMixin:
                         for other_key in original_chunk:
                             if other_key == key:
                                 continue
-                            other_original = str(original_chunk.get(other_key, "") or "")
+                            other_original = str(
+                                original_chunk.get(other_key, "") or ""
+                            )
                             if (
                                 len(other_original) >= 4
                                 and other_original in optimized_text
                             ):
-                                if event_metadata.get(key, {}).get("speaker") != event_metadata.get(other_key, {}).get("speaker"):
+                                if event_metadata.get(key, {}).get(
+                                    "speaker"
+                                ) != event_metadata.get(other_key, {}).get("speaker"):
                                     return False, "cross_speaker_text_transfer"
                 return True, reason
 
@@ -686,21 +711,21 @@ class PipelineStageMixin:
                 a_text_len = len(texts[i])
                 b_text_len = len(texts[j])
 
-                if (a.start <= b.start and a.end >= b.end
-                        and a_text_len >= b_text_len):
+                if a.start <= b.start and a.end >= b.end and a_text_len >= b_text_len:
                     to_remove.add(j)
                     logger.debug(
-                        "Intra-segment dedup: '%s' subsumes '%s' "
-                        "(overlap=%.0f%%)",
-                        texts[i][:40], texts[j][:40], overlap_ratio * 100,
+                        "Intra-segment dedup: '%s' subsumes '%s' (overlap=%.0f%%)",
+                        texts[i][:40],
+                        texts[j][:40],
+                        overlap_ratio * 100,
                     )
-                elif (b.start <= a.start and b.end >= a.end
-                        and b_text_len >= a_text_len):
+                elif b.start <= a.start and b.end >= a.end and b_text_len >= a_text_len:
                     to_remove.add(i)
                     logger.debug(
-                        "Intra-segment dedup: '%s' subsumes '%s' "
-                        "(overlap=%.0f%%)",
-                        texts[j][:40], texts[i][:40], overlap_ratio * 100,
+                        "Intra-segment dedup: '%s' subsumes '%s' (overlap=%.0f%%)",
+                        texts[j][:40],
+                        texts[i][:40],
+                        overlap_ratio * 100,
                     )
                     break
                 elif b_text_len > a_text_len:
@@ -712,7 +737,9 @@ class PipelineStageMixin:
         if to_remove:
             logger.info(
                 "Intra-segment ASR dedup: %d → %d segments (%d removed)",
-                n, n - len(to_remove), len(to_remove),
+                n,
+                n - len(to_remove),
+                len(to_remove),
             )
             return [s for idx, s in enumerate(seg_results) if idx not in to_remove]
         return seg_results
@@ -733,6 +760,7 @@ class PipelineStageMixin:
             return
         try:
             from ..asr.text_normalizer import TextNormalizer
+
             normalizer = TextNormalizer()
             for ts in seg_results:
                 ts.text = normalizer.normalize(ts.text)

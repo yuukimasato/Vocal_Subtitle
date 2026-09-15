@@ -14,8 +14,8 @@ import json
 import logging
 import re
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from .aligner import SubtitleAligner
 from .llm_client import call_llm
@@ -31,6 +31,7 @@ def _ensure_json_repair():
     """按需加载 json_repair（LLM extra 的一部分）。"""
     try:
         import json_repair as _jr
+
         return _jr
     except ImportError:
         raise ImportError(
@@ -68,10 +69,10 @@ class SubtitleOptimizer:
         thread_num: int = 4,
         batch_num: int = 10,
         custom_prompt: str = "",
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
         temperature: float = 0.2,
-        update_callback: Optional[Callable] = None,
+        update_callback: Callable | None = None,
     ):
         """初始化优化器
 
@@ -96,7 +97,7 @@ class SubtitleOptimizer:
         self.temperature = temperature
         self.update_callback = update_callback
 
-        self._executor: Optional[ThreadPoolExecutor] = None
+        self._executor: ThreadPoolExecutor | None = None
         # 批次失败告警去重：依赖缺失等错误会逐批重复，同一原因只记录一次
         self._warn_lock = threading.Lock()
         self._warned_failures: set = set()
@@ -115,9 +116,10 @@ class SubtitleOptimizer:
         return self._executor
 
     def optimize(
-        self, subtitles: Dict[str, str],
-        event_metadata: Optional[Dict[str, Dict]] = None,
-    ) -> Dict[str, str]:
+        self,
+        subtitles: dict[str, str],
+        event_metadata: dict[str, dict] | None = None,
+    ) -> dict[str, str]:
         """优化字幕
 
         Args:
@@ -138,9 +140,7 @@ class SubtitleOptimizer:
 
         return optimized_dict
 
-    def optimize_from_list(
-        self, texts: List[str]
-    ) -> List[str]:
+    def optimize_from_list(self, texts: list[str]) -> list[str]:
         """从文本列表优化字幕（便捷方法）
 
         Args:
@@ -152,15 +152,13 @@ class SubtitleOptimizer:
         subtitle_dict = {str(i + 1): text for i, text in enumerate(texts)}
         result = self.optimize(subtitle_dict)
         # 按原始顺序返回
-        return [
-            result.get(str(i + 1), texts[i])
-            for i in range(len(texts))
-        ]
+        return [result.get(str(i + 1), texts[i]) for i in range(len(texts))]
 
     def _split_chunks(
-        self, subtitle_dict: Dict[str, str],
-        event_metadata: Optional[Dict[str, Dict]] = None,
-    ) -> List[Tuple[Dict[str, str], Optional[Dict[str, Dict]]]]:
+        self,
+        subtitle_dict: dict[str, str],
+        event_metadata: dict[str, dict] | None = None,
+    ) -> list[tuple[dict[str, str], dict[str, dict] | None]]:
         """将字幕字典分割成批次，同时分割对应的元数据"""
         items = list(subtitle_dict.items())
         chunks = []
@@ -181,11 +179,11 @@ class SubtitleOptimizer:
         return chunks
 
     def _parallel_optimize(
-        self, chunks: List[Tuple[Dict[str, str], Optional[Dict[str, Dict]]]]
-    ) -> Dict[str, str]:
+        self, chunks: list[tuple[dict[str, str], dict[str, dict] | None]]
+    ) -> dict[str, str]:
         """并行优化所有批次"""
         executor = self._ensure_executor()
-        optimized_dict: Dict[str, str] = {}
+        optimized_dict: dict[str, str] = {}
 
         futures = {
             executor.submit(self._optimize_chunk, chunk, meta): chunk
@@ -202,19 +200,19 @@ class SubtitleOptimizer:
                 if self._warn_failure_once(e):
                     logger.warning(
                         "LLM chunk optimization failed, falling back to "
-                        "original text: %s", e,
+                        "original text: %s",
+                        e,
                     )
                 optimized_dict.update(chunk)
 
         return optimized_dict
 
     def _optimize_chunk(
-        self, subtitle_chunk: Dict[str, str],
-        event_metadata: Optional[Dict[str, Dict]] = None,
-    ) -> Dict[str, str]:
+        self,
+        subtitle_chunk: dict[str, str],
+        event_metadata: dict[str, dict] | None = None,
+    ) -> dict[str, str]:
         """优化单个字幕批次"""
-        start_idx = next(iter(subtitle_chunk))
-        end_idx = next(reversed(subtitle_chunk))
 
         try:
             result = self.agent_loop(subtitle_chunk, event_metadata)
@@ -236,15 +234,16 @@ class SubtitleOptimizer:
         except Exception as e:
             if self._warn_failure_once(e):
                 logger.warning(
-                    "LLM chunk optimization failed, falling back to "
-                    "original text: %s", e,
+                    "LLM chunk optimization failed, falling back to original text: %s",
+                    e,
                 )
             return subtitle_chunk
 
     def agent_loop(
-        self, subtitle_chunk: Dict[str, str],
-        event_metadata: Optional[Dict[str, Dict]] = None,
-    ) -> Dict[str, str]:
+        self,
+        subtitle_chunk: dict[str, str],
+        event_metadata: dict[str, dict] | None = None,
+    ) -> dict[str, str]:
         """使用 agent loop 优化字幕
 
         LLM → 验证 → 反馈 → 重试 (最多 MAX_STEPS 次)
@@ -272,9 +271,13 @@ class SubtitleOptimizer:
                 if meta.get("start") is not None and meta.get("end") is not None:
                     entry["time"] = f"{meta['start']:.1f}s - {meta['end']:.1f}s"
                 # 相邻条目信息
-                if meta.get("next_speaker") and meta["next_speaker"] != meta.get("speaker"):
+                if meta.get("next_speaker") and meta["next_speaker"] != meta.get(
+                    "speaker"
+                ):
                     entry["next_speaker"] = f"{meta['next_speaker']} (DIFFERENT)"
-                if meta.get("prev_speaker") and meta["prev_speaker"] != meta.get("speaker"):
+                if meta.get("prev_speaker") and meta["prev_speaker"] != meta.get(
+                    "speaker"
+                ):
                     entry["prev_speaker"] = f"{meta['prev_speaker']} (DIFFERENT)"
                 context_entries[idx] = entry
             input_json = json.dumps(context_entries, ensure_ascii=False, indent=2)
@@ -295,8 +298,7 @@ class SubtitleOptimizer:
 
         if self.custom_prompt:
             user_prompt += (
-                f"\nReference content:\n"
-                f"<reference>{self.custom_prompt}</reference>"
+                f"\nReference content:\n<reference>{self.custom_prompt}</reference>"
             )
 
         messages = [
@@ -330,7 +332,7 @@ class SubtitleOptimizer:
                 )
 
             # 规范化输出：处理 LLM 可能返回嵌套对象（匹配输入格式）的情况
-            result_dict: Dict[str, str] = {}
+            result_dict: dict[str, str] = {}
             for k, v in parsed_result.items():
                 if isinstance(v, dict):
                     # LLM 返回了嵌套对象 → 提取 text 字段
@@ -350,15 +352,15 @@ class SubtitleOptimizer:
             if is_valid:
                 # ★ 先清除吸收条目，再对齐修复（避免 aligner 干扰吸收检测）
                 absorbed_cleaned = self._resolve_absorbed_entries(
-                    subtitle_chunk, result_dict, event_metadata,
+                    subtitle_chunk,
+                    result_dict,
+                    event_metadata,
                 )
                 repaired = self._repair(subtitle_chunk, absorbed_cleaned)
                 return repaired
 
             # 验证失败，添加反馈
-            messages.append(
-                {"role": "assistant", "content": result_text}
-            )
+            messages.append({"role": "assistant", "content": result_text})
             messages.append(
                 {
                     "role": "user",
@@ -373,7 +375,9 @@ class SubtitleOptimizer:
         # 达到最大步数，返回最后一次结果
         if last_result:
             absorbed_cleaned = self._resolve_absorbed_entries(
-                subtitle_chunk, last_result, event_metadata,
+                subtitle_chunk,
+                last_result,
+                event_metadata,
             )
             repaired = self._repair(subtitle_chunk, absorbed_cleaned)
             return repaired
@@ -381,9 +385,9 @@ class SubtitleOptimizer:
 
     def _validate(
         self,
-        original_chunk: Dict[str, str],
-        optimized_chunk: Dict[str, str],
-    ) -> Tuple[bool, str]:
+        original_chunk: dict[str, str],
+        optimized_chunk: dict[str, str],
+    ) -> tuple[bool, str]:
         """验证优化结果
 
         检查:
@@ -412,8 +416,7 @@ class SubtitleOptimizer:
                 error_parts.append(f"Extra keys: {sorted(extra)}")
 
             error_msg = (
-                "\n".join(error_parts)
-                + f"\nRequired keys: {sorted(expected_keys)}\n"
+                "\n".join(error_parts) + f"\nRequired keys: {sorted(expected_keys)}\n"
                 f"Please return the COMPLETE optimized dictionary "
                 f"with ALL {len(expected_keys)} keys."
             )
@@ -440,13 +443,9 @@ class SubtitleOptimizer:
             optimized_cleaned = re.sub(r"\s+", " ", optimized_text).strip()
 
             # 计算相似度
-            matcher = difflib.SequenceMatcher(
-                None, original_cleaned, optimized_cleaned
-            )
+            matcher = difflib.SequenceMatcher(None, original_cleaned, optimized_cleaned)
             similarity = matcher.ratio()
-            similarity_threshold = (
-                0.6 if count_words(original_text) <= 10 else 0.7
-            )
+            similarity_threshold = 0.6 if count_words(original_text) <= 10 else 0.7
 
             # 相似度过低
             if similarity < similarity_threshold:
@@ -475,7 +474,7 @@ class SubtitleOptimizer:
             text_a = optimized_chunk[key_a].strip()
             if len(text_a) < 3:
                 continue
-            for key_b in sorted_keys[i + 1:]:
+            for key_b in sorted_keys[i + 1 :]:
                 text_b = optimized_chunk[key_b].strip()
                 if len(text_b) < 3:
                     continue
@@ -514,10 +513,10 @@ class SubtitleOptimizer:
 
     @staticmethod
     def _resolve_absorbed_entries(
-        original: Dict[str, str],
-        optimized: Dict[str, str],
-        event_metadata: Optional[Dict[str, Dict]] = None,
-    ) -> Dict[str, str]:
+        original: dict[str, str],
+        optimized: dict[str, str],
+        event_metadata: dict[str, dict] | None = None,
+    ) -> dict[str, str]:
         """清除被上一句吸收了内容的冗余条目。
 
         当 LLM 将下一句的内容追加到当前句末尾时（如将"四个半."
@@ -578,9 +577,12 @@ class SubtitleOptimizer:
                 if len(absorbed_text) >= 3 and absorbed_text in curr_text:
                     optimized[next_key] = ""
                     # ★ 同时从吸收者中移除被吸收的文本
-                    optimized[curr_key] = curr_text.replace(
-                        absorbed_text, ""
-                    ).strip().rstrip(".,，。;；").strip()
+                    optimized[curr_key] = (
+                        curr_text.replace(absorbed_text, "")
+                        .strip()
+                        .rstrip(".,，。;；")
+                        .strip()
+                    )
                     curr_text = optimized[curr_key]  # 更新引用，用于后续检测
                     continue
 
@@ -593,8 +595,11 @@ class SubtitleOptimizer:
                     if idx >= 0:
                         optimized[next_key] = ""
                         optimized[curr_key] = (
-                            curr_text[:idx] + curr_text[idx + len(cleaned_absorbed):]
-                        ).strip().rstrip(".,，。;；").strip()
+                            (curr_text[:idx] + curr_text[idx + len(cleaned_absorbed) :])
+                            .strip()
+                            .rstrip(".,，。;；")
+                            .strip()
+                        )
                         curr_text = optimized[curr_key]
                     continue
 
@@ -602,9 +607,9 @@ class SubtitleOptimizer:
 
     @staticmethod
     def _repair(
-        original: Dict[str, str],
-        optimized: Dict[str, str],
-    ) -> Dict[str, str]:
+        original: dict[str, str],
+        optimized: dict[str, str],
+    ) -> dict[str, str]:
         """修复字幕对齐
 
         使用 SubtitleAligner 对齐原文和优化后的文本，
@@ -632,8 +637,7 @@ class SubtitleOptimizer:
             # 重建字典，保持原有索引
             start_id = next(iter(original.keys()))
             return {
-                str(int(start_id) + i): text
-                for i, text in enumerate(aligned_target)
+                str(int(start_id) + i): text for i, text in enumerate(aligned_target)
             }
 
         except Exception:
@@ -655,12 +659,12 @@ class SubtitleOptimizer:
 def _clean_for_compare(text: str) -> str:
     """清理文本用于吸收比较：去除标点差异和多余空格"""
     import re as _re
+
     t = text.strip()
     # 移除末尾标点（LLM 常添加的）
-    t = _re.sub(r'[.。！!？?，,；;、]+$', '', t)
+    t = _re.sub(r"[.。！!？?，,；;、]+$", "", t)
     # 移除开头标点
-    t = _re.sub(r'^[.。！!？?，,；;、]+', '', t)
+    t = _re.sub(r"^[.。！!？?，,；;、]+", "", t)
     # 规范化空白
-    t = _re.sub(r'\s+', '', t)
+    t = _re.sub(r"\s+", "", t)
     return t
-

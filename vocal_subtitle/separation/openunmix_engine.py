@@ -9,9 +9,6 @@
 import logging
 import time
 from pathlib import Path
-from typing import Optional
-
-import numpy as np
 
 from .base import LicenseInfo, SeparationEngine, SeparationResult
 
@@ -34,7 +31,7 @@ class OpenUnmixEngine(SeparationEngine):
 
     def __init__(self):
         self._model = None
-        self._model_name: Optional[str] = None
+        self._model_name: str | None = None
 
     @property
     def name(self) -> str:
@@ -48,7 +45,7 @@ class OpenUnmixEngine(SeparationEngine):
             source_url="https://github.com/sigsep/open-unmix-pytorch",
         )
 
-    def load_model(self, model_name: Optional[str] = None) -> None:
+    def load_model(self, model_name: str | None = None) -> None:
         """加载 Open-Unmix 模型
 
         Args:
@@ -68,8 +65,7 @@ class OpenUnmixEngine(SeparationEngine):
             self._model_name = model_name
         except ImportError:
             raise ImportError(
-                "openunmix is required. Install it with: "
-                "pip install openunmix"
+                "openunmix is required. Install it with: pip install openunmix"
             )
 
     def separate(

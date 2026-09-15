@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Any, Iterable, Optional
+from typing import Any
 
 from .evidence import CandidateEvidence
-
 
 _REPEATED_SPACE = re.compile(r"\s+")
 _PUNCTUATION = re.compile(r"[^\w\u3400-\u9fff\u3040-\u30ff]+", re.UNICODE)
@@ -63,7 +63,7 @@ class RiskScoringConfig:
 class EvidenceRiskScorer:
     """Score candidates without deciding whether they should be deleted."""
 
-    def __init__(self, config: Optional[RiskScoringConfig] = None):
+    def __init__(self, config: RiskScoringConfig | None = None):
         self.config = config or RiskScoringConfig()
 
     def score_bundle(
@@ -135,7 +135,10 @@ class EvidenceRiskScorer:
             score += 0.12
             codes.append("low_avg_logprob")
             factors["avg_logprob"] = min(1.0, abs(candidate.avg_logprob) / 3.0)
-        if candidate.compression_ratio is not None and candidate.compression_ratio >= 2.4:
+        if (
+            candidate.compression_ratio is not None
+            and candidate.compression_ratio >= 2.4
+        ):
             score += 0.15
             codes.append("high_compression_ratio")
             factors["compression_ratio"] = min(1.0, candidate.compression_ratio / 4.0)
@@ -146,7 +149,9 @@ class EvidenceRiskScorer:
             codes.append("global_text_conflict")
             factors["global_conflict"] = overlap_conflict
 
-        if physical_timeline is not None and not self._has_physical_support(candidate, physical_timeline):
+        if physical_timeline is not None and not self._has_physical_support(
+            candidate, physical_timeline
+        ):
             score += 0.20
             codes.append("physical_coverage_gap")
             factors["physical_coverage"] = 0.20
@@ -176,12 +181,16 @@ class EvidenceRiskScorer:
         )
 
     @staticmethod
-    def _global_conflict(candidate: CandidateEvidence, global_evidence: Iterable[CandidateEvidence]) -> float:
+    def _global_conflict(
+        candidate: CandidateEvidence, global_evidence: Iterable[CandidateEvidence]
+    ) -> float:
         best = 0.0
         for observation in global_evidence:
             if observation.source != "global":
                 continue
-            overlap = min(candidate.end, observation.end) - max(candidate.start, observation.start)
+            overlap = min(candidate.end, observation.end) - max(
+                candidate.start, observation.start
+            )
             if overlap <= 0:
                 continue
             similarity = _similarity(candidate.text, observation.text)
@@ -201,7 +210,7 @@ class EvidenceRiskScorer:
         self,
         candidate: CandidateEvidence,
         candidates: Iterable[CandidateEvidence],
-    ) -> Optional[float]:
+    ) -> float | None:
         """Return the largest configured non-contiguous duplicate gap."""
         normalized = normalize_text(candidate.text)
         if not normalized:
@@ -221,4 +230,9 @@ class EvidenceRiskScorer:
         return round(max(gaps), 6) if gaps else None
 
 
-__all__ = ["EvidenceRiskScorer", "RiskAssessment", "RiskScoringConfig", "normalize_text"]
+__all__ = [
+    "EvidenceRiskScorer",
+    "RiskAssessment",
+    "RiskScoringConfig",
+    "normalize_text",
+]

@@ -8,72 +8,125 @@ imports acyclic.
 from __future__ import annotations
 
 import sys
-from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from ..config import PipelineConfig
 from ..utils.hf_token_store import has_hf_token
 
-PROFILE_DESCRIPTIONS: Dict[str, str] = {
-    "default": "通用场景，分离引擎 Spleeter，适合日常音频处理",
+PROFILE_DESCRIPTIONS: dict[str, str] = {
+    "default": "通用场景，分离引擎 UVR (BS-RoFormer)，适合日常音频处理",
     "podcast": "播客/访谈场景，UVR 高品质分离，中文优化，低 VAD 阈值捕捉更多语音",
-    "education": "教学/演讲场景，Spleeter 分离，较大的合并间隙适应讲课节奏",
+    "education": "教学/演讲场景，UVR 分离，较大的合并间隙适应讲课节奏",
     "variety_show": "综艺/直播场景，UVR 分离，背景音乐较多时的最佳选择",
     "music_live": "音乐现场场景，UVR 高品质分离，专为含背景音乐的语音优化",
 }
 
 # Stable, non-secret provider metadata used by the legacy LLM endpoints and
 # the split model-management route group.
-LLM_PROVIDERS: Dict[str, Dict[str, Any]] = {
+LLM_PROVIDERS: dict[str, dict[str, Any]] = {
     "deepseek": {
-        "id": "deepseek", "name": "DeepSeek（深度求索）",
-        "base_url": "https://api.deepseek.com", "default_model": "deepseek-v4-pro",
-        "default_models": ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+        "id": "deepseek",
+        "name": "DeepSeek（深度求索）",
+        "base_url": "https://api.deepseek.com",
+        "default_model": "deepseek-v4-pro",
+        "default_models": [
+            "deepseek-v4-pro",
+            "deepseek-v4-flash",
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
     },
     "openai": {
-        "id": "openai", "name": "OpenAI", "base_url": "https://api.openai.com",
-        "default_model": "gpt-5.5", "default_models": ["gpt-5.5", "gpt-5.4", "gpt-5", "o4-mini"],
+        "id": "openai",
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com",
+        "default_model": "gpt-5.5",
+        "default_models": ["gpt-5.5", "gpt-5.4", "gpt-5", "o4-mini"],
     },
     "anthropic": {
-        "id": "anthropic", "name": "Anthropic (Claude)", "base_url": "https://api.anthropic.com",
-        "default_model": "claude-fable-5", "default_models": ["claude-fable-5", "claude-mythos-5", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+        "id": "anthropic",
+        "name": "Anthropic (Claude)",
+        "base_url": "https://api.anthropic.com",
+        "default_model": "claude-fable-5",
+        "default_models": [
+            "claude-fable-5",
+            "claude-mythos-5",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+        ],
     },
     "google": {
-        "id": "google", "name": "Google (Gemini)",
+        "id": "google",
+        "name": "Google (Gemini)",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "default_model": "gemini-3.5-flash", "default_models": ["gemini-3.5-flash", "gemini-3.5-pro", "gemini-3.0-pro"],
+        "default_model": "gemini-3.5-flash",
+        "default_models": ["gemini-3.5-flash", "gemini-3.5-pro", "gemini-3.0-pro"],
     },
     "zhipu": {
-        "id": "zhipu", "name": "智谱 AI (GLM)", "base_url": "https://open.bigmodel.cn/api/paas/v4",
-        "default_model": "GLM-5.2", "default_models": ["GLM-5.2", "GLM-5.1", "glm-4-plus"],
+        "id": "zhipu",
+        "name": "智谱 AI (GLM)",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "default_model": "GLM-5.2",
+        "default_models": ["GLM-5.2", "GLM-5.1", "glm-4-plus"],
     },
     "dashscope": {
-        "id": "dashscope", "name": "阿里百炼 (Qwen)", "base_url": "https://dashscope.aliyuncs.com/compatible-mode",
-        "default_model": "qwen3.7-max", "default_models": ["qwen3.7-max", "qwen-plus", "qwen-max", "qwen-turbo"],
+        "id": "dashscope",
+        "name": "阿里百炼 (Qwen)",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode",
+        "default_model": "qwen3.7-max",
+        "default_models": ["qwen3.7-max", "qwen-plus", "qwen-max", "qwen-turbo"],
     },
     "hunyuan": {
-        "id": "hunyuan", "name": "腾讯混元 (Hunyuan)", "base_url": "https://api.hunyuan.cloud.tencent.com/v1",
-        "default_model": "hunyuan-hy3-preview", "default_models": ["hunyuan-hy3-preview", "hunyuan-turbo", "hunyuan-pro"],
+        "id": "hunyuan",
+        "name": "腾讯混元 (Hunyuan)",
+        "base_url": "https://api.hunyuan.cloud.tencent.com/v1",
+        "default_model": "hunyuan-hy3-preview",
+        "default_models": ["hunyuan-hy3-preview", "hunyuan-turbo", "hunyuan-pro"],
     },
     "moonshot": {
-        "id": "moonshot", "name": "月之暗面 (Kimi)", "base_url": "https://api.moonshot.cn",
-        "default_model": "kimi-k2.6", "default_models": ["kimi-k2.6", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+        "id": "moonshot",
+        "name": "月之暗面 (Kimi)",
+        "base_url": "https://api.moonshot.cn",
+        "default_model": "kimi-k2.6",
+        "default_models": [
+            "kimi-k2.6",
+            "moonshot-v1-8k",
+            "moonshot-v1-32k",
+            "moonshot-v1-128k",
+        ],
     },
     "minimax": {
-        "id": "minimax", "name": "MiniMax", "base_url": "https://api.minimax.chat/v1",
-        "default_model": "minimax-m3", "default_models": ["minimax-m3", "minimax-m2.7", "abab6.5s-chat"],
+        "id": "minimax",
+        "name": "MiniMax",
+        "base_url": "https://api.minimax.chat/v1",
+        "default_model": "minimax-m3",
+        "default_models": ["minimax-m3", "minimax-m2.7", "abab6.5s-chat"],
     },
     "siliconflow": {
-        "id": "siliconflow", "name": "硅基流动 (SiliconFlow)", "base_url": "https://api.siliconflow.cn",
+        "id": "siliconflow",
+        "name": "硅基流动 (SiliconFlow)",
+        "base_url": "https://api.siliconflow.cn",
         "default_model": "deepseek-ai/DeepSeek-V3",
-        "default_models": ["deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "Pro/deepseek-ai/DeepSeek-V3", "Qwen/Qwen3-235B-A22B"],
+        "default_models": [
+            "deepseek-ai/DeepSeek-V3",
+            "deepseek-ai/DeepSeek-R1",
+            "Pro/deepseek-ai/DeepSeek-V3",
+            "Qwen/Qwen3-235B-A22B",
+        ],
     },
     "ollama": {
-        "id": "ollama", "name": "Ollama（本地）", "base_url": "http://localhost:11434",
-        "default_model": "llama3", "default_models": [],
+        "id": "ollama",
+        "name": "Ollama（本地）",
+        "base_url": "http://localhost:11434",
+        "default_model": "llama3",
+        "default_models": [],
     },
     "custom": {
-        "id": "custom", "name": "自定义", "base_url": "", "default_model": "", "default_models": [],
+        "id": "custom",
+        "name": "自定义",
+        "base_url": "",
+        "default_model": "",
+        "default_models": [],
     },
 }
 
@@ -94,7 +147,10 @@ def speaker_model_download_detail(exc: Exception) -> str:
         return "Hugging Face Token 无效或尚未获得该模型权限；请检查 Token 类型、模型协议和账号授权"
     if isinstance(exc, ImportError):
         return "缺少 huggingface_hub 依赖，请先安装 WebUI/模型下载依赖"
-    if any(marker in error_text for marker in ("ssl", "httpsconnectionpool", "timeout", "connection")):
+    if any(
+        marker in error_text
+        for marker in ("ssl", "httpsconnectionpool", "timeout", "connection")
+    ):
         return "无法连接 Hugging Face，请检查网络、代理或 HF_ENDPOINT"
     if "incomplete" in error_text or "integrity" in error_text:
         return "模型下载未形成完整本地缓存，请重试下载"
@@ -105,7 +161,7 @@ def profile_description(name: str) -> str:
     return PROFILE_DESCRIPTIONS.get(name, "自定义配置")
 
 
-def config_summary(config: PipelineConfig) -> Dict[str, Any]:
+def config_summary(config: PipelineConfig) -> dict[str, Any]:
     return {
         "separation_engine": config.separation.engine,
         "vad_engine": config.vad.engine,
@@ -122,7 +178,7 @@ def config_summary(config: PipelineConfig) -> Dict[str, Any]:
     }
 
 
-def config_to_overrides(config: PipelineConfig) -> Dict[str, Any]:
+def config_to_overrides(config: PipelineConfig) -> dict[str, Any]:
     """Return the stable frontend configuration payload."""
     return {
         "separator": config.separation.engine,
@@ -176,7 +232,9 @@ def config_to_overrides(config: PipelineConfig) -> Dict[str, Any]:
         "speaker_embedding_enabled": config.speaker_embedding.enabled,
         "speaker_embedding_engine": config.speaker_embedding.engine,
         "speaker_embedding_model_ref": config.speaker_embedding.model_ref,
-        "speaker_embedding_hf_token": "***" if config.speaker_embedding.hf_token or has_saved_hf_token() else "",
+        "speaker_embedding_hf_token": "***"
+        if config.speaker_embedding.hf_token or has_saved_hf_token()
+        else "",
         "acoustic_skeleton_mode": config.acoustic_validation.skeleton_mode,
         "acoustic_export_skeleton": config.acoustic_validation.export_skeleton_segments,
         "fast_merge_max_gap": config.merge_decision.fast_merge_max_gap,

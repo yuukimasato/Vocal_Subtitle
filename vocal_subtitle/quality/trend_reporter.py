@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +75,8 @@ class VersionMetrics:
 class MetricChange:
     """单个指标的变更"""
 
-    group: str        # D0_engineering, D1_reference, etc.
-    metric: str       # test_pass_rate, coverage_avg, etc.
+    group: str  # D0_engineering, D1_reference, etc.
+    metric: str  # test_pass_rate, coverage_avg, etc.
     old: Any
     new: Any
     delta: Any = None
@@ -135,10 +135,11 @@ class TrendReporter:
         diff = reporter.compare(prev_report, curr_report)
     """
 
-    def __init__(self, storage_dir: Optional[Path] = None):
-        self._storage_dir = Path(storage_dir or (
-            Path(__file__).parent.parent.parent / "cache" / "quality" / "trends"
-        ))
+    def __init__(self, storage_dir: Path | None = None):
+        self._storage_dir = Path(
+            storage_dir
+            or (Path(__file__).parent.parent.parent / "cache" / "quality" / "trends")
+        )
         self._storage_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- 构建与持久化 ----
@@ -168,9 +169,13 @@ class TrendReporter:
         # 确保五组都存在
         filled = {
             "D0_engineering": trends.get("D0_engineering", {}),
-            "D1_reference": trends.get("D1_reference", {"scenarios": 0, "status": "not_available"}),
+            "D1_reference": trends.get(
+                "D1_reference", {"scenarios": 0, "status": "not_available"}
+            ),
             "D3_feedback": trends.get("D3_feedback", {"status": "not_available"}),
-            "D4_challenge": trends.get("D4_challenge", {"scenarios": 0, "status": "not_available"}),
+            "D4_challenge": trends.get(
+                "D4_challenge", {"scenarios": 0, "status": "not_available"}
+            ),
             "operations": trends.get("operations", {}),
         }
 
@@ -236,14 +241,26 @@ class TrendReporter:
         changes: list[MetricChange] = []
         regressions: list[MetricChange] = []
 
-        for group in ("D0_engineering", "D1_reference", "D3_feedback", "D4_challenge", "operations"):
+        for group in (
+            "D0_engineering",
+            "D1_reference",
+            "D3_feedback",
+            "D4_challenge",
+            "operations",
+        ):
             prev_group = previous.trends.get(group, {})
             curr_group = current.trends.get(group, {})
 
             # 跳过 not_available 的 D3
-            if isinstance(prev_group, dict) and prev_group.get("status") == "not_available":
+            if (
+                isinstance(prev_group, dict)
+                and prev_group.get("status") == "not_available"
+            ):
                 continue
-            if isinstance(curr_group, dict) and curr_group.get("status") == "not_available":
+            if (
+                isinstance(curr_group, dict)
+                and curr_group.get("status") == "not_available"
+            ):
                 continue
 
             if not isinstance(prev_group, dict) or not isinstance(curr_group, dict):
@@ -258,8 +275,12 @@ class TrendReporter:
                     continue
 
                 try:
-                    old_num = float(old_val) if not isinstance(old_val, bool) else old_val
-                    new_num = float(new_val) if not isinstance(new_val, bool) else new_val
+                    old_num = (
+                        float(old_val) if not isinstance(old_val, bool) else old_val
+                    )
+                    new_num = (
+                        float(new_val) if not isinstance(new_val, bool) else new_val
+                    )
                 except (TypeError, ValueError):
                     continue
 
@@ -268,14 +289,18 @@ class TrendReporter:
                 else:
                     higher_is_better = TREND_METRIC_DIRECTIONS.get(metric, True)
                     if isinstance(old_num, bool):
-                        direction = "improved" if new_num and not old_num else "regressed"
+                        direction = (
+                            "improved" if new_num and not old_num else "regressed"
+                        )
                     elif higher_is_better:
                         direction = "improved" if new_num > old_num else "regressed"
                     else:
                         direction = "improved" if new_num < old_num else "regressed"
 
                 delta_val = None
-                if isinstance(old_num, (int, float)) and isinstance(new_num, (int, float)):
+                if isinstance(old_num, (int, float)) and isinstance(
+                    new_num, (int, float)
+                ):
                     delta_val = round(new_num - old_num, 4)
 
                 change = MetricChange(
@@ -302,10 +327,10 @@ class TrendReporter:
     @staticmethod
     def render_monthly_report(
         report: VersionMetrics,
-        diff: Optional[TrendDiff] = None,
+        diff: TrendDiff | None = None,
         *,
-        known_issues: Optional[list[dict]] = None,
-        next_plans: Optional[list[str]] = None,
+        known_issues: list[dict] | None = None,
+        next_plans: list[str] | None = None,
     ) -> str:
         """生成 QUALITY_OPERATIONS.md §7 格式的月度质量报告（Markdown）。
 
@@ -322,7 +347,7 @@ class TrendReporter:
             f"# 月度质量报告 — {report.date[:7] if len(report.date) >= 7 else report.date}",
             "",
             "## 总体状态",
-            f"- 生产可用性: production-usable",
+            "- 生产可用性: production-usable",
         ]
 
         issues = known_issues or []
@@ -335,26 +360,32 @@ class TrendReporter:
             lines.append("")
             lines.append(f"## 版本对比 ({diff.baseline} → {diff.version})")
             for c in diff.changes:
-                icon = {"improved": "📈", "regressed": "📉", "neutral": "➡️"}.get(c.direction, "")
+                icon = {"improved": "📈", "regressed": "📉", "neutral": "➡️"}.get(
+                    c.direction, ""
+                )
                 delta_str = f" ({c.delta:+.4f})" if c.delta is not None else ""
-                lines.append(f"- {icon} {c.group}.{c.metric}: {c.old} → {c.new}{delta_str}")
+                lines.append(
+                    f"- {icon} {c.group}.{c.metric}: {c.old} → {c.new}{delta_str}"
+                )
 
         lines.append("")
         lines.append("## 用户反馈统计")
         ops = report.trends.get("operations", {})
         revision_rate = ops.get("user_revision_rate", "N/A")
-        lines.append(f"- 本月反馈数: N/A")
+        lines.append("- 本月反馈数: N/A")
         lines.append(f"- 修订率: {revision_rate}")
-        lines.append(f"- 主要投诉: N/A")
+        lines.append("- 主要投诉: N/A")
 
         if known_issues:
             lines.append("")
             lines.append("## 已知问题 Top 5")
             for i, issue in enumerate(known_issues[:5], 1):
-                lines.append(f"{i}. [{issue.get('severity', 'N/A').upper()}] "
-                             f"{issue.get('title', 'Unknown')} "
-                             f"— 影响范围 {issue.get('impact_range', '?')}, "
-                             f"严重度 {issue.get('user_severity', '?')}")
+                lines.append(
+                    f"{i}. [{issue.get('severity', 'N/A').upper()}] "
+                    f"{issue.get('title', 'Unknown')} "
+                    f"— 影响范围 {issue.get('impact_range', '?')}, "
+                    f"严重度 {issue.get('user_severity', '?')}"
+                )
 
         if next_plans:
             lines.append("")

@@ -4,7 +4,8 @@
 """
 
 import time
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 
 class ProgressManager:
@@ -26,7 +27,7 @@ class ProgressManager:
     def __init__(
         self,
         total_stages: int = 5,
-        callback: Optional[Callable] = None,
+        callback: Callable | None = None,
         use_tqdm: bool = True,
     ):
         self._total_stages = total_stages
@@ -34,9 +35,9 @@ class ProgressManager:
         self._use_tqdm = use_tqdm
 
         self._current_stage: str = ""
-        self._stage_progress: Dict[str, dict] = {}
+        self._stage_progress: dict[str, dict] = {}
         self._start_time = time.time()
-        self._stage_times: Dict[str, float] = {}
+        self._stage_times: dict[str, float] = {}
 
         # tqdm 实例
         self._pbar = None
@@ -86,7 +87,7 @@ class ProgressManager:
             )
 
     def report_progress(
-        self, current: int, total: int, extra: Optional[Dict[str, Any]] = None
+        self, current: int, total: int, extra: dict[str, Any] | None = None
     ) -> None:
         """报告绝对进度（不依赖内部计数器，直接推送到回调）
 
@@ -109,7 +110,7 @@ class ProgressManager:
                 }
             )
 
-    def update_stage(self, n: int = 1, extra: Optional[Dict[str, Any]] = None) -> None:
+    def update_stage(self, n: int = 1, extra: dict[str, Any] | None = None) -> None:
         """更新当前阶段的进度
 
         Args:
@@ -149,9 +150,7 @@ class ProgressManager:
         if self._current_stage not in self._stage_progress:
             return 0.0
 
-        elapsed = (
-            time.time() - self._stage_progress[self._current_stage]["start_time"]
-        )
+        elapsed = time.time() - self._stage_progress[self._current_stage]["start_time"]
         # 累加耗时：同一阶段多次调用时自动累加
         prev = self._stage_times.get(self._current_stage, 0.0)
         self._stage_times[self._current_stage] = prev + elapsed
@@ -165,7 +164,7 @@ class ProgressManager:
                 {
                     "type": "stage_finish",
                     "stage": self._current_stage,
-                    "elapsed_seconds": elapsed,        # 本次耗时（前端累加用）
+                    "elapsed_seconds": elapsed,  # 本次耗时（前端累加用）
                     "accumulated_seconds": prev + elapsed,  # 累计耗时（最终值）
                 }
             )

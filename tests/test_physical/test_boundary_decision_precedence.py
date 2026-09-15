@@ -9,8 +9,7 @@
     且不得跨越硬静音。
 """
 
-import numpy as np
-
+from vocal_subtitle.physical.allocator import WordAllocation
 from vocal_subtitle.physical.boundary_arbiter import BoundaryDecision
 from vocal_subtitle.physical.boundary_decision import (
     LARGE_SNAP_LIMIT,
@@ -21,7 +20,6 @@ from vocal_subtitle.physical.boundary_decision import (
     time_source_rank,
 )
 from vocal_subtitle.physical.ir import GlobalWord
-from vocal_subtitle.physical.allocator import WordAllocation
 from vocal_subtitle.physical.subtitle_bins import PhysicalSubtitleBin
 from vocal_subtitle.physical.timeline import PhysicalTimeline
 from vocal_subtitle.physical.word_alignment import align_words_to_physical
@@ -108,7 +106,9 @@ def test_high_confidence_boundary_within_120ms_is_accepted():
 
     assert result.accepted is True
     assert result.boundary_time == 1.10
-    assert any(item.get("reason") == "snap_policy_pass" for item in result.revision_trace)
+    assert any(
+        item.get("reason") == "snap_policy_pass" for item in result.revision_trace
+    )
 
 
 def test_medium_confidence_snap_up_to_200ms_is_accepted():
@@ -251,8 +251,7 @@ def test_alignment_stamps_word_time_source_and_runs_snap_policy():
     assert aligned.time_source == "whisperx_alignment"
     assert aligned.start_boundary_decision.time_source == "whisperx_alignment"
     trace_reasons = [
-        item.get("reason")
-        for item in aligned.start_boundary_decision.revision_trace
+        item.get("reason") for item in aligned.start_boundary_decision.revision_trace
     ]
     assert "snap_policy_pass" in trace_reasons
 

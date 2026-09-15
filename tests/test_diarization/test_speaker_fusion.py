@@ -4,8 +4,8 @@ import numpy as np
 
 from vocal_subtitle.asr.base import WordTimestamp
 from vocal_subtitle.config import PipelineConfig
-from vocal_subtitle.diarization.base import DiarizationResult, SpeakerTurn
 from vocal_subtitle.diarization import speaker_fusion
+from vocal_subtitle.diarization.base import DiarizationResult, SpeakerTurn
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 
 
@@ -45,7 +45,10 @@ def test_local_refinement_splits_one_subtitle_at_word_boundary():
     )
 
     result = speaker_fusion.run_speaker_fusion(
-        [event], audio, 16000, _config(expected=2),
+        [event],
+        audio,
+        16000,
+        _config(expected=2),
         embedding_engine=_FakeEmbedding(),
     )
 
@@ -70,7 +73,11 @@ def test_local_refinement_respects_minimum_part_duration():
     config.diarization.min_local_segment_seconds = 0.25
 
     result = speaker_fusion.run_speaker_fusion(
-        [event], audio, 16000, config, embedding_engine=_FakeEmbedding(),
+        [event],
+        audio,
+        16000,
+        config,
+        embedding_engine=_FakeEmbedding(),
     )
 
     assert result.local_split_count == 0
@@ -106,7 +113,11 @@ def test_global_turns_split_event_and_map_to_embedding_identity(monkeypatch):
     config.diarization.fusion_mode = "dual"
 
     result = speaker_fusion.run_speaker_fusion(
-        [event], audio, 16000, config, embedding_engine=_FakeEmbedding(),
+        [event],
+        audio,
+        16000,
+        config,
+        embedding_engine=_FakeEmbedding(),
     )
 
     assert result.backend == "fused"
@@ -138,7 +149,9 @@ def test_global_pass_uses_shared_default_model_cache(monkeypatch):
     config.speaker_embedding.cache_dir = ""
 
     result, model_ref, status = speaker_fusion._run_global_pass(
-        np.zeros(16000, dtype=np.float32), 16000, config,
+        np.zeros(16000, dtype=np.float32),
+        16000,
+        config,
     )
 
     assert result is not None
@@ -153,7 +166,10 @@ def test_missing_both_lines_keeps_unknown_without_alternation():
     events = [SubtitleEvent(1, 0.0, 1.0, "甲"), SubtitleEvent(2, 1.2, 2.0, "乙")]
 
     result = speaker_fusion.run_speaker_fusion(
-        events, np.zeros(32000, dtype=np.float32), 16000, config,
+        events,
+        np.zeros(32000, dtype=np.float32),
+        16000,
+        config,
     )
 
     assert result.status == "degraded"
@@ -170,7 +186,10 @@ def test_known_multi_speaker_count_does_not_split_identical_embeddings():
     ]
 
     result = speaker_fusion.run_speaker_fusion(
-        events, audio, 16000, _config(expected=2),
+        events,
+        audio,
+        16000,
+        _config(expected=2),
         embedding_engine=_FakeEmbedding(),
     )
 
@@ -192,7 +211,10 @@ def test_silent_embedding_windows_are_skipped():
     events = [SubtitleEvent(1, 0.0, 1.0, "静音")]
 
     result = speaker_fusion.run_speaker_fusion(
-        events, np.zeros(4 * 16000, dtype=np.float32), 16000, config,
+        events,
+        np.zeros(4 * 16000, dtype=np.float32),
+        16000,
+        config,
         embedding_engine=engine,
     )
 
@@ -202,12 +224,11 @@ def test_silent_embedding_windows_are_skipped():
 
 def test_fallback_cluster_assigns_speakers_when_embedding_unavailable():
     """嵌入引擎缺失（未装 speechbrain）时回退 MFCC+音高聚类，不再全部 unknown。"""
-    audio = (
-        0.3 * np.sin(2 * np.pi * 220.0 * np.arange(3 * 16000) / 16000)
-    ).astype(np.float32)
+    audio = (0.3 * np.sin(2 * np.pi * 220.0 * np.arange(3 * 16000) / 16000)).astype(
+        np.float32
+    )
     events = [
-        SubtitleEvent(i + 1, i * 1.0, i * 1.0 + 0.9, f"第{i + 1}句")
-        for i in range(3)
+        SubtitleEvent(i + 1, i * 1.0, i * 1.0 + 0.9, f"第{i + 1}句") for i in range(3)
     ]
     config = _config()
     config.diarization.distance_threshold = 0.5
@@ -215,8 +236,12 @@ def test_fallback_cluster_assigns_speakers_when_embedding_unavailable():
     config.diarization.max_speakers = 10
 
     result = speaker_fusion.run_speaker_fusion(
-        events, audio, 16000, config,
-        embedding_engine=None, language="zh",
+        events,
+        audio,
+        16000,
+        config,
+        embedding_engine=None,
+        language="zh",
     )
 
     assert result.backend == "agglomerative"
@@ -226,13 +251,17 @@ def test_fallback_cluster_assigns_speakers_when_embedding_unavailable():
 
 
 def test_fallback_label_defaults_to_english_without_language():
-    audio = (
-        0.3 * np.sin(2 * np.pi * 220.0 * np.arange(2 * 16000) / 16000)
-    ).astype(np.float32)
+    audio = (0.3 * np.sin(2 * np.pi * 220.0 * np.arange(2 * 16000) / 16000)).astype(
+        np.float32
+    )
     events = [SubtitleEvent(1, 0.0, 0.9, "hello")]
 
     result = speaker_fusion.run_speaker_fusion(
-        events, audio, 16000, _config(), embedding_engine=None,
+        events,
+        audio,
+        16000,
+        _config(),
+        embedding_engine=None,
     )
 
     assert result.backend == "agglomerative"
@@ -246,7 +275,10 @@ def test_fallback_skipped_on_silent_audio():
     config.speaker_embedding.enabled = False
 
     result = speaker_fusion.run_speaker_fusion(
-        events, np.zeros(32000, dtype=np.float32), 16000, config,
+        events,
+        np.zeros(32000, dtype=np.float32),
+        16000,
+        config,
     )
 
     assert result.backend == "unknown"
@@ -303,7 +335,11 @@ def test_speaker_evidence_conflict_falls_back_to_global(monkeypatch):
     config.diarization.fusion_mode = "dual"
 
     result = speaker_fusion.run_speaker_fusion(
-        events, audio, 16000, config, embedding_engine=_FakeEmbedding(),
+        events,
+        audio,
+        16000,
+        config,
+        embedding_engine=_FakeEmbedding(),
     )
 
     # 事件0: 全局说 0、嵌入说 1 → 冲突 → 回退全局线（旧行为是置空）
@@ -319,6 +355,7 @@ def test_speaker_evidence_conflict_falls_back_to_global(monkeypatch):
 
 
 # ---- auto 单说话人复核 (_verify_single_speaker_auto) ----
+
 
 def _turns_result(*speaker_ids):
     return DiarizationResult(
@@ -343,7 +380,8 @@ class _FakeVerifyEngine:
 def test_single_speaker_verify_adopts_multi_speaker_retry(monkeypatch):
     monkeypatch.setattr(speaker_fusion, "is_model_cached", lambda name, cache: True)
     monkeypatch.setattr(
-        speaker_fusion, "resolve_global_model_ref",
+        speaker_fusion,
+        "resolve_global_model_ref",
         lambda name: f"pyannote/speaker-diarization-{name}",
     )
     _FakeVerifyEngine.result = _turns_result(0, 1, 0, 1)
@@ -357,9 +395,13 @@ def test_single_speaker_verify_adopts_multi_speaker_retry(monkeypatch):
     first = _turns_result(0, 0, 0)
 
     result, model_ref = speaker_fusion._verify_single_speaker_auto(
-        np.zeros(16000, dtype=np.float32), 16000,
-        config.diarization, "pyannote/speaker-diarization-community-1",
-        first, token=None, cache_dir="cache/speaker_models",
+        np.zeros(16000, dtype=np.float32),
+        16000,
+        config.diarization,
+        "pyannote/speaker-diarization-community-1",
+        first,
+        token=None,
+        cache_dir="cache/speaker_models",
     )
 
     assert {turn.speaker_id for turn in result.turns} == {0, 1}
@@ -369,7 +411,8 @@ def test_single_speaker_verify_adopts_multi_speaker_retry(monkeypatch):
 def test_single_speaker_verify_keeps_first_when_retry_also_single(monkeypatch):
     monkeypatch.setattr(speaker_fusion, "is_model_cached", lambda name, cache: True)
     monkeypatch.setattr(
-        speaker_fusion, "resolve_global_model_ref",
+        speaker_fusion,
+        "resolve_global_model_ref",
         lambda name: f"pyannote/speaker-diarization-{name}",
     )
     _FakeVerifyEngine.result = _turns_result(0, 0)
@@ -383,9 +426,13 @@ def test_single_speaker_verify_keeps_first_when_retry_also_single(monkeypatch):
     first = _turns_result(0, 0, 0)
 
     result, model_ref = speaker_fusion._verify_single_speaker_auto(
-        np.zeros(16000, dtype=np.float32), 16000,
-        config.diarization, "pyannote/speaker-diarization-community-1",
-        first, token=None, cache_dir="cache/speaker_models",
+        np.zeros(16000, dtype=np.float32),
+        16000,
+        config.diarization,
+        "pyannote/speaker-diarization-community-1",
+        first,
+        token=None,
+        cache_dir="cache/speaker_models",
     )
 
     assert result is first
@@ -406,9 +453,13 @@ def test_single_speaker_verify_skipped_for_explicit_model(monkeypatch):
     first = _turns_result(0, 0, 0)
 
     result, model_ref = speaker_fusion._verify_single_speaker_auto(
-        np.zeros(16000, dtype=np.float32), 16000,
-        config.diarization, "pyannote/speaker-diarization-3.1",
-        first, token=None, cache_dir="cache/speaker_models",
+        np.zeros(16000, dtype=np.float32),
+        16000,
+        config.diarization,
+        "pyannote/speaker-diarization-3.1",
+        first,
+        token=None,
+        cache_dir="cache/speaker_models",
     )
 
     assert result is first

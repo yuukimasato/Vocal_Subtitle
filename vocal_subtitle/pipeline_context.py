@@ -14,10 +14,9 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
-
 
 # ------------------------------------------------------------------
 # 子结构
@@ -44,16 +43,16 @@ class ASRFragment:
     start: float
     end: float
     text: str
-    words: List[dict] = field(default_factory=list)
+    words: list[dict] = field(default_factory=list)
     confidence: float = 0.0
-    speaker_label: Optional[str] = None
-    gap_to_next: Optional[float] = None
-    gap_is_silent: Optional[bool] = None
+    speaker_label: str | None = None
+    gap_to_next: float | None = None
+    gap_is_silent: bool | None = None
     # 方案四精修标记
     start_refined: bool = False
     end_refined: bool = False
     # 方案五合并标记
-    merge_decision: Optional[str] = None  # "fast" | "llm" | "hard_split"
+    merge_decision: str | None = None  # "fast" | "llm" | "hard_split"
 
     @property
     def duration(self) -> float:
@@ -78,43 +77,43 @@ class PipelineContext:
     sample_rate: int = 16000
 
     # === 方案〇产出 ===
-    macro_chunks: List[Any] = field(default_factory=list)
+    macro_chunks: list[Any] = field(default_factory=list)
 
     # === 方案一+二产出 ===
-    silero_segments: List[Any] = field(default_factory=list)
-    ffmpeg_segments: List[Any] = field(default_factory=list)
-    fused_segments: List[Any] = field(default_factory=list)
+    silero_segments: list[Any] = field(default_factory=list)
+    ffmpeg_segments: list[Any] = field(default_factory=list)
+    fused_segments: list[Any] = field(default_factory=list)
 
     # === 方案三产出 ===
-    pre_split_segments: List[Any] = field(default_factory=list)
-    noise_profile: Optional[NoiseProfile] = None
+    pre_split_segments: list[Any] = field(default_factory=list)
+    noise_profile: NoiseProfile | None = None
 
     # === ASR 产出 ===
-    asr_fragments: List[ASRFragment] = field(default_factory=list)
+    asr_fragments: list[ASRFragment] = field(default_factory=list)
 
     # === 方案四产出 ===
-    refined_fragments: List[ASRFragment] = field(default_factory=list)
+    refined_fragments: list[ASRFragment] = field(default_factory=list)
 
     # === 方案五产出 ===
-    merged_events: List[Any] = field(default_factory=list)
+    merged_events: list[Any] = field(default_factory=list)
 
     # === 方案六产出 ===
-    seamless_events: List[Any] = field(default_factory=list)
+    seamless_events: list[Any] = field(default_factory=list)
 
     # === 方案七产出 ===
-    acoustic_skeleton: List[Tuple[float, float]] = field(default_factory=list)
+    acoustic_skeleton: list[tuple[float, float]] = field(default_factory=list)
     validation_report: dict = field(default_factory=dict)
 
     # === [层1] 说话人身份主干(early_turns,2026-09-11 定案)产出 ===
     # 全局 diarization 前置的全局时间轴 turns / 骨架×turns 原子跨度;
     # early_turns=false(或全局 pass 失败)时保持为空,行为不变。
-    early_turns: List[Any] = field(default_factory=list)
-    early_turn_spans: List[Any] = field(default_factory=list)
+    early_turns: list[Any] = field(default_factory=list)
+    early_turn_spans: list[Any] = field(default_factory=list)
     early_turns_window_offset: float = 0.0
 
     # === 元信息 ===
-    ffmpeg_unified_result: Optional[dict] = None
-    diagnostics: List[str] = field(default_factory=list)
+    ffmpeg_unified_result: dict | None = None
+    diagnostics: list[str] = field(default_factory=list)
 
     # ==================================================================
     # 便捷方法
@@ -136,6 +135,6 @@ class PipelineContext:
         """音频总时长（秒）"""
         return len(self.audio) / max(self.sample_rate, 1)
 
-    def get_health_score(self) -> Optional[float]:
+    def get_health_score(self) -> float | None:
         """获取声学校验健康度评分"""
         return self.validation_report.get("health_score")

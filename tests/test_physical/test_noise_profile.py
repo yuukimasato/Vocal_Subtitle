@@ -1,9 +1,6 @@
 """Tests for local noise profile estimation."""
 
-import copy
-
 import numpy as np
-import pytest
 
 from vocal_subtitle.physical.noise_profile import (
     LocalNoiseProfile,
@@ -16,7 +13,8 @@ class TestLocalNoiseProfile:
     def test_short_audio_returns_fallback(self):
         audio = np.zeros(8000, dtype=np.float32)  # 0.5s at 16kHz
         profile = estimate_noise_profile(
-            audio, 16000,
+            audio,
+            16000,
             fallback_db=-40.0,
             min_interval_duration=2.0,
         )
@@ -31,7 +29,8 @@ class TestLocalNoiseProfile:
         # 10s of near-silence at 16kHz
         audio = np.random.default_rng(42).normal(0, 0.001, 160000).astype(np.float32)
         profile = estimate_noise_profile(
-            audio, 16000,
+            audio,
+            16000,
             fallback_db=-35.0,
             min_interval_duration=0.5,
             min_stable_samples=2,
@@ -53,7 +52,8 @@ class TestLocalNoiseProfile:
         audio = np.concatenate([low, high])
 
         profile = estimate_noise_profile(
-            audio, sr,
+            audio,
+            sr,
             fallback_db=-35.0,
             min_interval_duration=0.5,
             min_stable_samples=2,
@@ -101,9 +101,10 @@ class TestLocalNoiseProfile:
         rng = np.random.default_rng(7)
         sr = 16000
         # Extremely loud signal should be clamped
-        audio = (rng.normal(0, 10.0, 5 * sr).astype(np.float32))
+        audio = rng.normal(0, 10.0, 5 * sr).astype(np.float32)
         profile = estimate_noise_profile(
-            audio, sr,
+            audio,
+            sr,
             rms_ceiling=0.3,
             min_interval_duration=0.5,
             min_stable_samples=2,
@@ -113,10 +114,9 @@ class TestLocalNoiseProfile:
     def test_noise_profile_is_immutable_evidence(self):
         """Noise profile results should not be modified after computation."""
         audio = np.zeros(160000, dtype=np.float32)
-        profile = estimate_noise_profile(audio, 16000, min_interval_duration=0.5, min_stable_samples=2)
-
-        # Snapshot before mutation attempt
-        intervals_before = copy.deepcopy(profile.intervals)
+        profile = estimate_noise_profile(
+            audio, 16000, min_interval_duration=0.5, min_stable_samples=2
+        )
 
         # Serialize and deserialize — the copy should be equal
         payload = profile.to_dict()

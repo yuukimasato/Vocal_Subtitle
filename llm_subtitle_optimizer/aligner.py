@@ -5,7 +5,7 @@
 """
 
 import difflib
-from typing import Iterator, List, Optional, Tuple
+from collections.abc import Iterator
 
 
 class SubtitleAligner:
@@ -27,8 +27,8 @@ class SubtitleAligner:
         self.line_numbers = [0, 0]
 
     def align_texts(
-        self, source_text: List[str], target_text: List[str]
-    ) -> Tuple[List[str], List[str]]:
+        self, source_text: list[str], target_text: list[str]
+    ) -> tuple[list[str], list[str]]:
         """对齐两个文本序列。
 
         Args:
@@ -41,9 +41,7 @@ class SubtitleAligner:
         diff_iterator = difflib.ndiff(source_text, target_text)
         return self._pair_lines(diff_iterator)
 
-    def _pair_lines(
-        self, diff_iterator: Iterator[str]
-    ) -> Tuple[List[str], List[str]]:
+    def _pair_lines(self, diff_iterator: Iterator[str]) -> tuple[list[str], list[str]]:
         source_lines = []
         target_lines = []
         flag = 0
@@ -68,13 +66,13 @@ class SubtitleAligner:
 
     def _line_iterator(
         self, diff_iterator: Iterator[str]
-    ) -> Iterator[Tuple[Optional[Tuple[int, str]], Optional[Tuple[int, str]], bool]]:
+    ) -> Iterator[tuple[tuple[int, str] | None, tuple[int, str] | None, bool]]:
         """迭代 diff 行，产出配对的行。
 
         Yields:
             (source_line, target_line, has_diff)
         """
-        lines: List[str] = []
+        lines: list[str] = []
         blank_lines_pending = 0
         blank_lines_to_yield = 0
 
@@ -151,10 +149,10 @@ class SubtitleAligner:
 
     def _format_line(
         self,
-        lines: List[str],
-        format_key: Optional[str],
+        lines: list[str],
+        format_key: str | None,
         side: int,
-    ) -> Tuple[int, str]:
+    ) -> tuple[int, str]:
         """格式化一行文本。
 
         Args:

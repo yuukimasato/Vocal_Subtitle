@@ -2,13 +2,13 @@ from pathlib import Path
 
 import numpy as np
 
-from vocal_subtitle.pipeline_context import PipelineContext
 from vocal_subtitle.physical.evidence_adapter import (
     adapt_ffmpeg_result,
     adapt_speech_segments,
     build_timeline_from_context,
 )
 from vocal_subtitle.physical.timeline import PhysicalTimeline
+from vocal_subtitle.pipeline_context import PipelineContext
 from vocal_subtitle.vad.base import SpeechSegment
 
 
@@ -18,14 +18,23 @@ def test_detector_sources_keep_provenance_and_overlap():
         [SpeechSegment(1.0, 2.0, confidence=0.8)], timeline, "silero"
     )
     ffmpeg = adapt_ffmpeg_result(
-        {"coarse_speech": [SpeechSegment(1.5, 2.5, confidence=0.9)], "skeleton": [(1.2, 2.7)]},
+        {
+            "coarse_speech": [SpeechSegment(1.5, 2.5, confidence=0.9)],
+            "skeleton": [(1.2, 2.7)],
+        },
         timeline,
     )
 
     assert [item.source for item in silero.evidence_spans] == ["silero"]
-    assert {item.source for item in ffmpeg.evidence_spans} == {"ffmpeg_coarse", "ffmpeg_skeleton"}
+    assert {item.source for item in ffmpeg.evidence_spans} == {
+        "ffmpeg_coarse",
+        "ffmpeg_skeleton",
+    }
     assert len(timeline.speech_evidence_spans) == 3
-    assert all(item.metadata["boundary_type"] == "detected_evidence" for item in timeline.speech_evidence_spans)
+    assert all(
+        item.metadata["boundary_type"] == "detected_evidence"
+        for item in timeline.speech_evidence_spans
+    )
 
 
 def test_offset_and_invalid_duration_are_explicitly_handled():

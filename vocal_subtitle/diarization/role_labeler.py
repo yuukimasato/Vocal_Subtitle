@@ -13,7 +13,7 @@
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +46,14 @@ class RoleLabeler:
 
     def label_roles(
         self,
-        transcript_by_speaker: Dict[int, List[str]],
+        transcript_by_speaker: dict[int, list[str]],
         model: str = "deepseek-v4-pro",
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
         temperature: float = 0.2,
-        context_hint: Optional[str] = None,
+        context_hint: str | None = None,
         language: str = "zh",
-    ) -> Dict[int, str]:
+    ) -> dict[int, str]:
         """为每个说话人标注角色/名字
 
         Args:
@@ -110,7 +110,7 @@ class RoleLabeler:
     # ------------------------------------------------------------------
 
     def _build_conversation_text(
-        self, transcript_by_speaker: Dict[int, List[str]]
+        self, transcript_by_speaker: dict[int, list[str]]
     ) -> str:
         """构建格式化的对话文本"""
         parts = []
@@ -129,9 +129,7 @@ class RoleLabeler:
         return "\n".join(parts).strip()
 
     @staticmethod
-    def _truncate_utterances(
-        utterances: List[str], max_chars: int = 3000
-    ) -> List[str]:
+    def _truncate_utterances(utterances: list[str], max_chars: int = 3000) -> list[str]:
         """截断过长的话语序列，保留开头和结尾"""
         total = 0
         kept = []
@@ -158,19 +156,16 @@ class RoleLabeler:
 
         return kept
 
-    def _get_system_prompt(
-        self, context_hint: Optional[str], language: str
-    ) -> str:
+    def _get_system_prompt(self, context_hint: str | None, language: str) -> str:
         """加载并填充 prompt 模板"""
         try:
             from llm_subtitle_optimizer.prompts import get_prompt
         except ImportError:
-            raise ImportError(
-                "llm_subtitle_optimizer is required for role labeling"
-            )
+            raise ImportError("llm_subtitle_optimizer is required for role labeling")
 
         hint = context_hint or (
-            "a multi-speaker conversation" if language == "zh"
+            "a multi-speaker conversation"
+            if language == "zh"
             else "a multi-speaker conversation"
         )
         return get_prompt(
@@ -184,17 +179,15 @@ class RoleLabeler:
         system_prompt: str,
         conversation: str,
         model: str,
-        base_url: Optional[str],
-        api_key: Optional[str],
+        base_url: str | None,
+        api_key: str | None,
         temperature: float,
     ) -> str:
         """调用 LLM API"""
         try:
             from llm_subtitle_optimizer.llm_client import call_llm
         except ImportError:
-            raise ImportError(
-                "llm_subtitle_optimizer is required for role labeling"
-            )
+            raise ImportError("llm_subtitle_optimizer is required for role labeling")
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -215,16 +208,18 @@ class RoleLabeler:
         return content
 
     def _parse_response(
-        self, response_text: str, transcript_by_speaker: Dict[int, List[str]]
-    ) -> Optional[Dict[str, Any]]:
+        self, response_text: str, transcript_by_speaker: dict[int, list[str]]
+    ) -> dict[str, Any] | None:
         """解析 LLM JSON 响应，失败则重试一次"""
 
-        def _try_parse(text: str) -> Optional[Dict[str, Any]]:
+        def _try_parse(text: str) -> dict[str, Any] | None:
             # 去除可能的 markdown 代码块
             text = text.strip()
             if text.startswith("```"):
                 lines = text.split("\n")
-                text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+                text = "\n".join(
+                    lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
+                )
                 text = text.strip()
 
             try:
@@ -235,6 +230,7 @@ class RoleLabeler:
             # 尝试用 json-repair 修复
             try:
                 from json_repair import repair_json
+
                 fixed = repair_json(text)
                 return json.loads(fixed)
             except Exception:
@@ -276,7 +272,7 @@ class RoleLabeler:
 
     @staticmethod
     def _validate_keys(
-        parsed: Dict[str, Any], transcript_by_speaker: Dict[int, List[str]]
+        parsed: dict[str, Any], transcript_by_speaker: dict[int, list[str]]
     ) -> bool:
         """验证 JSON 是否包含所有说话人的键"""
         expected_keys = {_int_to_label(i) for i in transcript_by_speaker.keys()}
@@ -289,9 +285,9 @@ class RoleLabeler:
 
     def _convert_labels(
         self,
-        parsed: Dict[str, Any],
-        transcript_by_speaker: Dict[int, List[str]],
-    ) -> Dict[int, str]:
+        parsed: dict[str, Any],
+        transcript_by_speaker: dict[int, list[str]],
+    ) -> dict[int, str]:
         """将 LLM 响应转换为 speaker_id → label 映射
 
         处理两种 JSON 格式:
@@ -326,8 +322,8 @@ class RoleLabeler:
         return result
 
     def _fallback_labels(
-        self, transcript_by_speaker: Dict[int, List[str]]
-    ) -> Dict[int, str]:
+        self, transcript_by_speaker: dict[int, list[str]]
+    ) -> dict[int, str]:
         """LLM 不可用时的兜底标签"""
         return {
             spk_id: self._generic_label(spk_id)

@@ -16,8 +16,7 @@
 """
 
 import logging
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -45,7 +44,7 @@ class DenoiseConfig:
     """
 
     enabled: bool = False
-    engine: str = "spectral_gate"             # "spectral_gate" | "rnnoise" | "deepfilternet"
+    engine: str = "spectral_gate"  # "spectral_gate" | "rnnoise" | "deepfilternet"
 
     # 谱减法参数
     spectral_noise_reduction_db: float = 12.0
@@ -53,7 +52,7 @@ class DenoiseConfig:
 
     # 突发噪音保护
     burst_noise_protection: bool = True
-    burst_noise_threshold_db: float = 15.0    # 超过局部 RMS 此值视为突发噪音
+    burst_noise_threshold_db: float = 15.0  # 超过局部 RMS 此值视为突发噪音
     burst_noise_max_duration_ms: int = 200
 
     # 输出
@@ -73,14 +72,14 @@ class AudioPreprocessor:
         cleaned_audio, report = preprocessor.process(audio, sample_rate)
     """
 
-    def __init__(self, config: Optional[DenoiseConfig] = None):
+    def __init__(self, config: DenoiseConfig | None = None):
         self.config = config or DenoiseConfig()
 
     def process(
         self,
         audio: np.ndarray,
         sample_rate: int,
-    ) -> Tuple[np.ndarray, Dict]:
+    ) -> tuple[np.ndarray, dict]:
         """对输入音频执行降噪
 
         Args:
@@ -91,13 +90,11 @@ class AudioPreprocessor:
             (denoised_audio, quality_report)
         """
         cfg = self.config
-        report: Dict = {
+        report: dict = {
             "denoise_applied": False,
             "engine": cfg.engine,
             "burst_events_detected": 0,
-            "input_rms": (
-                float(np.sqrt(np.mean(audio ** 2))) if audio.size else 0.0
-            ),
+            "input_rms": (float(np.sqrt(np.mean(audio**2))) if audio.size else 0.0),
         }
 
         if not cfg.enabled:
@@ -128,15 +125,20 @@ class AudioPreprocessor:
             return audio, report
 
         report["denoise_applied"] = True
-        report["output_rms"] = float(np.sqrt(np.mean(audio ** 2)))
+        report["output_rms"] = float(np.sqrt(np.mean(audio**2)))
         report["rms_reduction_db"] = round(
-            20 * np.log10(max(report["output_rms"], 1e-8)
-                          / max(report["input_rms"], 1e-8)), 1,
+            20
+            * np.log10(
+                max(report["output_rms"], 1e-8) / max(report["input_rms"], 1e-8)
+            ),
+            1,
         )
 
         logger.info(
             "Denoise complete: engine=%s, rms_reduction=%.1fdB, burst=%d",
-            cfg.engine, report["rms_reduction_db"], report["burst_events_detected"],
+            cfg.engine,
+            report["rms_reduction_db"],
+            report["burst_events_detected"],
         )
         return audio, report
 
@@ -148,7 +150,7 @@ class AudioPreprocessor:
         self,
         audio: np.ndarray,
         sample_rate: int,
-    ) -> Tuple[np.ndarray, int]:
+    ) -> tuple[np.ndarray, int]:
         """突发噪音检测与抑制
 
         检测能量在极短时间内（< max_duration）急剧上升后回落的事件，
@@ -172,8 +174,8 @@ class AudioPreprocessor:
         rms_vals = np.zeros(total_frames, dtype=np.float64)
         for i in range(total_frames):
             start = i * hop
-            frame = audio[start:start + frame_size]
-            rms_vals[i] = float(np.sqrt(np.mean(frame ** 2)))
+            frame = audio[start : start + frame_size]
+            rms_vals[i] = float(np.sqrt(np.mean(frame**2)))
 
         # 局部中位数 RMS（鲁棒估计，窗口 500ms）
         median_window = int(0.5 / (frame_ms / 1000))
@@ -196,9 +198,7 @@ class AudioPreprocessor:
 
         # 突发阈值 = 背景 RMS × 10^(threshold_db/20)
         burst_factor = 10 ** (cfg.burst_noise_threshold_db / 20)
-        max_burst_frames = int(
-            cfg.burst_noise_max_duration_ms / (frame_ms)
-        )
+        max_burst_frames = int(cfg.burst_noise_max_duration_ms / (frame_ms))
 
         # 检测并标记突发噪音帧
         burst_mask = np.zeros(total_frames, dtype=bool)
@@ -268,12 +268,16 @@ class AudioPreprocessor:
 
         # 取噪音前后的邻域（各 100ms）
         margin = min(1600, (end - start) // 2)  # ~100ms @ 16kHz
-        pre_samples = audio[max(0, start - margin):start]
-        post_samples = audio[end:min(len(audio), end + margin)]
+        pre_samples = audio[max(0, start - margin) : start]
+        post_samples = audio[end : min(len(audio), end + margin)]
 
         # 计算邻域 RMS
-        pre_rms = float(np.sqrt(np.mean(pre_samples ** 2))) if len(pre_samples) > 0 else 0.0
-        post_rms = float(np.sqrt(np.mean(post_samples ** 2))) if len(post_samples) > 0 else 0.0
+        pre_rms = (
+            float(np.sqrt(np.mean(pre_samples**2))) if len(pre_samples) > 0 else 0.0
+        )
+        post_rms = (
+            float(np.sqrt(np.mean(post_samples**2))) if len(post_samples) > 0 else 0.0
+        )
 
         if pre_rms == 0 and post_rms == 0:
             # 两边都是静音 → 直接置零
@@ -338,7 +342,8 @@ class AudioPreprocessor:
         try:
             reconstructed = self._compute_istft(
                 magnitude_reduced * np.exp(1j * phase),
-                n_fft, hop_length,
+                n_fft,
+                hop_length,
                 target_length=len(audio),
             )
         except Exception as e:
@@ -347,7 +352,7 @@ class AudioPreprocessor:
 
         # 确保输出与输入等长且归一化
         if len(reconstructed) > len(audio):
-            reconstructed = reconstructed[:len(audio)]
+            reconstructed = reconstructed[: len(audio)]
         elif len(reconstructed) < len(audio):
             reconstructed = np.pad(reconstructed, (0, len(audio) - len(reconstructed)))
 
@@ -375,7 +380,7 @@ class AudioPreprocessor:
 
         for i in range(num_frames):
             start = i * hop_length
-            frame = audio[start:start + n_fft] * window
+            frame = audio[start : start + n_fft] * window
             spectrum = np.fft.rfft(frame)
             stft[:, i] = spectrum
 
@@ -401,8 +406,8 @@ class AudioPreprocessor:
             frame = frame * window
 
             start = i * hop_length
-            output[start:start + n_fft] += frame
-            window_sum[start:start + n_fft] += window ** 2
+            output[start : start + n_fft] += frame
+            window_sum[start : start + n_fft] += window**2
 
         # 归一化（避免窗口重叠导致的幅度变化）
         mask = window_sum > 1e-8
@@ -430,7 +435,9 @@ class AudioPreprocessor:
 
         # RNNoise 需要 16kHz、16bit PCM、10ms 帧（160 samples）
         if sample_rate != 16000:
-            logger.warning("RNNoise requires 16kHz, got %dHz. Falling back.", sample_rate)
+            logger.warning(
+                "RNNoise requires 16kHz, got %dHz. Falling back.", sample_rate
+            )
             return self._apply_spectral_gate(audio, sample_rate)
 
         denoiser = rnnoise.RNNoise()
@@ -438,12 +445,14 @@ class AudioPreprocessor:
 
         output = np.zeros_like(audio)
         for i in range(0, len(audio) - frame_size + 1, frame_size):
-            frame = audio[i:i + frame_size]
+            frame = audio[i : i + frame_size]
             # 转为 16-bit PCM
             pcm_frame = (frame * 32767).astype(np.int16)
             denoised_pcm = denoiser.process_frame(pcm_frame.tobytes())
-            denoised = np.frombuffer(denoised_pcm, dtype=np.int16).astype(np.float32) / 32767.0
-            output[i:i + len(denoised)] = denoised[:len(denoised)]
+            denoised = (
+                np.frombuffer(denoised_pcm, dtype=np.int16).astype(np.float32) / 32767.0
+            )
+            output[i : i + len(denoised)] = denoised[: len(denoised)]
 
         return output
 

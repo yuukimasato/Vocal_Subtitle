@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
-
 from .merge_constraints import physical_owner_compatible_for_events
 
+
 def apply_frame_seamless_stitching(
-    events: List,
+    events: list,
     max_stitch_gap: float = 0.12,
-) -> List:
+) -> list:
     """帧级无缝衔接
 
     对非句尾字幕（不以 .!?。！？ 结尾），
@@ -46,8 +45,7 @@ def apply_frame_seamless_stitching(
             # 当前字幕的文本
             text = getattr(curr, "text", "")
             text_ends_with_terminal = (
-                text.rstrip()[-1] in sentence_endings
-                if text.rstrip() else False
+                text.rstrip()[-1] in sentence_endings if text.rstrip() else False
             )
 
             if not text_ends_with_terminal:
@@ -86,9 +84,9 @@ Output: {
 
 
 def apply_layout_suggestions(
-    events: List,
-    layout_suggestions: List[Dict],
-) -> List:
+    events: list,
+    layout_suggestions: list[dict],
+) -> list:
     """将 LLM 的断行建议应用到字幕事件
 
     对于 ASS 格式：使用 \\N 作为换行标记
@@ -140,8 +138,8 @@ def auto_line_break_fallback(
 
     # 渐进式搜索窗口：从 max_chars_per_line 逐步扩展到 2.5×
     # 偏好距离 max_chars_per_line 最近的自然断点
-    best_break = None   # (position, distance, priority)
-    best_priority = 3   # 1=标点, 2=连词, 3=无(降级到中点)
+    best_break = None  # (position, distance, priority)
+    best_priority = 3  # 1=标点, 2=连词, 3=无(降级到中点)
 
     for expand in [1.0, 1.5, 2.0, 2.5]:
         search_limit = int(max_chars_per_line * expand)
@@ -158,9 +156,21 @@ def auto_line_break_fallback(
         # 寻找自然断点（优先级 2：连词/介词前）
         if best_priority > 1:
             for word in [
-                " and ", " but ", " or ", " to ", " for ", " with ",
-                " 在", " 给", " 为", " 和", " 而且", " 但是",
-                " 所以", " 然后", " 因为",
+                " and ",
+                " but ",
+                " or ",
+                " to ",
+                " for ",
+                " with ",
+                " 在",
+                " 给",
+                " 为",
+                " 和",
+                " 而且",
+                " 但是",
+                " 所以",
+                " 然后",
+                " 因为",
             ]:
                 idx = text.rfind(word, 0, search_limit + len(word))
                 if idx > max_chars_per_line * 0.3:
@@ -183,17 +193,17 @@ def auto_line_break_fallback(
         for direction in [1, -1]:
             idx = mid + offset * direction
             if 0 <= idx < len(text) and text[idx] == " ":
-                return text[:idx] + "\\N" + text[idx + 1:]
+                return text[:idx] + "\\N" + text[idx + 1 :]
 
     # 完全无法断行：在中点强制断行
     return text[:mid] + "\\N" + text[mid:]
 
 
 def auto_layout_events(
-    events: List,
+    events: list,
     max_chars_cjk: int = 20,
     max_chars_latin: int = 40,
-) -> List:
+) -> list:
     """对字幕事件列表自动应用断行规则
 
     检查每条字幕，对超长的自动应用 auto_line_break_fallback。
@@ -216,9 +226,9 @@ def auto_layout_events(
             continue
 
         # 估算字符类型
-        cjk_count = sum(1 for c in text if "一" <= c <= "鿿"
-                        or "぀" <= c <= "ゟ"
-                        or "가" <= c <= "힯")
+        cjk_count = sum(
+            1 for c in text if "一" <= c <= "鿿" or "぀" <= c <= "ゟ" or "가" <= c <= "힯"
+        )
         latin_count = sum(1 for c in text if c.isascii() and c.isalpha())
 
         # 根据主导语言选择阈值

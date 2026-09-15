@@ -6,9 +6,6 @@ Covers:
 - release: ReleaseStatus, ReleaseManager, PreReleaseChecklist, RollbackStrategy
 """
 
-import json
-from pathlib import Path
-
 import pytest
 
 from vocal_subtitle.governance.engine_lifecycle import (
@@ -20,26 +17,21 @@ from vocal_subtitle.governance.engine_lifecycle import (
 )
 from vocal_subtitle.governance.experiment_registry import (
     ALLOWED_EXPERIMENT_TRANSITIONS,
-    ExperimentCategory,
-    ExperimentRecord,
     ExperimentRegistry,
     ExperimentStatus,
 )
 from vocal_subtitle.governance.release import (
     AlertReport,
-    KnownLimitation,
     ObservabilityMetrics,
     PreReleaseChecklist,
     ReleaseManager,
-    ReleaseRecord,
     ReleaseStatus,
-    RollbackStrategy,
 )
-
 
 # ---------------------------------------------------------------------------
 # EngineLifecycle enum and transitions
 # ---------------------------------------------------------------------------
+
 
 def test_engine_lifecycle_enum_values():
     assert EngineLifecycle.UNAVAILABLE.value == "unavailable"
@@ -71,20 +63,33 @@ def test_allowed_lifecycle_transitions_match_spec():
 
 
 def test_invalid_edges_absent():
-    assert EngineLifecycle.READY_DEFAULT not in ALLOWED_LIFECYCLE_TRANSITIONS[EngineLifecycle.UNAVAILABLE]
-    assert EngineLifecycle.READY_SHADOW not in ALLOWED_LIFECYCLE_TRANSITIONS[EngineLifecycle.UNAVAILABLE]
-    assert EngineLifecycle.READY_DEFAULT not in ALLOWED_LIFECYCLE_TRANSITIONS[EngineLifecycle.MODEL_MISSING]
+    assert (
+        EngineLifecycle.READY_DEFAULT
+        not in ALLOWED_LIFECYCLE_TRANSITIONS[EngineLifecycle.UNAVAILABLE]
+    )
+    assert (
+        EngineLifecycle.READY_SHADOW
+        not in ALLOWED_LIFECYCLE_TRANSITIONS[EngineLifecycle.UNAVAILABLE]
+    )
+    assert (
+        EngineLifecycle.READY_DEFAULT
+        not in ALLOWED_LIFECYCLE_TRANSITIONS[EngineLifecycle.MODEL_MISSING]
+    )
 
 
 # ---------------------------------------------------------------------------
 # EngineStatus
 # ---------------------------------------------------------------------------
 
+
 def test_engine_status_to_dict():
     status = EngineStatus(
-        engine="whisper-test", model="tiny",
-        status=EngineLifecycle.READY_SHADOW, device="cuda",
-        model_path="/models/tiny.ct2", model_hash="sha256:abcd",
+        engine="whisper-test",
+        model="tiny",
+        status=EngineLifecycle.READY_SHADOW,
+        device="cuda",
+        model_path="/models/tiny.ct2",
+        model_hash="sha256:abcd",
         language_support="zh, en",
     )
     d = status.to_dict()
@@ -105,16 +110,28 @@ def test_engine_status_defaults():
 # EngineRegistry
 # ---------------------------------------------------------------------------
 
+
 def test_registry_prepopulated_entries():
     registry = EngineRegistry()
     names = {e.engine for e in registry.list_all()}
     assert names == {
-        "uvr", "spleeter", "open-unmix",
-        "silero", "webrtc",
-        "faster-whisper", "funasr", "qwen-asr", "whisper.cpp",
-        "global-asr-evidence", "context-reasr", "qwen-review",
-        "forced-aligner", "sed", "semantic-review",
-        "speechbrain-ecapa", "pyannote",
+        "uvr",
+        "spleeter",
+        "open-unmix",
+        "silero",
+        "webrtc",
+        "faster-whisper",
+        "funasr",
+        "qwen-asr",
+        "whisper.cpp",
+        "global-asr-evidence",
+        "context-reasr",
+        "qwen-review",
+        "forced-aligner",
+        "sed",
+        "semantic-review",
+        "speechbrain-ecapa",
+        "pyannote",
     }
     assert len(registry.list_all()) == 17
 
@@ -134,24 +151,46 @@ def test_registry_get_engine():
 
 def test_registry_list_by_status():
     registry = EngineRegistry()
-    assert {e.engine for e in registry.list_by_status(EngineLifecycle.READY_DEFAULT)} == {
-        "uvr", "silero", "faster-whisper", "global-asr-evidence", "speechbrain-ecapa",
+    assert {
+        e.engine for e in registry.list_by_status(EngineLifecycle.READY_DEFAULT)
+    } == {
+        "uvr",
+        "silero",
+        "faster-whisper",
+        "global-asr-evidence",
+        "speechbrain-ecapa",
     }
-    assert {e.engine for e in registry.list_by_status(EngineLifecycle.READY_SHADOW)} == {
-        "open-unmix", "webrtc", "funasr", "qwen-asr", "whisper.cpp", "pyannote",
+    assert {
+        e.engine for e in registry.list_by_status(EngineLifecycle.READY_SHADOW)
+    } == {
+        "open-unmix",
+        "webrtc",
+        "funasr",
+        "qwen-asr",
+        "whisper.cpp",
+        "pyannote",
     }
     assert {e.engine for e in registry.list_by_status(EngineLifecycle.UNAVAILABLE)} == {
-        "spleeter", "context-reasr", "semantic-review",
+        "spleeter",
+        "context-reasr",
+        "semantic-review",
     }
     assert registry.list_by_status(EngineLifecycle.READY_REVIEW) == []
 
 
 def test_registry_list_by_category():
     registry = EngineRegistry()
-    assert {e.engine for e in registry.list_by_category("separation")} == {"uvr", "spleeter", "open-unmix"}
+    assert {e.engine for e in registry.list_by_category("separation")} == {
+        "uvr",
+        "spleeter",
+        "open-unmix",
+    }
     assert {e.engine for e in registry.list_by_category("vad")} == {"silero", "webrtc"}
     assert {e.engine for e in registry.list_by_category("asr")} == {
-        "faster-whisper", "funasr", "qwen-asr", "whisper.cpp",
+        "faster-whisper",
+        "funasr",
+        "qwen-asr",
+        "whisper.cpp",
     }
     assert registry.list_by_category("unknown") == []
 
@@ -167,6 +206,7 @@ def test_registry_to_dict():
 # ---------------------------------------------------------------------------
 # LifecycleManager
 # ---------------------------------------------------------------------------
+
 
 def test_promote_full_chain():
     mgr = LifecycleManager()
@@ -218,9 +258,14 @@ def test_transition_unknown_engine_raises():
 # ExperimentRegistry
 # ---------------------------------------------------------------------------
 
+
 def test_experiment_status_enum_values():
     assert [s.value for s in ExperimentStatus] == [
-        "proposed", "shadow", "review", "enabled", "rolled_back",
+        "proposed",
+        "shadow",
+        "review",
+        "enabled",
+        "rolled_back",
     ]
 
 
@@ -305,6 +350,7 @@ def test_experiment_list_by_status_and_category():
 # ReleaseManager
 # ---------------------------------------------------------------------------
 
+
 def test_release_status_values():
     assert ReleaseStatus.DEVELOPMENT.value == "development"
     assert ReleaseStatus.PRODUCTION_USABLE.value == "production-usable"
@@ -349,10 +395,14 @@ def test_observe_crash_rate_alert():
 
 
 def test_observe_multiple_alerts():
-    report = ReleaseManager.observe(ObservabilityMetrics(
-        crash_rate=0.12, degradation_rate=0.30,
-        export_failure_rate=0.10, high_severity_count=2,
-    ))
+    report = ReleaseManager.observe(
+        ObservabilityMetrics(
+            crash_rate=0.12,
+            degradation_rate=0.30,
+            export_failure_rate=0.10,
+            high_severity_count=2,
+        )
+    )
     assert len(report.alerts) >= 4
 
 
@@ -376,8 +426,11 @@ def test_known_limitations():
 
 def test_release_notes():
     notes = ReleaseManager.release_notes(
-        version="0.3.0", status=ReleaseStatus.PRODUCTION_USABLE,
-        changes={"新增": ["X"]}, upgrades=["迁移"], known_issues=["问题一"],
+        version="0.3.0",
+        status=ReleaseStatus.PRODUCTION_USABLE,
+        changes={"新增": ["X"]},
+        upgrades=["迁移"],
+        known_issues=["问题一"],
     )
     assert "# Vocal Subtitle v0.3.0" in notes
     assert "production-usable" in notes
@@ -388,14 +441,23 @@ def test_check_pre_release(tmp_path):
     checklist = mgr.check_pre_release("0.2.0")
     assert checklist.version == "0.2.0"
     assert set(checklist.sections) == {
-        "dependencies", "models", "tests", "d0_regression", "smoke", "export", "docs",
+        "dependencies",
+        "models",
+        "tests",
+        "d0_regression",
+        "smoke",
+        "export",
+        "docs",
     }
 
 
 def test_verify_item_persists(tmp_path):
     mgr = ReleaseManager(storage_dir=tmp_path)
     mgr.check_pre_release("0.2.0")
-    assert mgr.verify_item("0.2.0", "dependencies", "lock_files", True, note="locked") is True
+    assert (
+        mgr.verify_item("0.2.0", "dependencies", "lock_files", True, note="locked")
+        is True
+    )
     mgr2 = ReleaseManager(storage_dir=tmp_path)
     assert mgr2.verify_item("0.2.0", "models", "silero_vad", True) is True
 

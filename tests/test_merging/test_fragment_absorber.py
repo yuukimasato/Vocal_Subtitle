@@ -7,8 +7,8 @@
 
 import pytest
 
-from vocal_subtitle.merging.fragment_absorber import absorb_silent_fragments
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
+from vocal_subtitle.merging.fragment_absorber import absorb_silent_fragments
 
 
 class TestAbsorbSilentFragments:
@@ -18,7 +18,10 @@ class TestAbsorbSilentFragments:
         de = SubtitleEvent(index=1, start=12.516, end=12.876, text="得")
         leba = SubtitleEvent(index=2, start=12.876, end=13.096, text="了吧。")
         ni = SubtitleEvent(
-            index=3, start=13.988, end=16.42, text="你半路非要超近道走那条野路。",
+            index=3,
+            start=13.988,
+            end=16.42,
+            text="你半路非要超近道走那条野路。",
         )
         out = absorb_silent_fragments([de, leba, ni], skeleton)
         assert len(out) == 2
@@ -61,21 +64,25 @@ class TestReanchorWordTimestamps:
     def test_silent_word_shifted_to_onset(self):
         """骑在静音上的词起点重锚定到真实语音起点"""
         import numpy as np
+
+        from vocal_subtitle.asr.base import WordTimestamp
         from vocal_subtitle.merging.fragment_absorber import (
             reanchor_word_timestamps,
         )
-        from vocal_subtitle.asr.base import WordTimestamp
 
         sr = 16000
         audio = np.zeros(sr * 3, dtype=np.float32)
         t = np.arange(sr, dtype=np.float32) / sr
         # 语音：0-0.5 与 1.9-2.5；词"的"骑在 1.6-1.7 的静音上
-        audio[:int(0.5 * sr)] = np.sin(2 * np.pi * 440 * t[:int(0.5 * sr)]) * 0.5
-        audio[int(1.9 * sr):int(2.5 * sr)] = (
-            np.sin(2 * np.pi * 440 * t[:int(0.6 * sr)]) * 0.5
+        audio[: int(0.5 * sr)] = np.sin(2 * np.pi * 440 * t[: int(0.5 * sr)]) * 0.5
+        audio[int(1.9 * sr) : int(2.5 * sr)] = (
+            np.sin(2 * np.pi * 440 * t[: int(0.6 * sr)]) * 0.5
         )
         event = SubtitleEvent(
-            index=1, start=0.1, end=2.4, text="似的的十八盘",
+            index=1,
+            start=0.1,
+            end=2.4,
+            text="似的的十八盘",
             words=[
                 WordTimestamp("似", 0.2, 0.4),
                 WordTimestamp("的", 1.6, 1.7),
@@ -92,17 +99,21 @@ class TestReanchorWordTimestamps:
     def test_word_with_speech_energy_untouched(self):
         """词首有语音能量的词不动"""
         import numpy as np
+
+        from vocal_subtitle.asr.base import WordTimestamp
         from vocal_subtitle.merging.fragment_absorber import (
             reanchor_word_timestamps,
         )
-        from vocal_subtitle.asr.base import WordTimestamp
 
         sr = 16000
         audio = np.zeros(sr, dtype=np.float32)
         t = np.arange(sr, dtype=np.float32) / sr
-        audio[: sr] = np.sin(2 * np.pi * 440 * t) * 0.5
+        audio[:sr] = np.sin(2 * np.pi * 440 * t) * 0.5
         event = SubtitleEvent(
-            index=1, start=0.0, end=0.5, text="你好",
+            index=1,
+            start=0.0,
+            end=0.5,
+            text="你好",
             words=[WordTimestamp("你", 0.05, 0.3), WordTimestamp("好", 0.3, 0.5)],
         )
         shifted = reanchor_word_timestamps([event], audio, sr)

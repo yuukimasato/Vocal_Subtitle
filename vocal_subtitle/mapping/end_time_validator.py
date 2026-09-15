@@ -10,7 +10,6 @@
 """
 
 import logging
-from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ class EndTimePostValidator:
         self.min_duration_ms = min_duration_ms
         self.max_speaker_gap_sec = max_speaker_gap_sec
 
-    def validate(self, events: List) -> List:
+    def validate(self, events: list) -> list:
         """对字幕事件列表做结束时间校验和修正
 
         返回修正后的事件列表（可能修改 end 时间）。
@@ -57,7 +56,9 @@ class EndTimePostValidator:
             if evt.end <= evt.start:
                 logger.warning(
                     "EndTimeValidator: event #%d end(%.3f) <= start(%.3f), fixing",
-                    getattr(evt, "index", i), evt.end, evt.start,
+                    getattr(evt, "index", i),
+                    evt.end,
+                    evt.start,
                 )
                 evt.end = evt.start + 0.5  # 默认 500ms
                 fixed_count += 1
@@ -98,7 +99,8 @@ class EndTimePostValidator:
         if fixed_count > 0:
             logger.info(
                 "EndTimePostValidator: fixed %d/%d events",
-                fixed_count, len(events),
+                fixed_count,
+                len(events),
             )
 
         return events

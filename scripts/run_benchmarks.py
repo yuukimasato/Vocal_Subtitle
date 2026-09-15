@@ -36,8 +36,6 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-
 
 # ------------------------------------------------------------------
 # 数据模型
@@ -51,9 +49,9 @@ class SceneResult:
     scene: str
     success: bool
     output_dir: Path
-    auto_subtitle: Optional[Path] = None
-    comparison: Optional[dict] = None
-    diagnostic: Optional[dict] = None
+    auto_subtitle: Path | None = None
+    comparison: dict | None = None
+    diagnostic: dict | None = None
     elapsed_sec: float = 0.0
     error: str = ""
     asr_path: str = ""
@@ -68,7 +66,7 @@ class BenchmarkSummary:
     config_file: str = ""
     total_scenes: int = 0
     success_scenes: int = 0
-    results: List[SceneResult] = field(default_factory=list)
+    results: list[SceneResult] = field(default_factory=list)
 
     # 聚合指标（所有成功场景的平均值）
     avg_start_mae_ms: float = 0.0
@@ -78,7 +76,7 @@ class BenchmarkSummary:
 
     # rollout 状态
     rollout_eligible: bool = False
-    eligibility_reasons: List[str] = field(default_factory=list)
+    eligibility_reasons: list[str] = field(default_factory=list)
 
 
 # ------------------------------------------------------------------
@@ -86,7 +84,7 @@ class BenchmarkSummary:
 # ------------------------------------------------------------------
 
 
-def discover_scenes(benchmark_dir: Path) -> Dict[str, Path]:
+def discover_scenes(benchmark_dir: Path) -> dict[str, Path]:
     """扫描基准目录，发现所有场景
 
     每个场景目录需包含 audio.wav 或 vocals.wav，
@@ -129,8 +127,8 @@ def run_pipeline(
     output_path: Path,
     config_path: Path,
     skip_separation: bool = False,
-    profile: Optional[str] = None,
-) -> Tuple[bool, str]:
+    profile: str | None = None,
+) -> tuple[bool, str]:
     """运行 Pipeline 生成字幕
 
     Args:
@@ -146,11 +144,17 @@ def run_pipeline(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        sys.executable, "-m", "vocal_subtitle.cli", "process",
+        sys.executable,
+        "-m",
+        "vocal_subtitle.cli",
+        "process",
         str(audio_path),
-        "--output", str(output_path),
-        "--format", "ass",
-        "--config", str(config_path),
+        "--output",
+        str(output_path),
+        "--format",
+        "ass",
+        "--config",
+        str(config_path),
     ]
 
     if skip_separation:
@@ -167,7 +171,10 @@ def run_pipeline(
             timeout=900,  # 15分钟超时
         )
         if result.returncode != 0:
-            return False, f"Pipeline 退出码 {result.returncode}:\n{result.stderr[-1000:]}"
+            return (
+                False,
+                f"Pipeline 退出码 {result.returncode}:\n{result.stderr[-1000:]}",
+            )
         return True, ""
     except subprocess.TimeoutExpired:
         return False, "Pipeline 超时（15分钟）"
@@ -179,8 +186,8 @@ def run_comparison(
     auto_path: Path,
     gt_path: Path,
     output_path: Path,
-    health_score: Optional[float] = None,
-) -> Optional[dict]:
+    health_score: float | None = None,
+) -> dict | None:
     """运行时间轴对比分析
 
     Args:
@@ -194,14 +201,18 @@ def run_comparison(
     """
     compare_script = Path(__file__).parent / "compare_timeline.py"
     if not compare_script.exists():
-        print(f"    警告: compare_timeline.py 未找到，跳过对比")
+        print("    警告: compare_timeline.py 未找到，跳过对比")
         return None
 
     cmd = [
-        sys.executable, str(compare_script),
-        "--auto", str(auto_path),
-        "--ground-truth", str(gt_path),
-        "--output", str(output_path),
+        sys.executable,
+        str(compare_script),
+        "--auto",
+        str(auto_path),
+        "--ground-truth",
+        str(gt_path),
+        "--output",
+        str(output_path),
         "--quiet",
     ]
 
@@ -211,7 +222,7 @@ def run_comparison(
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode == 0 and output_path.exists():
-            with open(output_path, "r", encoding="utf-8") as f:
+            with open(output_path, encoding="utf-8") as f:
                 return json.load(f)
     except (subprocess.TimeoutExpired, Exception):
         pass
@@ -224,7 +235,7 @@ def run_comparison(
 # ------------------------------------------------------------------
 
 
-def aggregate_summary(results: List[SceneResult]) -> BenchmarkSummary:
+def aggregate_summary(results: list[SceneResult]) -> BenchmarkSummary:
     """汇总所有场景结果"""
     import datetime
 
@@ -238,19 +249,22 @@ def aggregate_summary(results: List[SceneResult]) -> BenchmarkSummary:
     success_results = [r for r in results if r.success and r.comparison]
 
     if success_results:
-        summary.avg_start_mae_ms = sum(
-            r.comparison["statistics"]["start"]["mae_ms"]
-            for r in success_results
-        ) / len(success_results) if success_results else 0
+        summary.avg_start_mae_ms = (
+            sum(r.comparison["statistics"]["start"]["mae_ms"] for r in success_results)
+            / len(success_results)
+            if success_results
+            else 0
+        )
 
-        summary.avg_end_mae_ms = sum(
-            r.comparison["statistics"]["end"]["mae_ms"]
-            for r in success_results
-        ) / len(success_results) if success_results else 0
+        summary.avg_end_mae_ms = (
+            sum(r.comparison["statistics"]["end"]["mae_ms"] for r in success_results)
+            / len(success_results)
+            if success_results
+            else 0
+        )
 
         health_scores = [
-            r.comparison.get("health_score", 0) or 0
-            for r in success_results
+            r.comparison.get("health_score", 0) or 0 for r in success_results
         ]
         summary.avg_health_score = (
             sum(health_scores) / len(health_scores) if health_scores else 0
@@ -286,12 +300,18 @@ def summary_to_dict(summary: BenchmarkSummary) -> dict:
                 "asr_path": r.asr_path,
                 "fallback_category": r.fallback_category,
                 "statistics": r.comparison.get("statistics") if r.comparison else None,
-                "health_score": r.comparison.get("health_score") if r.comparison else None,
-                "flagged_count": len(r.comparison.get("flagged_events", [])) if r.comparison else 0,
+                "health_score": r.comparison.get("health_score")
+                if r.comparison
+                else None,
+                "flagged_count": len(r.comparison.get("flagged_events", []))
+                if r.comparison
+                else 0,
                 "files": {
                     "subtitle": str(r.auto_subtitle) if r.auto_subtitle else None,
                     "comparison": str(r.output_dir / "comparison_report.json"),
-                    "diagnostic": str(r.output_dir / "diagnostic_report.json") if (r.output_dir / "diagnostic_report.json").exists() else None,
+                    "diagnostic": str(r.output_dir / "diagnostic_report.json")
+                    if (r.output_dir / "diagnostic_report.json").exists()
+                    else None,
                 },
             }
             for r in summary.results
@@ -301,10 +321,10 @@ def summary_to_dict(summary: BenchmarkSummary) -> dict:
 
 def evaluate_rollout_eligibility(
     scene_dirs: dict,
-    results: List[SceneResult],
+    results: list[SceneResult],
     summary: BenchmarkSummary,
     min_scenes: int = 3,
-    target_metrics: Optional[dict] = None,
+    target_metrics: dict | None = None,
 ) -> tuple:
     """Evaluate whether a benchmark rollout is eligible for publication.
 
@@ -332,9 +352,13 @@ def evaluate_rollout_eligibility(
         end_target = target_metrics.get("end_mae")
         start_target = target_metrics.get("start_mae")
         if end_target and summary.avg_end_mae_ms > end_target:
-            reasons.append(f"End MAE {summary.avg_end_mae_ms:.0f}ms 超过目标 {end_target}ms")
+            reasons.append(
+                f"End MAE {summary.avg_end_mae_ms:.0f}ms 超过目标 {end_target}ms"
+            )
         if start_target and summary.avg_start_mae_ms > start_target:
-            reasons.append(f"Start MAE {summary.avg_start_mae_ms:.0f}ms 超过目标 {start_target}ms")
+            reasons.append(
+                f"Start MAE {summary.avg_start_mae_ms:.0f}ms 超过目标 {start_target}ms"
+            )
 
     eligible = len(reasons) == 0
     return eligible, reasons
@@ -361,12 +385,16 @@ def print_summary(summary: BenchmarkSummary) -> None:
                 end_mae = r.comparison["statistics"]["end"]["mae_ms"]
                 start_mae = r.comparison["statistics"]["start"]["mae_ms"]
                 health = r.comparison.get("health_score", 0) or 0
-                print(f"  │ {scene:<24} │ {end_mae:>6.0f}ms │ {start_mae:>6.0f}ms │ {health:>5.1f}%   │")
+                print(
+                    f"  │ {scene:<24} │ {end_mae:>6.0f}ms │ {start_mae:>6.0f}ms │ {health:>5.1f}%   │"
+                )
             elif not r.success:
                 scene = r.scene[:24]
                 print(f"  │ {scene:<24} │ {'FAIL':>6} │ {'--':>6} │ {'--':>5}   │")
         print("  ├──────────────────────────┼──────────┼──────────┼──────────┤")
-        print(f"  │ {'平均':>24} │ {summary.avg_end_mae_ms:>6.0f}ms │ {summary.avg_start_mae_ms:>6.0f}ms │ {summary.avg_health_score:>5.1f}%   │")
+        print(
+            f"  │ {'平均':>24} │ {summary.avg_end_mae_ms:>6.0f}ms │ {summary.avg_start_mae_ms:>6.0f}ms │ {summary.avg_health_score:>5.1f}%   │"
+        )
         print("  └──────────────────────────┴──────────┴──────────┴──────────┘")
         print()
 
@@ -410,7 +438,9 @@ def check_metrics(summary: BenchmarkSummary, target_metrics: dict) -> dict:
             checks[metric] = {
                 "actual": round(actual, 1),
                 "target": target,
-                "pass": actual <= target if metric != "health_score" else actual >= target,
+                "pass": actual <= target
+                if metric != "health_score"
+                else actual >= target,
             }
 
     return checks
@@ -529,7 +559,7 @@ def main():
 
     # ---- 2. 逐场景测试 ----
     output_dir = Path(args.output_dir)
-    results: List[SceneResult] = []
+    results: list[SceneResult] = []
     total_start = time.time()
 
     for i, (scene_name, scene_dir) in enumerate(sorted(scenes.items()), 1):
@@ -538,7 +568,9 @@ def main():
 
         scene_output_dir = output_dir / scene_name
         scene_output_dir.mkdir(parents=True, exist_ok=True)
-        result = SceneResult(scene=scene_name, success=False, output_dir=scene_output_dir)
+        result = SceneResult(
+            scene=scene_name, success=False, output_dir=scene_output_dir
+        )
 
         # 选择输入音频
         vocals_path = scene_dir / "vocals.wav"
@@ -557,7 +589,9 @@ def main():
 
         # 运行 Pipeline
         success, error = run_pipeline(
-            input_audio, auto_subtitle, config_path,
+            input_audio,
+            auto_subtitle,
+            config_path,
             skip_separation=skip_sep,
             profile=args.profile,
         )
@@ -577,7 +611,9 @@ def main():
         # 运行对比分析
         comparison_path = scene_output_dir / "comparison_report.json"
         comparison = run_comparison(
-            auto_subtitle, gt_subtitle, comparison_path,
+            auto_subtitle,
+            gt_subtitle,
+            comparison_path,
             health_score=None,  # 声学校验健康度从诊断中提取
         )
 
@@ -586,16 +622,20 @@ def main():
             end_mae = comparison["statistics"]["end"]["mae_ms"]
             start_mae = comparison["statistics"]["start"]["mae_ms"]
             flagged = len(comparison.get("flagged_events", []))
-            print(f"  ✓ 对比完成: Start MAE={start_mae:.0f}ms, "
-                  f"End MAE={end_mae:.0f}ms, 标记={flagged}条")
+            print(
+                f"  ✓ 对比完成: Start MAE={start_mae:.0f}ms, "
+                f"End MAE={end_mae:.0f}ms, 标记={flagged}条"
+            )
 
         # 尝试加载诊断报告
         diag_path = scene_output_dir / "diagnostic_report.json"
         if diag_path.exists():
             try:
-                with open(diag_path, "r", encoding="utf-8") as f:
+                with open(diag_path, encoding="utf-8") as f:
                     result.diagnostic = json.load(f)
-                print(f"  ✓ 诊断报告: 健康度={result.diagnostic.get('health_score', 'N/A')}%")
+                print(
+                    f"  ✓ 诊断报告: 健康度={result.diagnostic.get('health_score', 'N/A')}%"
+                )
             except Exception:
                 pass
 
@@ -625,13 +665,14 @@ def main():
         }
         checks = check_metrics(summary, targets)
 
-        all_pass = True
         print()
         print("--- CI 指标检查 ---")
         for metric, check in checks.items():
             status = "✓" if check["pass"] else "✗"
-            print(f"  {status} {metric}: {check['actual']:.0f}ms "
-                  f"(目标: {check['target']:.0f}ms)")
+            print(
+                f"  {status} {metric}: {check['actual']:.0f}ms "
+                f"(目标: {check['target']:.0f}ms)"
+            )
 
         if not all(checks.values()):
             print()

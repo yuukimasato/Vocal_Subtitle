@@ -5,8 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
@@ -24,7 +23,7 @@ class EmbeddingEvidence:
     spans: list[tuple[float, float]] = field(default_factory=list)
     centroids: dict[int, np.ndarray] = field(default_factory=dict)
     model: str = ""
-    silhouette: Optional[float] = None
+    silhouette: float | None = None
     status: str = "unavailable"
 
 
@@ -33,7 +32,7 @@ _SPEAKER_LABEL_MAP = {"zh": "说话人", "ja": "話者", "ko": "화자"}
 _SPEAKER_LABEL_DEFAULT = "Speaker"
 
 
-def _speaker_label(language: Optional[str], speaker_id: int) -> str:
+def _speaker_label(language: str | None, speaker_id: int) -> str:
     """按语言生成说话人标签（"说话人A" / "Speaker A" / "話者A"）。"""
     letter = (
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[speaker_id]
@@ -59,7 +58,7 @@ def _fallback_cluster_labels(
     audio: np.ndarray,
     sample_rate: int,
     diar_cfg: Any,
-) -> Optional[dict]:
+) -> dict | None:
     """声学嵌入与全局分离均不可用时的轻量聚类回退。
 
     复用仓库内置的 MFCC+音高凝聚聚类（SpeakerDiarizer，仅依赖
@@ -74,8 +73,7 @@ def _fallback_cluster_labels(
         from .speaker_clusterer import SpeakerDiarizer
 
         segments = [
-            SimpleNamespace(start=event.start, end=event.end)
-            for event in events
+            SimpleNamespace(start=event.start, end=event.end) for event in events
         ]
         diarizer = SpeakerDiarizer(
             distance_threshold=getattr(diar_cfg, "distance_threshold", 0.5),
@@ -93,7 +91,9 @@ def _fallback_cluster_labels(
     if len(ids) != len(events):
         return None
     silhouette = getattr(diarizer, "last_silhouette_", None)
-    if len(set(ids)) > 1 and (silhouette is None or silhouette < _FALLBACK_MIN_SILHOUETTE):
+    if len(set(ids)) > 1 and (
+        silhouette is None or silhouette < _FALLBACK_MIN_SILHOUETTE
+    ):
         logger.info(
             "Fallback speaker clustering quality low (silhouette=%.3f) "
             "→ collapsing to single speaker",
@@ -102,7 +102,8 @@ def _fallback_cluster_labels(
         ids = [0] * len(ids)
     logger.info(
         "Fallback speaker clustering assigned %d events across %d speakers",
-        len(ids), len(set(ids)),
+        len(ids),
+        len(set(ids)),
     )
     return {index: int(sid) for index, sid in enumerate(ids)}
 
@@ -149,7 +150,9 @@ def _cosine_distance(left: np.ndarray, right: np.ndarray) -> float:
     return max(0.0, min(2.0, 1.0 - similarity))
 
 
-def _audio_slice(audio: np.ndarray, start: float, end: float, sample_rate: int) -> np.ndarray:
+def _audio_slice(
+    audio: np.ndarray, start: float, end: float, sample_rate: int
+) -> np.ndarray:
     start_sample = max(0, min(len(audio), int(start * sample_rate)))
     end_sample = max(start_sample, min(len(audio), int(end * sample_rate)))
     return np.asarray(audio[start_sample:end_sample], dtype=np.float32)
@@ -182,7 +185,9 @@ def _window_spans(duration: float) -> list[tuple[float, float]]:
     return list(dict.fromkeys(spans))
 
 
-def _nearest_centroid(feature: np.ndarray, centroids: dict[int, np.ndarray]) -> Optional[int]:
+def _nearest_centroid(
+    feature: np.ndarray, centroids: dict[int, np.ndarray]
+) -> int | None:
     if not centroids:
         return None
     return min(
@@ -207,9 +212,8 @@ def _extract_embedding_evidence(
     valid_spans: list[tuple[float, float]] = []
     for start, end in spans:
         snippet = _audio_slice(audio, start, end, sample_rate)
-        if (
-            len(snippet) < max(1, int(sample_rate * 0.15))
-            or not _has_audio_signal(snippet)
+        if len(snippet) < max(1, int(sample_rate * 0.15)) or not _has_audio_signal(
+            snippet
         ):
             continue
         try:
@@ -220,13 +224,19 @@ def _extract_embedding_evidence(
         except Exception as exc:
             logger.warning("Speaker embedding extraction failed: %s", exc)
             continue
-        if feature.size == 0 or not np.any(np.isfinite(feature)) or not np.any(np.abs(feature) > 1e-8):
+        if (
+            feature.size == 0
+            or not np.any(np.isfinite(feature))
+            or not np.any(np.abs(feature) > 1e-8)
+        ):
             continue
         features.append(np.nan_to_num(feature))
         valid_spans.append((start, end))
 
     if not features:
-        return EmbeddingEvidence(model=getattr(embedding_engine, "name", ""), status="failed")
+        return EmbeddingEvidence(
+            model=getattr(embedding_engine, "name", ""), status="failed"
+        )
 
     matrix = np.vstack(features)
     if matrix.ndim != 2 or matrix.shape[0] != len(valid_spans):
@@ -236,8 +246,7 @@ def _extract_embedding_evidence(
         )
     expected = getattr(diar_cfg, "expected_speakers", None)
     identical_embeddings = (
-        len(features) > 1
-        and float(np.max(np.ptp(matrix, axis=0))) <= 1e-8
+        len(features) > 1 and float(np.max(np.ptp(matrix, axis=0))) <= 1e-8
     )
     if expected is not None and int(expected) > 1 and identical_embeddings:
         # A known multi-speaker constraint must not manufacture clusters from
@@ -275,7 +284,9 @@ def _extract_embedding_evidence(
         silhouette = diarizer._evaluate_clustering(matrix, labels)
     except Exception as exc:
         logger.warning("Embedding clustering failed: %s", exc)
-        return EmbeddingEvidence(model=getattr(embedding_engine, "name", ""), status="failed")
+        return EmbeddingEvidence(
+            model=getattr(embedding_engine, "name", ""), status="failed"
+        )
 
     centroids = {}
     for label in sorted(set(labels.tolist())):
@@ -283,7 +294,9 @@ def _extract_embedding_evidence(
         if len(members):
             centroids[int(label)] = members.mean(axis=0)
     if not centroids:
-        return EmbeddingEvidence(model=getattr(embedding_engine, "name", ""), status="failed")
+        return EmbeddingEvidence(
+            model=getattr(embedding_engine, "name", ""), status="failed"
+        )
     event_labels: list[int] = []
     for event in events:
         best_index = max(
@@ -306,7 +319,7 @@ def _extract_embedding_evidence(
     )
 
 
-def _select_global_model(global_model: str, cache_dir: Optional[str]) -> Optional[str]:
+def _select_global_model(global_model: str, cache_dir: str | None) -> str | None:
     if global_model in ("none", "disabled"):
         return None
     if global_model == "auto":
@@ -317,18 +330,25 @@ def _select_global_model(global_model: str, cache_dir: Optional[str]) -> Optiona
     return resolve_global_model_ref(global_model)
 
 
-def _run_global_pass(audio: np.ndarray, sample_rate: int, config: Any) -> tuple[Optional[DiarizationResult], str, str]:
+def _run_global_pass(
+    audio: np.ndarray, sample_rate: int, config: Any
+) -> tuple[DiarizationResult | None, str, str]:
     diar_cfg = config.diarization
     if getattr(diar_cfg, "backend", "auto") == "legacy":
         return None, "", "disabled"
-    if getattr(diar_cfg, "diarization_scope", "hierarchical") not in ("global", "hierarchical"):
+    if getattr(diar_cfg, "diarization_scope", "hierarchical") not in (
+        "global",
+        "hierarchical",
+    ):
         return None, "", "disabled"
 
     emb_cfg = config.speaker_embedding
     # Keep model discovery and runtime loading on the same cache root. The
     # empty config value means the project's shared speaker-model directory.
     cache_dir = getattr(emb_cfg, "cache_dir", "") or str(DEFAULT_CACHE_DIR)
-    model_ref = _select_global_model(getattr(diar_cfg, "global_model", "auto"), cache_dir)
+    model_ref = _select_global_model(
+        getattr(diar_cfg, "global_model", "auto"), cache_dir
+    )
     if not model_ref:
         return None, "", "unavailable"
 
@@ -355,7 +375,11 @@ def _run_global_pass(audio: np.ndarray, sample_rate: int, config: Any) -> tuple[
         )
         if expected is None:
             result, model_ref = _verify_single_speaker_auto(
-                audio, sample_rate, diar_cfg, model_ref, result,
+                audio,
+                sample_rate,
+                diar_cfg,
+                model_ref,
+                result,
                 token=getattr(emb_cfg, "hf_token", "") or None,
                 cache_dir=cache_dir,
             )
@@ -389,14 +413,19 @@ def _verify_single_speaker_auto(
 
     for candidate in ("diarization-3.1", "community-1"):
         ref = resolve_global_model_ref(candidate)
-        if (not ref or ref == first_model_ref
-                or not is_model_cached(candidate, cache_dir)):
+        if (
+            not ref
+            or ref == first_model_ref
+            or not is_model_cached(candidate, cache_dir)
+        ):
             continue
         try:
             from .pyannote_engine import PyannoteDiarizationEngine
 
             engine = PyannoteDiarizationEngine(
-                model_ref=ref, token=token, cache_dir=cache_dir,
+                model_ref=ref,
+                token=token,
+                cache_dir=cache_dir,
             )
             verify_result = engine.diarize(
                 audio=audio,
@@ -418,14 +447,16 @@ def _verify_single_speaker_auto(
             logger.info(
                 "Single-speaker verify: %s found %d speakers "
                 "(first model %s reported 1) — adopting multi-speaker turns",
-                ref, len(verify_speakers), first_model_ref,
+                ref,
+                len(verify_speakers),
+                first_model_ref,
             )
             return verify_result, ref
         return result, first_model_ref
     return result, first_model_ref
 
 
-def _global_speaker_at(turns: list[SpeakerTurn], point: float) -> Optional[int]:
+def _global_speaker_at(turns: list[SpeakerTurn], point: float) -> int | None:
     active = [turn for turn in turns if turn.start <= point < turn.end]
     if not active:
         return None
@@ -433,7 +464,9 @@ def _global_speaker_at(turns: list[SpeakerTurn], point: float) -> Optional[int]:
 
 
 def _global_boundaries(event: Any, turns: list[SpeakerTurn]) -> list[float]:
-    relevant = [turn for turn in turns if turn.end > event.start and turn.start < event.end]
+    relevant = [
+        turn for turn in turns if turn.end > event.start and turn.start < event.end
+    ]
     speaker_ids = {turn.speaker_id for turn in relevant}
     if len(speaker_ids) < 2:
         return []
@@ -464,7 +497,10 @@ def _embedding_boundaries(
         right_end = min(float(event.end), boundary_end + context_seconds)
         left_audio = _audio_slice(audio, left_start, boundary_start, sample_rate)
         right_audio = _audio_slice(audio, boundary_end, right_end, sample_rate)
-        if len(left_audio) < sample_rate * 0.12 or len(right_audio) < sample_rate * 0.12:
+        if (
+            len(left_audio) < sample_rate * 0.12
+            or len(right_audio) < sample_rate * 0.12
+        ):
             continue
         try:
             left_feature = embedding_engine.extract_embedding(left_audio, sample_rate)
@@ -475,7 +511,9 @@ def _embedding_boundaries(
         gap_score = min(1.0, max(0.0, boundary_end - boundary_start) / 0.25)
         score = 0.8 * distance + 0.2 * gap_score
         if score >= threshold:
-            points.append(boundary_start if boundary_end > boundary_start else boundary_end)
+            points.append(
+                boundary_start if boundary_end > boundary_start else boundary_end
+            )
     return sorted(set(points))
 
 
@@ -484,7 +522,7 @@ def _local_global_boundaries(
     audio: np.ndarray,
     sample_rate: int,
     engine: Any,
-    expected_speakers: Optional[int],
+    expected_speakers: int | None,
     context_seconds: float,
 ) -> list[float]:
     if engine is None or len(event.words or []) < 2:
@@ -520,7 +558,7 @@ def _copy_event_part(
     start: float,
     end: float,
     index: int,
-    source_word_ids: Optional[list[str]] = None,
+    source_word_ids: list[str] | None = None,
 ) -> Any:
     part = copy.deepcopy(event)
     part.index = index
@@ -555,14 +593,26 @@ def _split_event(
         midpoint = (_word_start(word) + _word_end(word)) / 2.0
         group_index = min(
             len(groups) - 1,
-            max(0, next((index for index in range(len(boundaries) - 1) if midpoint < boundaries[index + 1]), len(groups) - 1)),
+            max(
+                0,
+                next(
+                    (
+                        index
+                        for index in range(len(boundaries) - 1)
+                        if midpoint < boundaries[index + 1]
+                    ),
+                    len(groups) - 1,
+                ),
+            ),
         )
         groups[group_index].append(word)
     groups = [group for group in groups if group]
     if len(groups) < 2:
         return [event]
     parts = []
-    original_positions = {id(word): position for position, word in enumerate(original_words)}
+    original_positions = {
+        id(word): position for position, word in enumerate(original_words)
+    }
     original_source_ids = list(getattr(event, "source_word_ids", []) or [])
     for index, group in enumerate(groups):
         start = max(float(event.start), _word_start(group[0]))
@@ -576,23 +626,31 @@ def _split_event(
             for word in group
             if id(word) in original_positions
         }
-        part_source_ids = [
-            source_id
-            for position, source_id in enumerate(original_source_ids)
-            if position in group_positions
-        ] if len(original_source_ids) == len(original_words) else []
-        parts.append(_copy_event_part(
-            event,
-            group,
-            start,
-            end,
-            event.index + index,
-            part_source_ids,
-        ))
+        part_source_ids = (
+            [
+                source_id
+                for position, source_id in enumerate(original_source_ids)
+                if position in group_positions
+            ]
+            if len(original_source_ids) == len(original_words)
+            else []
+        )
+        parts.append(
+            _copy_event_part(
+                event,
+                group,
+                start,
+                end,
+                event.index + index,
+                part_source_ids,
+            )
+        )
     return parts or [event]
 
 
-def _map_global_to_embedding(result: Optional[DiarizationResult], events: list[Any], labels: list[int]) -> dict[int, int]:
+def _map_global_to_embedding(
+    result: DiarizationResult | None, events: list[Any], labels: list[int]
+) -> dict[int, int]:
     if result is None or not labels:
         return {}
     scores: dict[tuple[int, int], float] = {}
@@ -600,7 +658,9 @@ def _map_global_to_embedding(result: Optional[DiarizationResult], events: list[A
         for turn in result.turns:
             overlap = max(0.0, min(event.end, turn.end) - max(event.start, turn.start))
             if overlap:
-                scores[(turn.speaker_id, label)] = scores.get((turn.speaker_id, label), 0.0) + overlap
+                scores[(turn.speaker_id, label)] = (
+                    scores.get((turn.speaker_id, label), 0.0) + overlap
+                )
     mapping: dict[int, int] = {}
     used_labels: set[int] = set()
     candidates = sorted(
@@ -627,7 +687,7 @@ def run_speaker_fusion(
     config: Any,
     *,
     embedding_engine: Any = None,
-    language: Optional[str] = None,
+    language: str | None = None,
 ) -> SpeakerFusionResult:
     """Run both speaker lines and return final events with provenance."""
     if not events or not getattr(config.diarization, "enabled", True):
@@ -635,14 +695,20 @@ def run_speaker_fusion(
 
     diar_cfg = config.diarization
     embedding = _extract_embedding_evidence(
-        events, audio, sample_rate, embedding_engine, diar_cfg,
+        events,
+        audio,
+        sample_rate,
+        embedding_engine,
+        diar_cfg,
     )
     fusion_mode = getattr(diar_cfg, "fusion_mode", "auto")
     if fusion_mode == "embedding":
         global_result, global_model_ref, global_status = None, "", "disabled"
     else:
         global_result, global_model_ref, global_status = _run_global_pass(
-            audio, sample_rate, config,
+            audio,
+            sample_rate,
+            config,
         )
     use_global = global_result is not None
     if getattr(diar_cfg, "fusion_mode", "auto") == "dual" and global_result is None:
@@ -652,14 +718,21 @@ def run_speaker_fusion(
     # 退回内置 MFCC+音高凝聚聚类，至少给出粗粒度的说话人区分。
     # 仅在引擎根本不可用（unavailable）时触发；引擎存在但提取失败
     # （failed）说明音频本身有问题，保持 unknown 更诚实。
-    fallback_labels: Optional[dict] = None
+    fallback_labels: dict | None = None
     if embedding.status == "unavailable" and not use_global:
         fallback_labels = _fallback_cluster_labels(
-            events, audio, sample_rate, diar_cfg,
+            events,
+            audio,
+            sample_rate,
+            diar_cfg,
         )
 
-    global_turns = list(global_result.exclusive_turns or global_result.turns) if use_global else []
-    global_map = _map_global_to_embedding(global_result if use_global else None, events, embedding.labels)
+    global_turns = (
+        list(global_result.exclusive_turns or global_result.turns) if use_global else []
+    )
+    global_map = _map_global_to_embedding(
+        global_result if use_global else None, events, embedding.labels
+    )
     global_engine = None
     if use_global and getattr(diar_cfg, "local_refinement", "embedding") == "full":
         try:
@@ -668,7 +741,8 @@ def run_speaker_fusion(
             global_engine = PyannoteDiarizationEngine(
                 model_ref=global_model_ref,
                 token=getattr(config.speaker_embedding, "hf_token", "") or None,
-                cache_dir=getattr(config.speaker_embedding, "cache_dir", "") or str(DEFAULT_CACHE_DIR),
+                cache_dir=getattr(config.speaker_embedding, "cache_dir", "")
+                or str(DEFAULT_CACHE_DIR),
             )
             global_engine.load_model()
         except Exception:
@@ -685,23 +759,27 @@ def run_speaker_fusion(
     for event_index, event in enumerate(events):
         points = _global_boundaries(event, global_turns)
         if local_mode in ("embedding", "full"):
-            points.extend(_embedding_boundaries(
-                event,
-                audio,
-                sample_rate,
-                embedding_engine,
-                getattr(diar_cfg, "local_context_seconds", 0.6),
-                getattr(diar_cfg, "min_change_confidence", 0.70),
-            ))
+            points.extend(
+                _embedding_boundaries(
+                    event,
+                    audio,
+                    sample_rate,
+                    embedding_engine,
+                    getattr(diar_cfg, "local_context_seconds", 0.6),
+                    getattr(diar_cfg, "min_change_confidence", 0.70),
+                )
+            )
         if local_mode == "full":
-            points.extend(_local_global_boundaries(
-                event,
-                audio,
-                sample_rate,
-                global_engine,
-                expected,
-                getattr(diar_cfg, "local_context_seconds", 0.6),
-            ))
+            points.extend(
+                _local_global_boundaries(
+                    event,
+                    audio,
+                    sample_rate,
+                    global_engine,
+                    expected,
+                    getattr(diar_cfg, "local_context_seconds", 0.6),
+                )
+            )
         parts = _split_event(
             event,
             points,
@@ -718,15 +796,26 @@ def run_speaker_fusion(
                 try:
                     snippet = _audio_slice(
                         audio,
-                        max(0.0, part.start - getattr(diar_cfg, "local_context_seconds", 0.6)),
-                        min(len(audio) / max(sample_rate, 1), part.end + getattr(diar_cfg, "local_context_seconds", 0.6)),
+                        max(
+                            0.0,
+                            part.start
+                            - getattr(diar_cfg, "local_context_seconds", 0.6),
+                        ),
+                        min(
+                            len(audio) / max(sample_rate, 1),
+                            part.end + getattr(diar_cfg, "local_context_seconds", 0.6),
+                        ),
                         sample_rate,
                     )
                     feature = embedding_engine.extract_embedding(snippet, sample_rate)
                     embedding_id = _nearest_centroid(feature, embedding.centroids)
                 except Exception:
                     embedding_id = None
-            if embedding_id is None and embedding.status == "ok" and event_index < len(embedding.labels):
+            if (
+                embedding_id is None
+                and embedding.status == "ok"
+                and event_index < len(embedding.labels)
+            ):
                 embedding_id = embedding.labels[event_index]
 
             if global_id is not None and embedding_id is not None:
@@ -776,7 +865,9 @@ def run_speaker_fusion(
             final_events.append(part)
 
     # Compact IDs and ensure labels remain stable after local splitting.
-    unique = sorted({event.speaker_id for event in final_events if event.speaker_id is not None})
+    unique = sorted(
+        {event.speaker_id for event in final_events if event.speaker_id is not None}
+    )
     remap = {old: new for new, old in enumerate(unique)}
     for index, event in enumerate(final_events, start=1):
         if event.speaker_id is not None:
@@ -797,7 +888,11 @@ def run_speaker_fusion(
         backend = "agglomerative"
     else:
         backend = "unknown"
-    status = "ok" if final_events and any(e.speaker_id is not None for e in final_events) else "degraded"
+    status = (
+        "ok"
+        if final_events and any(e.speaker_id is not None for e in final_events)
+        else "degraded"
+    )
     # 回退线已经给出说话人时，嵌入线缺失不再把整体状态压回 degraded
     if global_status in ("failed", "degraded") or (
         embedding.status in ("failed", "unavailable") and fallback_labels is None

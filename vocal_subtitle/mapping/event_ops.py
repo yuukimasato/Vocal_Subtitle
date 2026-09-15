@@ -7,8 +7,8 @@ without losing physical provenance or speaker metadata.
 from __future__ import annotations
 
 import copy
-import uuid
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from .time_mapper import SubtitleEvent
 
@@ -19,7 +19,7 @@ def clone_event(event: SubtitleEvent, **changes) -> SubtitleEvent:
     All mutable fields (words, physical_spans, source_word_ids, etc.)
     are deep-copied so the clone is independent of the original.
     """
-    fields: Dict[str, Any] = {
+    fields: dict[str, Any] = {
         "index": event.index,
         "start": event.start,
         "end": event.end,
@@ -78,10 +78,18 @@ def shift_event(event: SubtitleEvent, offset: float) -> SubtitleEvent:
         event,
         start=event.start + offset,
         end=event.end + offset,
-        physical_start=event.physical_start + offset if event.physical_start is not None else None,
-        physical_end=event.physical_end + offset if event.physical_end is not None else None,
-        physical_bin_start=event.physical_bin_start + offset if event.physical_bin_start is not None else None,
-        physical_bin_end=event.physical_bin_end + offset if event.physical_bin_end is not None else None,
+        physical_start=event.physical_start + offset
+        if event.physical_start is not None
+        else None,
+        physical_end=event.physical_end + offset
+        if event.physical_end is not None
+        else None,
+        physical_bin_start=event.physical_bin_start + offset
+        if event.physical_bin_start is not None
+        else None,
+        physical_bin_end=event.physical_bin_end + offset
+        if event.physical_bin_end is not None
+        else None,
         physical_spans=new_physical_spans,
     )
 
@@ -91,7 +99,7 @@ def can_merge_events(
     *,
     max_gap: float = 0.12,
     max_combined_duration: float = 5.0,
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """Check whether a group of events can be safely merged.
 
     Refuses merges that would:
@@ -147,17 +155,20 @@ def can_merge_events(
     # Duration check
     combined_duration = ordered[-1].end - ordered[0].start
     if combined_duration > max_combined_duration:
-        return False, f"combined duration {combined_duration:.1f}s exceeds max {max_combined_duration:.1f}s"
+        return (
+            False,
+            f"combined duration {combined_duration:.1f}s exceeds max {max_combined_duration:.1f}s",
+        )
 
     return True, None
 
 
 def merge_event_group(
     events: Sequence[SubtitleEvent],
-    text: Optional[str] = None,
+    text: str | None = None,
     reason: str = "merge",
     *,
-    new_index: Optional[int] = None,
+    new_index: int | None = None,
 ) -> SubtitleEvent:
     """Merge a group of events into one, preserving provenance.
 
@@ -200,30 +211,39 @@ def merge_event_group(
     merged_trace = []
     for e in ordered:
         merged_trace.extend(copy.deepcopy(e.revision_trace))
-    merged_trace.append({
-        "op": "merge",
-        "stage": "subtitle_builder_merge",
-        "reason": reason,
-        "merged_indices": [e.index for e in ordered],
-        "event_ids": [_event_id(e) for e in ordered],
-        "physical_owner": {
-            "region_ids": list(dict.fromkeys(
-                e.physical_region_id for e in ordered if e.physical_region_id
-            )),
-            "bin_ids": list(dict.fromkeys(
-                e.physical_bin_id for e in ordered if e.physical_bin_id
-            )),
-            "speaker_ids": list(dict.fromkeys(
-                e.speaker_id for e in ordered if e.speaker_id is not None
-            )),
-        },
-        "merged_texts": [e.text for e in ordered],
-    })
+    merged_trace.append(
+        {
+            "op": "merge",
+            "stage": "subtitle_builder_merge",
+            "reason": reason,
+            "merged_indices": [e.index for e in ordered],
+            "event_ids": [_event_id(e) for e in ordered],
+            "physical_owner": {
+                "region_ids": list(
+                    dict.fromkeys(
+                        e.physical_region_id for e in ordered if e.physical_region_id
+                    )
+                ),
+                "bin_ids": list(
+                    dict.fromkeys(
+                        e.physical_bin_id for e in ordered if e.physical_bin_id
+                    )
+                ),
+                "speaker_ids": list(
+                    dict.fromkeys(
+                        e.speaker_id for e in ordered if e.speaker_id is not None
+                    )
+                ),
+            },
+            "merged_texts": [e.text for e in ordered],
+        }
+    )
 
     # Determine speaker: use confirmed if present; prefer majority otherwise
     speakers = [e.speaker_id for e in ordered if e.speaker_id is not None]
     confirmed = [
-        e for e in ordered
+        e
+        for e in ordered
         if e.speaker_id is not None and e.speaker_status == "confirmed"
     ]
     if confirmed:
@@ -232,15 +252,21 @@ def merge_event_group(
         speaker_source = confirmed[0].speaker_source
     elif speakers:
         speaker_id = max(set(speakers), key=speakers.count)
-        speaker_status = ordered[0].speaker_status if ordered[0].speaker_status else "unknown"
-        speaker_source = ordered[0].speaker_source if ordered[0].speaker_source else "unknown"
+        speaker_status = (
+            ordered[0].speaker_status if ordered[0].speaker_status else "unknown"
+        )
+        speaker_source = (
+            ordered[0].speaker_source if ordered[0].speaker_source else "unknown"
+        )
     else:
         speaker_id = None
         speaker_status = "unknown"
         speaker_source = "unknown"
 
     # Physical range union
-    physical_starts = [e.physical_start for e in ordered if e.physical_start is not None]
+    physical_starts = [
+        e.physical_start for e in ordered if e.physical_start is not None
+    ]
     physical_ends = [e.physical_end for e in ordered if e.physical_end is not None]
     physical_start = min(physical_starts) if physical_starts else None
     physical_end = max(physical_ends) if physical_ends else None
@@ -254,11 +280,19 @@ def merge_event_group(
         for word in event.words:
             copied = copy.copy(word)
             if isinstance(copied, dict):
-                copied["start"] = float(copied.get("start", 0.0)) + event.start - event_start
-                copied["end"] = float(copied.get("end", 0.0)) + event.start - event_start
+                copied["start"] = (
+                    float(copied.get("start", 0.0)) + event.start - event_start
+                )
+                copied["end"] = (
+                    float(copied.get("end", 0.0)) + event.start - event_start
+                )
             else:
-                copied.start = float(getattr(copied, "start", 0.0)) + event.start - event_start
-                copied.end = float(getattr(copied, "end", 0.0)) + event.start - event_start
+                copied.start = (
+                    float(getattr(copied, "start", 0.0)) + event.start - event_start
+                )
+                copied.end = (
+                    float(getattr(copied, "end", 0.0)) + event.start - event_start
+                )
             merged_words.append(copied)
 
     return SubtitleEvent(
@@ -279,7 +313,9 @@ def merge_event_group(
         physical_region_id=ordered[0].physical_region_id,
         physical_bin_id=ordered[0].physical_bin_id,
         physical_bin_start=ordered[0].physical_bin_start,
-        physical_bin_end=ordered[-1].physical_bin_end if ordered[-1].physical_bin_end is not None else ordered[-1].physical_bin_end,
+        physical_bin_end=ordered[-1].physical_bin_end
+        if ordered[-1].physical_bin_end is not None
+        else ordered[-1].physical_bin_end,
         time_source=ordered[0].time_source,
         hard_split_before=ordered[0].hard_split_before,
         speaker_status=speaker_status,
@@ -297,9 +333,9 @@ def merge_event_group(
 
 def split_event_by_word_ranges(
     event: SubtitleEvent,
-    ranges: List[tuple[int, int]],
+    ranges: list[tuple[int, int]],
     reason: str = "split",
-) -> List[SubtitleEvent]:
+) -> list[SubtitleEvent]:
     """Split an event into multiple events based on word index ranges.
 
     Each range is (start_word_idx, end_word_idx) where end_word_idx is exclusive.
@@ -322,18 +358,22 @@ def split_event_by_word_ranges(
         # No word-level data: split by time proportion
         total_duration = event.end - event.start
         if total_duration <= 0:
-            return [clone_event(event, index=event.index + i) for i in range(len(ranges))]
+            return [
+                clone_event(event, index=event.index + i) for i in range(len(ranges))
+            ]
 
         results = []
         for i, (fraction_start, fraction_end) in enumerate(ranges):
             clone = clone_event(event, index=event.index + i)
             clone.start = event.start + fraction_start * total_duration
             clone.end = event.start + fraction_end * total_duration
-            clone.revision_trace.append({
-                "op": "split",
-                "reason": reason,
-                "range": [fraction_start, fraction_end],
-            })
+            clone.revision_trace.append(
+                {
+                    "op": "split",
+                    "reason": reason,
+                    "range": [fraction_start, fraction_end],
+                }
+            )
             results.append(clone)
         return results
 
@@ -354,7 +394,10 @@ def split_event_by_word_ranges(
         # Partition source word IDs proportionally
         total_words = len(words) if words else 1
         source_start = max(0, int(len(event.source_word_ids) * w_start / total_words))
-        source_end = min(len(event.source_word_ids), int(len(event.source_word_ids) * w_end / total_words) + 1)
+        source_end = min(
+            len(event.source_word_ids),
+            int(len(event.source_word_ids) * w_end / total_words) + 1,
+        )
         sub_source_ids = event.source_word_ids[source_start:source_end]
 
         trace_entry = {
@@ -364,36 +407,38 @@ def split_event_by_word_ranges(
         }
         new_trace = list(event.revision_trace) + [trace_entry]
 
-        results.append(SubtitleEvent(
-            index=event.index + i,
-            start=new_start,
-            end=new_end,
-            text=new_text,
-            words=copy.deepcopy(sub_words),
-            original_text=event.original_text,
-            speaker_id=event.speaker_id,
-            speaker_label=event.speaker_label,
-            physical_start=new_start,
-            physical_end=new_end,
-            physical_spans=copy.deepcopy(event.physical_spans),
-            source_word_ids=sub_source_ids,
-            logical_sentence_id=event.logical_sentence_id,
-            alignment_warning=event.alignment_warning,
-            physical_region_id=event.physical_region_id,
-            physical_bin_id=event.physical_bin_id,
-            physical_bin_start=event.physical_bin_start,
-            physical_bin_end=event.physical_bin_end,
-            time_source=event.time_source,
-            hard_split_before=False,
-            speaker_status=event.speaker_status,
-            speaker_source=event.speaker_source,
-            speaker_repair_reason="",
-            asr_text=event.asr_text,
-            genuine_overlap=event.genuine_overlap,
-            overlap_group_id=event.overlap_group_id,
-            overlap_tracks=copy.deepcopy(event.overlap_tracks),
-            revision_trace=new_trace,
-        ))
+        results.append(
+            SubtitleEvent(
+                index=event.index + i,
+                start=new_start,
+                end=new_end,
+                text=new_text,
+                words=copy.deepcopy(sub_words),
+                original_text=event.original_text,
+                speaker_id=event.speaker_id,
+                speaker_label=event.speaker_label,
+                physical_start=new_start,
+                physical_end=new_end,
+                physical_spans=copy.deepcopy(event.physical_spans),
+                source_word_ids=sub_source_ids,
+                logical_sentence_id=event.logical_sentence_id,
+                alignment_warning=event.alignment_warning,
+                physical_region_id=event.physical_region_id,
+                physical_bin_id=event.physical_bin_id,
+                physical_bin_start=event.physical_bin_start,
+                physical_bin_end=event.physical_bin_end,
+                time_source=event.time_source,
+                hard_split_before=False,
+                speaker_status=event.speaker_status,
+                speaker_source=event.speaker_source,
+                speaker_repair_reason="",
+                asr_text=event.asr_text,
+                genuine_overlap=event.genuine_overlap,
+                overlap_group_id=event.overlap_group_id,
+                overlap_tracks=copy.deepcopy(event.overlap_tracks),
+                revision_trace=new_trace,
+            )
+        )
 
     return results
 

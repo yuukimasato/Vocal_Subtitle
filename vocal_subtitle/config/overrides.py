@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import copy
 import typing
-from typing import Any, Dict
+from typing import Any
 
 from .models import PipelineConfig
-
 
 FIELD_MAP = {
     "separator": "separation.engine",
@@ -121,7 +120,7 @@ def merge_with_overrides(config: PipelineConfig, **overrides: Any) -> PipelineCo
 
 
 def apply_user_profile_overrides(
-    config: PipelineConfig, user_overrides: Dict[str, Any]
+    config: PipelineConfig, user_overrides: dict[str, Any]
 ) -> PipelineConfig:
     """Apply a nested user profile patch without mutating the base config."""
     new_config = copy.deepcopy(config)

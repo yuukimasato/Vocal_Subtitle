@@ -24,8 +24,9 @@ disabled,全链路行为与现状一致。
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from .base import SpeakerTurn
 from .speaker_fusion import _speaker_label, _split_event
@@ -53,14 +54,14 @@ class EarlyTurnsState:
         diagnostics: 附加诊断(global_status / expected_speakers 等)。
     """
 
-    turns: List[SpeakerTurn] = field(default_factory=list)
+    turns: list[SpeakerTurn] = field(default_factory=list)
     speaker_count: int = 0
     backend: str = "unknown"
     status: str = "disabled"
     model_ref: str = ""
     attempted: bool = False
     single_speaker: bool = False
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
     @property
     def active(self) -> bool:
@@ -73,7 +74,7 @@ def run_early_global_pass(
     sample_rate: int,
     config: Any,
     *,
-    duration: Optional[float] = None,
+    duration: float | None = None,
 ) -> EarlyTurnsState:
     """[P1] 分离之后对完整人声音频跑一次全局 diarization。
 
@@ -87,12 +88,18 @@ def run_early_global_pass(
     if diar_cfg is None or not getattr(diar_cfg, "enabled", True):
         return EarlyTurnsState(
             status="disabled",
-            diagnostics={"early_turns_status": "disabled", "reason": "diarization_disabled"},
+            diagnostics={
+                "early_turns_status": "disabled",
+                "reason": "diarization_disabled",
+            },
         )
     if not getattr(diar_cfg, "early_turns", False):
         return EarlyTurnsState(
             status="disabled",
-            diagnostics={"early_turns_status": "disabled", "reason": "early_turns_disabled"},
+            diagnostics={
+                "early_turns_status": "disabled",
+                "reason": "early_turns_disabled",
+            },
         )
 
     from .speaker_fusion import _run_global_pass
@@ -127,12 +134,16 @@ def run_early_global_pass(
         logger.info(
             "Early turns pass unavailable (status=%s, model=%s) — "
             "postprocess event-level fusion stays authoritative",
-            global_status, model_ref or "none",
+            global_status,
+            model_ref or "none",
         )
     else:
         logger.info(
             "Early turns pass: %d turns / %d speakers (model=%s, single=%s)",
-            len(turns), len(speakers), model_ref, state.single_speaker,
+            len(turns),
+            len(speakers),
+            model_ref,
+            state.single_speaker,
         )
     return state
 
@@ -141,9 +152,9 @@ def spans_from_skeleton(
     skeleton_intervals: Sequence,
     turns: Sequence[SpeakerTurn],
     *,
-    duration: Optional[float] = None,
+    duration: float | None = None,
     boundary_collar_ms: float = 80.0,
-) -> List[Any]:
+) -> list[Any]:
     """[P1] 骨架物理区间 × 全局 turns 求交,再做同说话人合并。
 
     物理区间只提供时间信息;speaker identity 一律来自 turns(停顿不
@@ -164,9 +175,9 @@ def dominant_turn_at(
     turns: Sequence[SpeakerTurn],
     start: float,
     end: float,
-) -> Optional[SpeakerTurn]:
+) -> SpeakerTurn | None:
     """返回与区间 [start, end] 重叠时间最长的 turn;无覆盖为 None。"""
-    best: Optional[SpeakerTurn] = None
+    best: SpeakerTurn | None = None
     best_overlap = 0.0
     for turn in turns:
         overlap = min(end, turn.end) - max(start, turn.start)
@@ -179,7 +190,7 @@ def dominant_speaker_at(
     turns: Sequence[SpeakerTurn],
     start: float,
     end: float,
-) -> Optional[int]:
+) -> int | None:
     """区间的主说话人(与区间重叠最长的 turn);无覆盖为 None。"""
     turn = dominant_turn_at(turns, start, end)
     return turn.speaker_id if turn is not None else None
@@ -189,13 +200,13 @@ def dominant_span_speaker(
     spans: Sequence,
     start: float,
     end: float,
-) -> Optional[int]:
+) -> int | None:
     """区间的主说话人(按 AtomicSpeechSpan 跨度求主覆盖)。
 
     只在已知身份的跨度中取主覆盖;仅 unknown 跨度覆盖时返回 None
     (无信息,调用方按"安全合并"处理)。两人重叠跨度不参与归属。
     """
-    best_id: Optional[int] = None
+    best_id: int | None = None
     best_overlap = 0.0
     for span in spans:
         if span.speaker_id is None:
@@ -206,7 +217,7 @@ def dominant_span_speaker(
     return best_id
 
 
-def _turn_at(turns: Sequence[SpeakerTurn], point: float) -> Optional[SpeakerTurn]:
+def _turn_at(turns: Sequence[SpeakerTurn], point: float) -> SpeakerTurn | None:
     return next(
         (turn for turn in turns if turn.start <= point < turn.end),
         None,
@@ -215,8 +226,8 @@ def _turn_at(turns: Sequence[SpeakerTurn], point: float) -> Optional[SpeakerTurn
 
 def _apply_identity(
     event: Any,
-    speaker_id: Optional[int],
-    turn: Optional[SpeakerTurn],
+    speaker_id: int | None,
+    turn: SpeakerTurn | None,
     model_ref: str,
 ) -> bool:
     """把单个 turn 的身份写入事件(字段契约与 run_speaker_fusion 一致)。
@@ -275,14 +286,14 @@ def _value(item: Any, key: str, default: Any = None) -> Any:
 
 
 def assign_event_speakers(
-    events: List[Any],
+    events: list[Any],
     turns: Sequence[SpeakerTurn],
     *,
     word_split: bool = False,
     min_part_duration: float = 0.0,
-    language: Optional[str] = None,
+    language: str | None = None,
     model_ref: str = "",
-) -> Tuple[List[Any], Dict[str, Any]]:
+) -> tuple[list[Any], dict[str, Any]]:
     """[P1/P2] early_turns 成功时的事件说话人注入(标签先天正确)。
 
     - 单一说话人覆盖(常见快路径):事件链整段继承该标签,零切分开销;
@@ -297,7 +308,7 @@ def assign_event_speakers(
     对齐,供 stats 字段契约复用。
     """
     normalized = normalize_turns(turns)
-    output: List[Any] = []
+    output: list[Any] = []
     word_split_count = 0
     fallback_split_count = 0
     speaker_split_degraded_count = 0
@@ -305,7 +316,8 @@ def assign_event_speakers(
 
     for event in events:
         relevant = [
-            turn for turn in normalized
+            turn
+            for turn in normalized
             if turn.end > event.start and turn.start < event.end
         ]
         speakers = {turn.speaker_id for turn in relevant}
@@ -329,7 +341,8 @@ def assign_event_speakers(
             if _apply_identity(
                 event,
                 turn.speaker_id if turn is not None else None,
-                turn, model_ref,
+                turn,
+                model_ref,
             ):
                 overlapped_count += 1
             output.append(event)
@@ -344,7 +357,8 @@ def assign_event_speakers(
             if _apply_identity(
                 event,
                 turn.speaker_id if turn is not None else None,
-                turn, model_ref,
+                turn,
+                model_ref,
             ):
                 overlapped_count += 1
             event.speaker_split_degraded = True
@@ -355,12 +369,14 @@ def assign_event_speakers(
             continue
 
         # 词级切分:turn 翻转点吸附最近词间隙(词中点归属,与 fusion 同源)
-        points = sorted({
-            point
-            for turn in relevant
-            for point in (turn.start, turn.end)
-            if event.start + 1e-4 < point < event.end - 1e-4
-        })
+        points = sorted(
+            {
+                point
+                for turn in relevant
+                for point in (turn.start, turn.end)
+                if event.start + 1e-4 < point < event.end - 1e-4
+            }
+        )
         parts = _split_event(event, points, min_part_duration)
         if len(parts) <= 1:
             # 切分未发生(如切出片段短于 min_part_duration):
@@ -369,7 +385,8 @@ def assign_event_speakers(
             if _apply_identity(
                 event,
                 turn.speaker_id if turn is not None else None,
-                turn, model_ref,
+                turn,
+                model_ref,
             ):
                 overlapped_count += 1
             output.append(event)
@@ -382,7 +399,8 @@ def assign_event_speakers(
             if _apply_identity(
                 part,
                 turn.speaker_id if turn is not None else None,
-                turn, model_ref,
+                turn,
+                model_ref,
             ):
                 overlapped_count += 1
             output.append(part)
@@ -410,8 +428,12 @@ def assign_event_speakers(
     logger.info(
         "Early turns labeling: %d events / %d speakers "
         "(word_split=%d, fallback_split=%d, degraded_split=%d, overlapped=%d, unknown=%d)",
-        len(output), len(unique), word_split_count,
-        fallback_split_count, speaker_split_degraded_count,
-        overlapped_count, diagnostics["unknown_count"],
+        len(output),
+        len(unique),
+        word_split_count,
+        fallback_split_count,
+        speaker_split_degraded_count,
+        overlapped_count,
+        diagnostics["unknown_count"],
     )
     return output, diagnostics

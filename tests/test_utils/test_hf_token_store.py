@@ -38,7 +38,10 @@ def test_hf_token_store_rejects_masked_value(tmp_path):
 
 
 def test_hf_token_store_returns_none_when_missing(tmp_path):
-    assert load_hf_token(
-        key_path=tmp_path / ".missing.key",
-        token_path=tmp_path / "missing.enc",
-    ) is None
+    assert (
+        load_hf_token(
+            key_path=tmp_path / ".missing.key",
+            token_path=tmp_path / "missing.enc",
+        )
+        is None
+    )

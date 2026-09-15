@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from vocal_subtitle.asr.base import WordTimestamp
 from vocal_subtitle.application.member_projection import (
     reproject_events_to_members,
 )
+from vocal_subtitle.asr.base import WordTimestamp
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 
 
@@ -24,11 +24,15 @@ def _event(start, end, words_abs, text=None):
 
 def test_split_across_member_gap_restores_silence_boundaries():
     members = [(0.0, 1.0), (1.4, 2.5)]
-    event = _event(0.0, 2.5, [
-        ("你", 0.10, 0.30),
-        ("好", 0.40, 0.60),
-        ("吗", 1.45, 1.60),
-    ])
+    event = _event(
+        0.0,
+        2.5,
+        [
+            ("你", 0.10, 0.30),
+            ("好", 0.40, 0.60),
+            ("吗", 1.45, 1.60),
+        ],
+    )
 
     projected, stats = reproject_events_to_members([event], members)
 
@@ -51,11 +55,15 @@ def test_small_member_gap_is_intra_phrase_and_keeps_text_whole():
     # 0.25s 的成员间隙属于句内微停顿（< member_split_min_gap 默认 0.3s）：
     # 文本不拆行，端点钳制到组成员包络，尾部词不被截断。
     members = [(0.0, 1.0), (1.25, 2.5)]
-    event = _event(0.0, 2.5, [
-        ("你", 0.10, 0.30),
-        ("好", 0.40, 0.60),
-        ("吗", 1.30, 1.50),
-    ])
+    event = _event(
+        0.0,
+        2.5,
+        [
+            ("你", 0.10, 0.30),
+            ("好", 0.40, 0.60),
+            ("吗", 1.30, 1.50),
+        ],
+    )
 
     projected, stats = reproject_events_to_members([event], members)
 
@@ -74,15 +82,21 @@ def test_over_limit_merged_group_splits_at_member_gaps():
     # 模拟用户实测的 5.7s 列举句：成员间隙全部 < 0.3s（句内微停顿不拆），
     # 但聚合组超过 max_duration 时必须在成员间隙处继续拆分成短行。
     members = [(0.0, 1.4), (1.6, 3.0), (3.15, 4.5), (4.65, 5.8)]
-    event = _event(0.0, 5.8, [
-        ("a hot dishes section,", 0.10, 1.30),
-        ("a pastries section,", 1.70, 2.90),
-        ("a fruits section,", 3.20, 4.40),
-        ("and a live cooking station.", 4.70, 5.70),
-    ])
+    event = _event(
+        0.0,
+        5.8,
+        [
+            ("a hot dishes section,", 0.10, 1.30),
+            ("a pastries section,", 1.70, 2.90),
+            ("a fruits section,", 3.20, 4.40),
+            ("and a live cooking station.", 4.70, 5.70),
+        ],
+    )
 
     projected, stats = reproject_events_to_members(
-        [event], members, max_duration=2.0,
+        [event],
+        members,
+        max_duration=2.0,
     )
 
     assert stats.split_events == 1
@@ -96,22 +110,27 @@ def test_over_limit_merged_group_splits_at_member_gaps():
     for piece in projected:
         assert piece.duration <= 2.0
     assert [item.hard_split_before for item in projected] == [
-        False, True, True, True,
+        False,
+        True,
+        True,
+        True,
     ]
-    assert all(
-        item.revision_trace[-1].get("over_limit") for item in projected
-    )
+    assert all(item.revision_trace[-1].get("over_limit") for item in projected)
 
 
 def test_default_max_duration_caps_window_sized_group():
     # 默认 5.0s 上限：整组 5.6s 跨越四个成员 → 在最后一个成员间隙处切开。
     members = [(0.0, 1.4), (1.6, 3.0), (3.15, 4.5), (4.65, 5.8)]
-    event = _event(0.0, 5.8, [
-        ("a hot dishes section,", 0.10, 1.30),
-        ("a pastries section,", 1.70, 2.90),
-        ("a fruits section,", 3.20, 4.40),
-        ("and a live cooking station.", 4.70, 5.70),
-    ])
+    event = _event(
+        0.0,
+        5.8,
+        [
+            ("a hot dishes section,", 0.10, 1.30),
+            ("a pastries section,", 1.70, 2.90),
+            ("a fruits section,", 3.20, 4.40),
+            ("and a live cooking station.", 4.70, 5.70),
+        ],
+    )
 
     projected, stats = reproject_events_to_members([event], members)
 
@@ -124,10 +143,14 @@ def test_default_max_duration_caps_window_sized_group():
 def test_over_limit_width_splits_at_member_gap():
     # 显示宽度超限（CJK=2 计，84 上限）同样触发成员间隙拆分。
     members = [(0.0, 1.0), (1.15, 2.2)]
-    event = _event(0.0, 2.2, [
-        ("a" * 50, 0.10, 0.90),
-        ("b" * 50, 1.20, 2.00),
-    ])
+    event = _event(
+        0.0,
+        2.2,
+        [
+            ("a" * 50, 0.10, 0.90),
+            ("b" * 50, 1.20, 2.00),
+        ],
+    )
 
     projected, stats = reproject_events_to_members([event], members)
 
@@ -148,13 +171,19 @@ def test_single_member_over_limit_stays_whole():
 
 def test_split_min_gap_zero_restores_legacy_per_member_split():
     members = [(0.0, 1.0), (1.25, 2.5)]
-    event = _event(0.0, 2.5, [
-        ("你", 0.10, 0.30),
-        ("吗", 1.30, 1.50),
-    ])
+    event = _event(
+        0.0,
+        2.5,
+        [
+            ("你", 0.10, 0.30),
+            ("吗", 1.30, 1.50),
+        ],
+    )
 
     projected, stats = reproject_events_to_members(
-        [event], members, split_min_gap=0.0,
+        [event],
+        members,
+        split_min_gap=0.0,
     )
 
     assert stats.split_events == 1
@@ -237,10 +266,14 @@ def test_unworded_event_outside_all_members_dropped():
 
 def test_english_split_keeps_word_spacing():
     members = [(0.0, 1.0), (1.4, 2.5)]
-    event = _event(0.0, 2.5, [
-        ("hello", 0.10, 0.40),
-        (" world", 1.45, 1.70),
-    ])
+    event = _event(
+        0.0,
+        2.5,
+        [
+            ("hello", 0.10, 0.40),
+            (" world", 1.45, 1.70),
+        ],
+    )
 
     projected, _ = reproject_events_to_members([event], members)
 
@@ -249,10 +282,14 @@ def test_english_split_keeps_word_spacing():
 
 def test_input_events_are_not_mutated():
     members = [(0.0, 1.0), (1.25, 2.5)]
-    event = _event(0.0, 2.5, [
-        ("你", 0.10, 0.30),
-        ("吗", 1.30, 1.50),
-    ])
+    event = _event(
+        0.0,
+        2.5,
+        [
+            ("你", 0.10, 0.30),
+            ("吗", 1.30, 1.50),
+        ],
+    )
 
     reproject_events_to_members([event], members)
 

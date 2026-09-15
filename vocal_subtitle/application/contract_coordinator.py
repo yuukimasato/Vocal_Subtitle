@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, Mapping, Optional
+from typing import Any
 
 from ..contracts.common import ErrorInfo
 from ..contracts.ports import ArtifactPort, PipelineRunPort, ReportPort, TaskPort
 from ..contracts.run import RunRequest, RunResult
-from ..contracts.task import TaskRequest, TaskSnapshot, TaskState
+from ..contracts.task import TaskSnapshot, TaskState
 
 
 class BackendRunCoordinator:
@@ -23,8 +24,8 @@ class BackendRunCoordinator:
         *,
         tasks: TaskPort,
         runner: PipelineRunPort,
-        reports: Optional[ReportPort] = None,
-        artifacts: Optional[ArtifactPort] = None,
+        reports: ReportPort | None = None,
+        artifacts: ArtifactPort | None = None,
     ):
         self.tasks = tasks
         self.runner = runner
@@ -33,7 +34,9 @@ class BackendRunCoordinator:
 
     def run(self, request: RunRequest) -> RunResult:
         task = self._ensure_task(request)
-        resolved_request = replace(request, task=request.task.with_task_id(task.task_id))
+        resolved_request = replace(
+            request, task=request.task.with_task_id(task.task_id)
+        )
         self._transition(task, TaskState.PREFLIGHT)
         self._transition(task, TaskState.RUNNING)
         try:
@@ -46,7 +49,9 @@ class BackendRunCoordinator:
                 state=TaskState.FAILED,
                 error=error,
             )
-            return RunResult(task=failed, error=error, diagnostics={"coordinator": "runner_failed"})
+            return RunResult(
+                task=failed, error=error, diagnostics={"coordinator": "runner_failed"}
+            )
 
         self._register_artifacts(result)
         self._finalize_task(result, task)
@@ -69,11 +74,13 @@ class BackendRunCoordinator:
         task: TaskSnapshot,
         state: TaskState,
         *,
-        error: Optional[ErrorInfo] = None,
+        error: ErrorInfo | None = None,
     ) -> TaskSnapshot:
         if task.state == state:
             return task
-        updated = self.tasks.transition(task.task_id, state, run_id=task.run_id or "", error=error)
+        updated = self.tasks.transition(
+            task.task_id, state, run_id=task.run_id or "", error=error
+        )
         task.state = updated.state
         task.run_id = updated.run_id
         return updated
@@ -86,10 +93,16 @@ class BackendRunCoordinator:
             TaskState.FAILED,
             TaskState.CANCELLED,
         }:
-            state = TaskState.DEGRADED_COMPLETED if result.diagnostics.get("degraded") else TaskState.COMPLETED
+            state = (
+                TaskState.DEGRADED_COMPLETED
+                if result.diagnostics.get("degraded")
+                else TaskState.COMPLETED
+            )
         error = result.error or result.task.error
         try:
-            self.tasks.transition(original.task_id, state, run_id=result.task.run_id or "", error=error)
+            self.tasks.transition(
+                original.task_id, state, run_id=result.task.run_id or "", error=error
+            )
         except Exception:
             # A legacy runner may already have finalized the same task.
             current = self.tasks.get(original.task_id)
@@ -106,7 +119,9 @@ class BackendRunCoordinator:
         if self.reports is None:
             return
         try:
-            report = self.reports.build(result, config_snapshot=_config_snapshot(request.config))
+            report = self.reports.build(
+                result, config_snapshot=_config_snapshot(request.config)
+            )
             result.report = report
             self.reports.persist(report, config=request.config)
         except Exception as exc:

@@ -60,9 +60,18 @@ def _make_events(times_texts):
 # ============================================================================
 
 
-
 __all__ = [
-    "json", "math", "os", "tempfile", "datetime", "timedelta",
-    "Path", "MagicMock", "patch", "np", "pytest", "_make_event", "_make_events",
+    "json",
+    "math",
+    "os",
+    "tempfile",
+    "datetime",
+    "timedelta",
+    "Path",
+    "MagicMock",
+    "patch",
+    "np",
+    "pytest",
+    "_make_event",
+    "_make_events",
 ]
-

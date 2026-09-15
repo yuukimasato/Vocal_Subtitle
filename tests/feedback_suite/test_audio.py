@@ -1,6 +1,11 @@
 """Feedback tests: test_audio."""
 
-from .common import *
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import pytest
+
 
 class TestAudioFingerprint:
     """音频指纹测试"""
@@ -97,7 +102,10 @@ class TestAudioFingerprint:
 
     def test_sqlite_crud(self):
         """SQLite 数据库 CRUD 操作"""
-        from vocal_subtitle.feedback.audio_fingerprint import AudioFingerprint, AudioFingerprinter
+        from vocal_subtitle.feedback.audio_fingerprint import (
+            AudioFingerprint,
+            AudioFingerprinter,
+        )
 
         db_path = Path(tempfile.gettempdir()) / "__test_fingerprints.db"
         try:
@@ -154,6 +162,7 @@ class TestAudioFingerprint:
 # 10. ShadowMode 测试
 # ============================================================================
 
+
 class TestShadowMode:
     """影子模式评估器测试"""
 
@@ -170,15 +179,25 @@ class TestShadowMode:
         )
 
         for i in range(10):
-            evaluator.add_run(ShadowRunResult(
-                timestamp=f"2026-07-{(i + 1):02d}T10:00:00",
-                health_current=70.0,
-                health_shadow=75.0,  # 平均好 5 分 (+7.1%)
-                health_detail_current={"alignment_coverage": 70.0, "semantic_similarity": 70.0,
-                                        "time_iou": 70.0, "structure_consistency": 70.0},
-                health_detail_shadow={"alignment_coverage": 75.0, "semantic_similarity": 75.0,
-                                      "time_iou": 75.0, "structure_consistency": 75.0},
-            ))
+            evaluator.add_run(
+                ShadowRunResult(
+                    timestamp=f"2026-07-{(i + 1):02d}T10:00:00",
+                    health_current=70.0,
+                    health_shadow=75.0,  # 平均好 5 分 (+7.1%)
+                    health_detail_current={
+                        "alignment_coverage": 70.0,
+                        "semantic_similarity": 70.0,
+                        "time_iou": 70.0,
+                        "structure_consistency": 70.0,
+                    },
+                    health_detail_shadow={
+                        "alignment_coverage": 75.0,
+                        "semantic_similarity": 75.0,
+                        "time_iou": 75.0,
+                        "structure_consistency": 75.0,
+                    },
+                )
+            )
 
         result = evaluator.should_upgrade()
         assert result.should_upgrade
@@ -192,9 +211,12 @@ class TestShadowMode:
         )
 
         evaluator = ShadowModeEvaluator(min_shadow_runs=10)
-        evaluator.add_run(ShadowRunResult(
-            health_current=70.0, health_shadow=80.0,
-        ))
+        evaluator.add_run(
+            ShadowRunResult(
+                health_current=70.0,
+                health_shadow=80.0,
+            )
+        )
 
         result = evaluator.should_upgrade()
         assert not result.should_upgrade
@@ -213,14 +235,24 @@ class TestShadowMode:
         )
 
         for _ in range(3):
-            evaluator.add_run(ShadowRunResult(
-                health_current=70.0,
-                health_shadow=70.5,  # 仅好 0.5 (+0.7%)
-                health_detail_current={"alignment_coverage": 70.0, "semantic_similarity": 70.0,
-                                        "time_iou": 70.0, "structure_consistency": 70.0},
-                health_detail_shadow={"alignment_coverage": 70.5, "semantic_similarity": 70.5,
-                                      "time_iou": 70.5, "structure_consistency": 70.5},
-            ))
+            evaluator.add_run(
+                ShadowRunResult(
+                    health_current=70.0,
+                    health_shadow=70.5,  # 仅好 0.5 (+0.7%)
+                    health_detail_current={
+                        "alignment_coverage": 70.0,
+                        "semantic_similarity": 70.0,
+                        "time_iou": 70.0,
+                        "structure_consistency": 70.0,
+                    },
+                    health_detail_shadow={
+                        "alignment_coverage": 70.5,
+                        "semantic_similarity": 70.5,
+                        "time_iou": 70.5,
+                        "structure_consistency": 70.5,
+                    },
+                )
+            )
 
         result = evaluator.should_upgrade()
         assert result.recommendation == "discard"
@@ -239,15 +271,24 @@ class TestShadowMode:
         )
 
         for _ in range(3):
-            evaluator.add_run(ShadowRunResult(
-                health_current=70.0,
-                health_shadow=80.0,  # 整体高 14%
-                health_detail_current={"alignment_coverage": 70.0, "semantic_similarity": 70.0,
-                                        "time_iou": 70.0, "structure_consistency": 70.0},
-                health_detail_shadow={"alignment_coverage": 95.0, "semantic_similarity": 95.0,
-                                      "time_iou": 30.0,   # ★ 严重退化 -57%
-                                      "structure_consistency": 95.0},
-            ))
+            evaluator.add_run(
+                ShadowRunResult(
+                    health_current=70.0,
+                    health_shadow=80.0,  # 整体高 14%
+                    health_detail_current={
+                        "alignment_coverage": 70.0,
+                        "semantic_similarity": 70.0,
+                        "time_iou": 70.0,
+                        "structure_consistency": 70.0,
+                    },
+                    health_detail_shadow={
+                        "alignment_coverage": 95.0,
+                        "semantic_similarity": 95.0,
+                        "time_iou": 30.0,  # ★ 严重退化 -57%
+                        "structure_consistency": 95.0,
+                    },
+                )
+            )
 
         result = evaluator.should_upgrade()
         assert result.recommendation == "discard"
@@ -257,5 +298,3 @@ class TestShadowMode:
 # ============================================================================
 # 11. 集成测试
 # ============================================================================
-
-

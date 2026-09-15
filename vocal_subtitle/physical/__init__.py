@@ -1,14 +1,27 @@
 """Physical timeline and global-coordinate infrastructure."""
 
+from .allocator import (
+    AllocationResult,
+    PhysicalSpan,
+    WordAllocation,
+    allocate_words,
+    repair_late_words,
+)
 from .context import build_context_windows
 from .coordinate import CoordinateMapper, CoordinateRange, MacroChunkCoordinate
-from .ir_cache import (
-    decode_ir_value,
-    encode_ir_value,
-    fingerprint_ir,
-    load_ir_value,
-    make_ir_cache_key,
-    persist_ir_value,
+from .coverage import (
+    PhysicalCoverageRange,
+    PhysicalCoverageReport,
+    audit_physical_coverage,
+)
+from .decision_ir import decisions_to_global_transcript
+from .decision_projection import DecisionEventProjector, DecisionProjectionError
+from .events import GlobalSubtitleEvent, build_events
+from .evidence_adapter import (
+    EvidenceAdaptResult,
+    adapt_ffmpeg_result,
+    adapt_speech_segments,
+    build_timeline_from_context,
 )
 from .ir import (
     GlobalSpeakerTimeline,
@@ -18,28 +31,15 @@ from .ir import (
     adapt_diarization_result,
     adapt_transcription_segments,
 )
-from .evidence_adapter import (
-    EvidenceAdaptResult,
-    adapt_ffmpeg_result,
-    adapt_speech_segments,
-    build_timeline_from_context,
+from .ir_cache import (
+    decode_ir_value,
+    encode_ir_value,
+    fingerprint_ir,
+    load_ir_value,
+    make_ir_cache_key,
+    persist_ir_value,
 )
 from .shadow import ShadowBuildResult, build_shadow_artifacts
-from .allocator import (
-    AllocationResult,
-    PhysicalSpan,
-    WordAllocation,
-    allocate_words,
-    repair_late_words,
-)
-from .coverage import (
-    PhysicalCoverageRange,
-    PhysicalCoverageReport,
-    audit_physical_coverage,
-)
-from .events import GlobalSubtitleEvent, build_events
-from .decision_projection import DecisionEventProjector, DecisionProjectionError
-from .decision_ir import decisions_to_global_transcript
 from .subtitle_bins import (
     PhysicalSubtitleBin,
     assign_word_to_bin,

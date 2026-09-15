@@ -8,11 +8,11 @@ without coupling report generation to an ASR implementation.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from difflib import SequenceMatcher
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 from .matching import classify_expected_match
-
 
 TRACE_SCHEMA_VERSION = "offline-trace-v1"
 TRACE_KEYS = (
@@ -37,7 +37,9 @@ def as_mapping(item: Any) -> dict[str, Any]:
     return {}
 
 
-def normalize_trace_context(value: Mapping[str, Any] | None = None, **updates: Any) -> dict[str, Any]:
+def normalize_trace_context(
+    value: Mapping[str, Any] | None = None, **updates: Any
+) -> dict[str, Any]:
     """Normalize a trace context while retaining forward-compatible fields."""
     context = dict(value or {})
     context.update({key: item for key, item in updates.items() if item is not None})
@@ -115,11 +117,17 @@ def _gap(left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
 
 
 def _similarity(left: Any, right: Any) -> float:
-    normalize = lambda value: "".join(str(value or "").split()).casefold()
-    return SequenceMatcher(None, normalize(left), normalize(right), autojunk=False).ratio()
+    def normalize(value: Any) -> str:
+        return "".join(str(value or "").split()).casefold()
+
+    return SequenceMatcher(
+        None, normalize(left), normalize(right), autojunk=False
+    ).ratio()
 
 
-def _related(expected: Mapping[str, Any], items: Iterable[Any], *, gap: float = 0.35) -> list[dict[str, Any]]:
+def _related(
+    expected: Mapping[str, Any], items: Iterable[Any], *, gap: float = 0.35
+) -> list[dict[str, Any]]:
     expected_id = expected.get("id")
     result = []
     for raw in items:
@@ -163,7 +171,9 @@ def attribute_expected_miss(
     physical = _related(expected, physical_spans, gap=0.05)
     candidate_items = _related(expected, candidates)
     decision_items = _related(expected, decisions)
-    final_items = _related(expected, final_events if final_events is not None else predicted)
+    final_items = _related(
+        expected, final_events if final_events is not None else predicted
+    )
 
     if legacy.get("matched") and not strict.get("matched"):
         stage = "strict_match_only_failure"
@@ -172,7 +182,8 @@ def attribute_expected_miss(
     elif physical and not candidate_items:
         stage = "speech_candidate_missing"
     elif candidate_items and not any(
-        _similarity(expected.get("text"), item.get("text", item.get("final_text", ""))) >= 0.35
+        _similarity(expected.get("text"), item.get("text", item.get("final_text", "")))
+        >= 0.35
         for item in candidate_items
     ):
         stage = "asr_text_mismatch"
@@ -180,7 +191,12 @@ def attribute_expected_miss(
         stage = "decision_drop_or_unresolved"
     elif decision_items and not final_items:
         stage = "postprocess_coverage_loss"
-    elif not physical and not physical_spans and not candidate_items and not decision_items:
+    elif (
+        not physical
+        and not physical_spans
+        and not candidate_items
+        and not decision_items
+    ):
         stage = "unknown_with_evidence_gap"
     elif not legacy.get("matched"):
         stage = str(legacy.get("stage") or "unknown_with_evidence_gap")
@@ -227,7 +243,10 @@ def attribute_case_misses(
     result = []
     for expected in expected_events:
         if str(expected.get("kind", "speech")).casefold() in {
-            "non_speech", "non-speech", "noise", "hallucination",
+            "non_speech",
+            "non-speech",
+            "noise",
+            "hallucination",
         }:
             continue
         legacy = classify_expected_match(expected, predicted_events)
@@ -239,22 +258,26 @@ def attribute_case_misses(
             match_policy="strict-overlap-v1",
         )
         if not legacy.get("matched") or not strict.get("matched"):
-            result.append(attribute_expected_miss(
-                expected,
-                predicted_events,
-                physical_spans=physical_spans,
-                candidates=candidates,
-                decisions=decisions,
-                final_events=final_events,
-                match_result=legacy,
-                strict_match_result=strict,
-            ))
+            result.append(
+                attribute_expected_miss(
+                    expected,
+                    predicted_events,
+                    physical_spans=physical_spans,
+                    candidates=candidates,
+                    decisions=decisions,
+                    final_events=final_events,
+                    match_result=legacy,
+                    strict_match_result=strict,
+                )
+            )
     return result
 
 
 def attribution_counts(records: Iterable[Mapping[str, Any]]) -> dict[str, int]:
     """Count primary attribution stages in a stable order."""
-    return dict(Counter(str(item.get("stage", "unknown_with_evidence_gap")) for item in records))
+    return dict(
+        Counter(str(item.get("stage", "unknown_with_evidence_gap")) for item in records)
+    )
 
 
 __all__ = [

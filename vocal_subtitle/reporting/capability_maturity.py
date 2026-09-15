@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
-
+from collections.abc import Mapping
+from typing import Any
 
 MATURITY_FIELDS = (
     "implemented",
@@ -14,7 +14,15 @@ MATURITY_FIELDS = (
 )
 
 
-def _entry(*, implemented: bool, runnable: bool, benchmarked: bool, gated: bool, release_default: bool, evidence: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def _entry(
+    *,
+    implemented: bool,
+    runnable: bool,
+    benchmarked: bool,
+    gated: bool,
+    release_default: bool,
+    evidence: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "implemented": bool(implemented),
         "runnable": bool(runnable),
@@ -35,16 +43,28 @@ def build_capability_maturity(
     review = dict(evidence or {})
     optional = review.get("optional_engines") or {}
     quality = dict(quality or {})
-    gate_evidence = bool(quality.get("golden_gate_version") or quality.get("gate_report"))
+    gate_evidence = bool(
+        quality.get("golden_gate_version") or quality.get("gate_report")
+    )
+
     def optional_state(name: str) -> tuple[bool, bool, dict[str, Any]]:
         payload = optional.get(name) or {}
         status = str(payload.get("status", "unavailable"))
-        runnable = status not in {"unavailable", "disabled", "model_missing", "port_missing"}
-        return True, runnable, {
-            "status": status,
-            "reason": payload.get("reason"),
-            "windows_processed": len(payload.get("windows") or []),
+        runnable = status not in {
+            "unavailable",
+            "disabled",
+            "model_missing",
+            "port_missing",
         }
+        return (
+            True,
+            runnable,
+            {
+                "status": status,
+                "reason": payload.get("reason"),
+                "windows_processed": len(payload.get("windows") or []),
+            },
+        )
 
     context_impl, context_runnable, context_evidence = optional_state("context_reasr")
     qwen_impl, qwen_runnable, qwen_evidence = optional_state("qwen")
@@ -54,7 +74,10 @@ def build_capability_maturity(
         "capabilities": {
             "segmented_primary": _entry(
                 implemented=True,
-                runnable=bool(review.get("candidate_count", 0) or review.get("status") in {"ok", "completed"}),
+                runnable=bool(
+                    review.get("candidate_count", 0)
+                    or review.get("status") in {"ok", "completed"}
+                ),
                 benchmarked=bool(review.get("candidate_count", 0)),
                 gated=gate_evidence,
                 release_default=True,
@@ -86,11 +109,17 @@ def build_capability_maturity(
             ),
             "feedback_profile": _entry(
                 implemented=True,
-                runnable=bool(getattr(getattr(config, "feedback", None), "enabled", False)),
+                runnable=bool(
+                    getattr(getattr(config, "feedback", None), "enabled", False)
+                ),
                 benchmarked=False,
                 gated=False,
                 release_default=False,
-                evidence={"active_profile": getattr(getattr(config, "feedback", None), "active_profile", None)},
+                evidence={
+                    "active_profile": getattr(
+                        getattr(config, "feedback", None), "active_profile", None
+                    )
+                },
             ),
         },
     }

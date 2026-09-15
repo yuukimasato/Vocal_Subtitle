@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..application.pipeline_result import PipelineStats
 
@@ -15,7 +15,7 @@ def build_result_payload(
     *,
     task_id: str,
     stats: PipelineStats,
-    events: List[Any],
+    events: list[Any],
     input_path: Any = None,
     subtitle_path: Any = None,
     clean_subtitle_path: Any = None,
@@ -23,16 +23,18 @@ def build_result_payload(
     vocals_path: Any = None,
     accompaniment_path: Any = None,
     from_cache: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """组装与 WebUI task_result 同构的结果载荷。
 
     CLI 任务写入历史库后，WebUI 的字幕导出、音频下载、任务详情面板
     均按该载荷回退渲染（见 routes_subtitles / api_serializers）。
     """
-    event_dicts: List[Dict[str, Any]] = []
+    event_dicts: list[dict[str, Any]] = []
     for event in events:
         try:
-            event_dicts.append(event.to_dict() if hasattr(event, "to_dict") else dict(event))
+            event_dicts.append(
+                event.to_dict() if hasattr(event, "to_dict") else dict(event)
+            )
         except Exception:
             continue
     artifacts = {
@@ -53,7 +55,9 @@ def build_result_payload(
         "status": stats.status,
         "input_path": str(input_path) if input_path else str(stats.input_path),
         "subtitle_path": str(subtitle_path) if subtitle_path else None,
-        "clean_subtitle_path": str(clean_subtitle_path) if clean_subtitle_path else None,
+        "clean_subtitle_path": str(clean_subtitle_path)
+        if clean_subtitle_path
+        else None,
         "llm_subtitle_path": str(llm_subtitle_path) if llm_subtitle_path else None,
         "stats": stats.to_dict(),
         "events": event_dicts,
@@ -75,7 +79,7 @@ def finalize_task_state(
     pipeline: Any,
     stats: PipelineStats,
     *,
-    result_payload: Optional[Dict[str, Any]] = None,
+    result_payload: dict[str, Any] | None = None,
 ) -> None:
     """Record the final task state without changing pipeline semantics."""
     task_id = getattr(pipeline, "_effective_task_id", None) or stats.task_id

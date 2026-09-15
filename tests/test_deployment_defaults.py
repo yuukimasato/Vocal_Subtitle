@@ -1,8 +1,8 @@
-from vocal_subtitle.config import ConfigLoader
 from vocal_subtitle.config import (
     AcousticValidationConfig,
     ASRConfig,
     BoundaryRefinementConfig,
+    ConfigLoader,
     GapHandlingConfig,
     LLMOptimizeConfig,
     MergingConfig,
@@ -66,10 +66,22 @@ def test_yaml_omitted_values_match_dataclass_defaults(tmp_path):
     assert loaded.asr.model == ASRConfig().model == expected.asr.model
     assert loaded.vad.min_speech_duration_ms == VADConfig().min_speech_duration_ms
     assert loaded.merging.pre_split_threshold == MergingConfig().pre_split_threshold
-    assert loaded.subtitle.gap_handling.seamless_threshold == GapHandlingConfig().seamless_threshold
-    assert loaded.acoustic_validation.snap_start_margin == AcousticValidationConfig().snap_start_margin
-    assert loaded.acoustic_validation.skeleton_mode == AcousticValidationConfig().skeleton_mode
-    assert loaded.boundary_refinement.max_shrink_ms == BoundaryRefinementConfig().max_shrink_ms
+    assert (
+        loaded.subtitle.gap_handling.seamless_threshold
+        == GapHandlingConfig().seamless_threshold
+    )
+    assert (
+        loaded.acoustic_validation.snap_start_margin
+        == AcousticValidationConfig().snap_start_margin
+    )
+    assert (
+        loaded.acoustic_validation.skeleton_mode
+        == AcousticValidationConfig().skeleton_mode
+    )
+    assert (
+        loaded.boundary_refinement.max_shrink_ms
+        == BoundaryRefinementConfig().max_shrink_ms
+    )
     assert loaded.llm_optimize.batch_num == LLMOptimizeConfig().batch_num
 
 

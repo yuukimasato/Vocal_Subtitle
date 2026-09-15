@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from .allocator import WordAllocation
 from .subtitle_bins import PhysicalSubtitleBin
@@ -117,11 +118,7 @@ def speaker_change_boundaries(turns: Sequence[Any] | None) -> list[float]:
     ):
         if next_start < end:
             continue
-        if (
-            speaker is not None
-            and next_speaker is not None
-            and speaker == next_speaker
-        ):
+        if speaker is not None and next_speaker is not None and speaker == next_speaker:
             continue
         boundaries.append((end + next_start) / 2.0)
     return boundaries
@@ -168,9 +165,7 @@ def audit_physical_coverage(
         list(bins), key=lambda item: (float(item.start), float(item.end), item.id)
     )
     accepted_words = [
-        item.word
-        for item in allocations
-        if getattr(item, "accepted", False)
+        item.word for item in allocations if getattr(item, "accepted", False)
     ]
     transcript_end = max(
         (float(getattr(word, "raw_end")) for word in accepted_words),
@@ -190,25 +185,19 @@ def audit_physical_coverage(
         else:
             uncovered.append(bin_item)
 
-    last_physical_end = max(
-        (float(item.end) for item in ordered_bins), default=None
-    )
+    last_physical_end = max((float(item.end) for item in ordered_bins), default=None)
     tail_gap = max(
         0.0,
         (last_physical_end or 0.0) - (transcript_end or 0.0),
     )
 
-    uncovered_payload = tuple(
-        _bin_payload(item) for item in uncovered
-    )
+    uncovered_payload = tuple(_bin_payload(item) for item in uncovered)
     recovery_bins = [
         item
         for item in uncovered
         if float(item.end) - float(item.start) >= min_required_duration
     ]
-    recovery_ranges = tuple(
-        _merge_ranges(recovery_bins, merge_gap=merge_gap)
-    )
+    recovery_ranges = tuple(_merge_ranges(recovery_bins, merge_gap=merge_gap))
 
     # 时间轴仲裁层 R3:空洞区间与 turns 换人边界相交 → possible_speaker_hole
     # (提示空洞可能是 B 话轮被 A 事件吞掉;turns=None 时完全跳过,现状不变)
@@ -218,10 +207,13 @@ def audit_physical_coverage(
         marked_ranges: list[PhysicalCoverageRange] = []
         for recovery_range in recovery_ranges:
             if hole_intersects_speaker_change(
-                recovery_range.start, recovery_range.end, boundaries,
+                recovery_range.start,
+                recovery_range.end,
+                boundaries,
             ):
                 recovery_range = replace(
-                    recovery_range, possible_speaker_hole=True,
+                    recovery_range,
+                    possible_speaker_hole=True,
                 )
                 speaker_holes.append(recovery_range.to_dict())
             marked_ranges.append(recovery_range)
@@ -241,7 +233,8 @@ def audit_physical_coverage(
 
     # 统计过分配/欠分配（从 allocation 计数推估）
     over_allocated = sum(
-        1 for item in allocations
+        1
+        for item in allocations
         if getattr(item, "accepted", False)
         and not any(
             float(getattr(item.word, "raw_start")) < float(b.end)

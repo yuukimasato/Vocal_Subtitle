@@ -3,36 +3,29 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import Dict, List, Optional, Tuple
+from typing import Any
 
-import numpy as np
-
-from ..asr.base import ASREngine
 from ..asr.contracts import ASRRuntimePorts, GlobalASRRequest
+from ..asr.engine_pairing import EnginePairRouter
 from ..asr.evidence import candidate_from_subtitle_event
 from ..asr.evidence_review import EvidenceReviewRuntimePorts
+from ..asr.global_path import GlobalASRService
+from ..asr.global_transcriber import GlobalTranscriber, GlobalTranscriberConfig
 from ..asr.optional_adapters import (
     LazyAudioClassifierSED,
     LazyQwenASR,
     LazyQwenForcedAligner,
 )
 from ..asr.review_engines import WindowedASRContextReASR, WindowedASREngine
+from ..asr.review_path import ASRFailureRequest, ASRReviewRequest, ASRReviewService
+from ..asr.router import ASRRouter
+from .global_primary import evaluate_global_primary_suitability
 from .offline_production import (
     OfflineProductionCoordinator,
     OfflineProductionRequest,
 )
-from ..asr.global_transcriber import GlobalTranscriber, GlobalTranscriberConfig
-from ..asr.global_path import GlobalASRService
-from ..asr.engine_pairing import EnginePairRouter
-from ..asr.review_path import ASRFailureRequest, ASRReviewRequest, ASRReviewService
-from .global_primary import evaluate_global_primary_suitability
-from ..asr.router import ASRRouter
-from ..pipeline_context import NoiseProfile, PipelineContext
-from ..utils.audio_utils import AudioUtils
-from ..vad.base import SpeechSegment
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +68,7 @@ class PipelineASRPathMixin:
         forced_aligner = None
         sed_engine = None
         qwen_model_path = (
-            getattr(config, "qwen_model_path", None)
-            if config is not None
-            else None
+            getattr(config, "qwen_model_path", None) if config is not None else None
         ) or getattr(getattr(self.config, "asr", None), "qwen_model_path", None)
         if config is not None and getattr(config, "qwen_enabled", False):
             qwen_engine = LazyQwenASR(
@@ -150,17 +141,24 @@ class PipelineASRPathMixin:
                 )
             )
             if secondary_name == "qwen" and qwen_pair_enabled:
-                secondary_engine = LazyQwenASR(
-                    qwen_model_path or "",
-                    device=getattr(config, "review_device", "auto"),
-                    allow_remote=getattr(config, "allow_remote_model_download", False),
-                ) if config is not None else None
+                secondary_engine = (
+                    LazyQwenASR(
+                        qwen_model_path or "",
+                        device=getattr(config, "review_device", "auto"),
+                        allow_remote=getattr(
+                            config, "allow_remote_model_download", False
+                        ),
+                    )
+                    if config is not None
+                    else None
+                )
             elif secondary_name in {"faster-whisper", "whisper-cpp", "funasr"}:
                 secondary_engine = WindowedASREngine(
                     lambda name=secondary_name: self._get_asr_engine_for(name),
                     name=secondary_name,
                     source="context_reasr",
-                    family=getattr(pair_decision, "secondary_family", "whisper") or "whisper",
+                    family=getattr(pair_decision, "secondary_family", "whisper")
+                    or "whisper",
                     model_name=model_name,
                 )
         result = OfflineProductionCoordinator().run(
@@ -179,7 +177,9 @@ class PipelineASRPathMixin:
                 model=model_name,
                 pair_decision=pair_decision,
                 secondary_engine=secondary_name or "",
-                pair_route_version=getattr(pair_decision, "route_version", "") if pair_decision else "",
+                pair_route_version=getattr(pair_decision, "route_version", "")
+                if pair_decision
+                else "",
             ),
             EvidenceReviewRuntimePorts(
                 config=config,
@@ -200,12 +200,19 @@ class PipelineASRPathMixin:
             stats.decision_count = int(result.diagnostics.get("decision_count", 0) or 0)
             runtime_status = result.diagnostics.get("status", "completed")
             if runtime_status not in {"completed", "degraded", "failed"}:
-                runtime_status = "degraded" if result.diagnostics.get("degraded") else "completed"
+                runtime_status = (
+                    "degraded" if result.diagnostics.get("degraded") else "completed"
+                )
             stats.status = runtime_status
             stats.error_category = result.diagnostics.get("error_category", "")
             stats.diagnostics_complete = all(
                 key in result.diagnostics
-                for key in ("production_path", "review_status", "decision_count", "physical_projection")
+                for key in (
+                    "production_path",
+                    "review_status",
+                    "decision_count",
+                    "physical_projection",
+                )
             )
             if result.diagnostics.get("fallback_reason"):
                 stats.fallback_reason = result.diagnostics["fallback_reason"]
@@ -359,9 +366,7 @@ class PipelineASRPathMixin:
             return self._asr_route_decision
 
         def factory(engine_name, model=None, probe=False):
-            return self._get_asr_engine_for(
-                engine_name, model=model, cache=not probe
-            )
+            return self._get_asr_engine_for(engine_name, model=model, cache=not probe)
 
         decision = ASRRouter(self.config, factory).decide(
             audio, sample_rate, speech_intervals
@@ -381,8 +386,7 @@ class PipelineASRPathMixin:
             selected_model = decision.selected_model
             if pair.primary == "qwen":
                 selected_model = (
-                    getattr(self.config.asr, "qwen_model_path", None)
-                    or "qwen3-asr"
+                    getattr(self.config.asr, "qwen_model_path", None) or "qwen3-asr"
                 )
             decision = replace(
                 decision,
@@ -398,8 +402,10 @@ class PipelineASRPathMixin:
         self._asr_route_decision = decision
         # 显式执行计划(重构计划 Task 4):路径与回退策略可观测。
         from ..asr.execution_plan import build_execution_plan
+
         self._asr_execution_plan = build_execution_plan(
-            self.config, decision,
+            self.config,
+            decision,
             requested_path=self._resolve_asr_path(),
         )
         self._resolved_language = decision.language
@@ -509,7 +515,10 @@ class PipelineASRPathMixin:
                 result.events = []
         self._global_evidence = tuple(
             result.evidence
-            or [candidate_from_subtitle_event(event, source="global") for event in result.events]
+            or [
+                candidate_from_subtitle_event(event, source="global")
+                for event in result.events
+            ]
         )
         return result.events, result.diagnostics, result.transcript
 
@@ -531,11 +540,11 @@ class PipelineASRPathMixin:
         The tests in test_coverage_recovery and test_phase_three verify
         this integration path.
         """
-        from ..physical.ir import GlobalTranscript, GlobalTranscriptSegment, GlobalWord
-        from ..physical.subtitle_bins import build_physical_subtitle_bins
         from ..physical.allocator import AllocationResult, allocate_words
         from ..physical.coverage import audit_physical_coverage
         from ..physical.events import build_events
+        from ..physical.ir import GlobalTranscript, GlobalTranscriptSegment, GlobalWord
+        from ..physical.subtitle_bins import build_physical_subtitle_bins
         from ..physical.word_alignment import align_words_to_physical
 
         engine = self._get_global_asr_engine()
@@ -615,10 +624,15 @@ class PipelineASRPathMixin:
                             continue
                         word_ranges.append((word_start, word_end))
                     word = GlobalWord(
-                        id=word_id, text=str(getattr(w, "word", "")),
-                        raw_start=float(word_start if word_start is not None else seg.start),
+                        id=word_id,
+                        text=str(getattr(w, "word", "")),
+                        raw_start=float(
+                            word_start if word_start is not None else seg.start
+                        ),
                         raw_end=float(word_end if word_end is not None else seg.end),
-                        confidence=self._optional_asr_confidence(getattr(w, "confidence", None)),
+                        confidence=self._optional_asr_confidence(
+                            getattr(w, "confidence", None)
+                        ),
                         source_window_id="global",
                         segment_id=f"seg-{len(transcript_segments):03d}",
                         metadata={
@@ -635,10 +649,12 @@ class PipelineASRPathMixin:
                 if not seg_words:
                     word_id = f"word-{word_idx:06d}"
                     word = GlobalWord(
-                        id=word_id, text=str(getattr(seg, "text", "")).strip(),
+                        id=word_id,
+                        text=str(getattr(seg, "text", "")).strip(),
                         raw_start=float(getattr(seg, "start", 0.0)),
                         raw_end=float(getattr(seg, "end", 1.0)),
-                        confidence=None, source_window_id="global",
+                        confidence=None,
+                        source_window_id="global",
                         segment_id=f"seg-{len(transcript_segments):03d}",
                         metadata={"time_source": "segment_boundary"},
                     )
@@ -650,46 +666,59 @@ class PipelineASRPathMixin:
                     # segment end. Keep that valid acoustic evidence and
                     # repair the IR container instead of dropping the whole
                     # global transcript during validation.
-                    segment_start = min(segment_start, min(item[0] for item in word_ranges))
+                    segment_start = min(
+                        segment_start, min(item[0] for item in word_ranges)
+                    )
                     segment_end = max(segment_end, max(item[1] for item in word_ranges))
-                transcript_segments.append(GlobalTranscriptSegment(
-                    id=f"seg-{len(transcript_segments):03d}",
-                    text=str(getattr(seg, "text", "")).strip(),
-                    raw_start=segment_start,
-                    raw_end=segment_end,
-                    word_ids=seg_word_ids,
-                ))
+                transcript_segments.append(
+                    GlobalTranscriptSegment(
+                        id=f"seg-{len(transcript_segments):03d}",
+                        text=str(getattr(seg, "text", "")).strip(),
+                        raw_start=segment_start,
+                        raw_end=segment_end,
+                        word_ids=seg_word_ids,
+                    )
+                )
 
             global_transcript = GlobalTranscript(
                 audio_duration=float(stats.duration_seconds),
-                words=words, segments=transcript_segments,
+                words=words,
+                segments=transcript_segments,
                 backend=engine.name,
                 status="ok" if words else "degraded",
             )
 
         if timeline is None:
-            return [], {
-                **windowed_diagnostics,
-                "recovery": {"status": "no_timeline"},
-                "physical_coverage": {"complete": False},
-            }, global_transcript
+            return (
+                [],
+                {
+                    **windowed_diagnostics,
+                    "recovery": {"status": "no_timeline"},
+                    "physical_coverage": {"complete": False},
+                },
+                global_transcript,
+            )
 
         tail_repair = self._repair_tail_evidence(timeline, stats.duration_seconds)
 
         bins = build_physical_subtitle_bins(
-            timeline, audio=audio, sample_rate=sample_rate,
+            timeline,
+            audio=audio,
+            sample_rate=sample_rate,
         )
         speaker_timeline = getattr(shadow, "global_speaker_timeline", None)
-        allocation_result = allocate_words(global_transcript, timeline, speaker_timeline=speaker_timeline, subtitle_bins=bins)
+        allocation_result = allocate_words(
+            global_transcript,
+            timeline,
+            speaker_timeline=speaker_timeline,
+            subtitle_bins=bins,
+        )
 
         bin_owner_map = {
-            item.id: item.physical_clip_id
-            for item in bins
-            if item.physical_clip_id
+            item.id: item.physical_clip_id for item in bins if item.physical_clip_id
         }
         clip_bounds = {
-            item.id: (item.start, item.end)
-            for item in timeline.physical_clips
+            item.id: (item.start, item.end) for item in timeline.physical_clips
         }
         # Global callers may provide detector outputs directly. When they do
         # not, reconstruct the same absolute-time evidence from the shadow
@@ -732,8 +761,7 @@ class PipelineASRPathMixin:
             sample_rate=sample_rate,
             vad_segments=vad_segments,
             ffmpeg_result=(
-                getattr(shadow, "ffmpeg_unified_result", None)
-                or ffmpeg_result
+                getattr(shadow, "ffmpeg_unified_result", None) or ffmpeg_result
             ),
             noise_profile=noise_profile,
         )
@@ -762,12 +790,20 @@ class PipelineASRPathMixin:
             "quality_gate": quality.to_dict(),
             "tail_evidence_repair": tail_repair,
             "recovery": {
-                "status": "not_needed" if coverage.complete else "deferred_to_evidence_review"
+                "status": "not_needed"
+                if coverage.complete
+                else "deferred_to_evidence_review"
             },
         }
 
         if not coverage.complete:
-            global_transcript = GlobalTranscript(audio_duration=stats.duration_seconds, words=words, segments=transcript_segments, backend=engine.name, status="degraded")
+            global_transcript = GlobalTranscript(
+                audio_duration=stats.duration_seconds,
+                words=words,
+                segments=transcript_segments,
+                backend=engine.name,
+                status="degraded",
+            )
 
         quality = evaluate_asr_quality(
             events,
@@ -800,9 +836,11 @@ class PipelineASRPathMixin:
         evidence = list(getattr(timeline, "speech_evidence_spans", []) or [])
         preferred = [item for item in evidence if item.source == "ffmpeg_skeleton"]
         alternatives = [
-            item for item in evidence
+            item
+            for item in evidence
             if item.source != "ffmpeg_skeleton"
-            and item.source in {"silero", "ten", "webrtc", "boundary_fusion", "ffmpeg_coarse"}
+            and item.source
+            in {"silero", "ten", "webrtc", "boundary_fusion", "ffmpeg_coarse"}
         ]
         preferred_end = max((float(item.end) for item in preferred), default=0.0)
         alternative = max(alternatives, key=lambda item: float(item.end), default=None)
@@ -918,7 +956,8 @@ class PipelineASRPathMixin:
             policy = self.config.asr.auto_routing
             if (
                 cached_stats.get("asr_route_version") != policy.route_version
-                or cached_stats.get("quality_gate_version") != policy.quality_gate_version
+                or cached_stats.get("quality_gate_version")
+                != policy.quality_gate_version
                 or not cached_stats.get("requested_engine")
                 or not cached_stats.get("selected_engine")
             ):

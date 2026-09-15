@@ -8,7 +8,6 @@
 
 import logging
 from pathlib import Path
-from typing import List
 
 import numpy as np
 
@@ -46,7 +45,7 @@ class SileroVAD(VADEngine):
         logger.info("Loading Silero VAD model")
 
         try:
-            import torch
+            import torch  # noqa: F401 (可用性探测)
         except ImportError:
             raise ImportError(
                 "torch and torchaudio are required for Silero VAD. "
@@ -72,15 +71,13 @@ class SileroVAD(VADEngine):
         1. 优先从本地缓存加载（importlib，零网络访问，秒级完成）
         2. 缓存不存在时回退到 torch.hub.load（需要 GitHub 访问）
         """
-        import os
         import importlib.util
+        import os
 
         model, utils = None, None
         errors = []
 
-        cache_dir = os.path.expanduser(
-            "~/.cache/torch/hub/snakers4_silero-vad_master"
-        )
+        cache_dir = os.path.expanduser("~/.cache/torch/hub/snakers4_silero-vad_master")
 
         # 方式 1（优先）: 本地缓存直接加载，完全离线，避免 torch.hub.load
         # 即使 force_reload=False 也会尝试连接 GitHub 验证仓库，在无网/
@@ -97,15 +94,14 @@ class SileroVAD(VADEngine):
                 model, utils = hubconf.silero_vad()
             except Exception as e:
                 errors.append(f"local_cache: {e}")
-                logger.warning(
-                    "Failed to load Silero VAD from local cache: %s", e
-                )
+                logger.warning("Failed to load Silero VAD from local cache: %s", e)
         else:
             logger.info("Local cache not found at %s", cache_dir)
 
         # 方式 2（回退）: 本地缓存不存在时，通过 torch.hub.load 下载
         if model is None:
             import torch
+
             try:
                 logger.info("Loading Silero VAD from torch.hub (GitHub)...")
                 model, utils = torch.hub.load(
@@ -123,7 +119,7 @@ class SileroVAD(VADEngine):
             raise RuntimeError(
                 "Failed to load Silero VAD model. "
                 "Please ensure either GitHub is accessible or the model "
-                "is cached locally. Errors: %s" % "; ".join(errors)
+                f"is cached locally. Errors: {'; '.join(errors)}"
             )
 
         return model, utils
@@ -134,7 +130,7 @@ class SileroVAD(VADEngine):
         threshold: float = 0.5,
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 400,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """检测音频文件中的语音区间
 
         Args:
@@ -184,7 +180,7 @@ class SileroVAD(VADEngine):
         threshold: float = 0.5,
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 400,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """在 numpy 数组上检测语音区间
 
         Args:
@@ -209,8 +205,8 @@ class SileroVAD(VADEngine):
         if sample_rate != 16000:
             # 需要重采样
             try:
-                import torchaudio
-                import torchaudio.functional as F
+                import torchaudio  # noqa: F401 (可用性探测)
+                import torchaudio.functional as F  # noqa: F401,N812 (PyTorch 惯例别名)
 
                 audio_tensor = torch.from_numpy(audio).unsqueeze(0)
                 audio_tensor = F.resample(

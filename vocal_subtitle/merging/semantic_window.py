@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import copy
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any
 
 from ..mapping.semantic_fragments import PhysicalFragment
 
@@ -34,14 +35,14 @@ class SemanticWindowInput:
     """
 
     window_id: str
-    fragment_ids: List[str] = field(default_factory=list)
-    word_ids: List[str] = field(default_factory=list)
+    fragment_ids: list[str] = field(default_factory=list)
+    word_ids: list[str] = field(default_factory=list)
     physical_range_start: float = 0.0  # readonly, for diagnostics only
     physical_range_end: float = 0.0
     language: str = ""
-    fragments: List[Dict[str, Any]] = field(default_factory=list)  # readonly metadata
+    fragments: list[dict[str, Any]] = field(default_factory=list)  # readonly metadata
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "window_id": self.window_id,
             "fragment_ids": list(self.fragment_ids),
@@ -60,13 +61,21 @@ class SemanticWindowOutput:
     """
 
     window_id: str
-    groups: List[List[str]] = field(default_factory=list)  # ordered fragment/word ID groups
-    normalized_text: Dict[str, str] = field(default_factory=dict)  # word_id -> corrected text
-    speaker_decisions: Dict[str, int] = field(default_factory=dict)  # fragment_id -> speaker_id (UNKNOWN only)
-    review_requests: List[Dict[str, Any]] = field(default_factory=list)  # suspected missing/incorrect words
+    groups: list[list[str]] = field(
+        default_factory=list
+    )  # ordered fragment/word ID groups
+    normalized_text: dict[str, str] = field(
+        default_factory=dict
+    )  # word_id -> corrected text
+    speaker_decisions: dict[str, int] = field(
+        default_factory=dict
+    )  # fragment_id -> speaker_id (UNKNOWN only)
+    review_requests: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # suspected missing/incorrect words
     reason: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "window_id": self.window_id,
             "groups": [list(g) for g in self.groups],
@@ -77,7 +86,7 @@ class SemanticWindowOutput:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "SemanticWindowOutput":
+    def from_dict(cls, payload: dict) -> SemanticWindowOutput:
         return cls(
             window_id=payload["window_id"],
             groups=payload.get("groups", []),
@@ -100,7 +109,7 @@ def build_semantic_windows(
     max_window_duration: float = 30.0,
     window_overlap_fragments: int = 1,
     window_id_prefix: str = "sw",
-) -> List[SemanticWindowInput]:
+) -> list[SemanticWindowInput]:
     """Partition PhysicalFragments into semantic windows respecting hard boundaries.
 
     Windows are truncated at hard_split_before markers — no window ever
@@ -121,16 +130,16 @@ def build_semantic_windows(
     if not fragments:
         return []
 
-    windows: List[SemanticWindowInput] = []
+    windows: list[SemanticWindowInput] = []
     window_index = 0
     i = 0
 
     while i < len(fragments):
         window_index += 1
-        window_frags: List[PhysicalFragment] = []
+        window_frags: list[PhysicalFragment] = []
         window_duration = 0.0
-        frag_ids: List[str] = []
-        word_ids: List[str] = []
+        frag_ids: list[str] = []
+        word_ids: list[str] = []
 
         for j in range(i, len(fragments)):
             frag = fragments[j]
@@ -153,24 +162,28 @@ def build_semantic_windows(
         # Build read-only metadata for each fragment
         frag_metadata = []
         for frag in window_frags:
-            frag_metadata.append({
-                "fragment_id": frag.id,
-                "word_ids": list(frag.word_ids),
-                "language": frag.language,
-                "candidate_speaker": frag.candidate_speaker,
-                "speaker_status": frag.speaker_status,
-                "speaker_confidence": frag.speaker_confidence,
-                "pause_class": frag.pause_class,
-                "hard_split_before": frag.hard_split_before,
-                "hard_split_reason": frag.hard_split_reason,
-                "genuine_overlap": frag.genuine_overlap,
-            })
+            frag_metadata.append(
+                {
+                    "fragment_id": frag.id,
+                    "word_ids": list(frag.word_ids),
+                    "language": frag.language,
+                    "candidate_speaker": frag.candidate_speaker,
+                    "speaker_status": frag.speaker_status,
+                    "speaker_confidence": frag.speaker_confidence,
+                    "pause_class": frag.pause_class,
+                    "hard_split_before": frag.hard_split_before,
+                    "hard_split_reason": frag.hard_split_reason,
+                    "genuine_overlap": frag.genuine_overlap,
+                }
+            )
 
         window = SemanticWindowInput(
             window_id=f"{window_id_prefix}-{window_index:04d}",
             fragment_ids=frag_ids,
             word_ids=word_ids,
-            physical_range_start=window_frags[0].physical_start if window_frags else 0.0,
+            physical_range_start=window_frags[0].physical_start
+            if window_frags
+            else 0.0,
             physical_range_end=window_frags[-1].physical_end if window_frags else 0.0,
             language=window_frags[0].language or "",
             fragments=frag_metadata,
@@ -186,7 +199,6 @@ def build_semantic_windows(
             step = max(1, consumed - window_overlap_fragments)
             i = i + step
 
-
     return windows
 
 
@@ -199,8 +211,8 @@ def validate_window_output(
     output: SemanticWindowOutput,
     window: SemanticWindowInput,
     *,
-    confirmed_speakers: Optional[Set[int]] = None,
-) -> tuple[bool, List[str]]:
+    confirmed_speakers: set[int] | None = None,
+) -> tuple[bool, list[str]]:
     """Validate LLM output against invariants.
 
     Returns (valid, errors). The output is REJECTED if errors is non-empty.
@@ -213,13 +225,12 @@ def validate_window_output(
     - No confirmed speaker modification
     - No invented text without source word IDs
     """
-    errors: List[str] = []
+    errors: list[str] = []
     valid_ids = set(window.fragment_ids) | set(window.word_ids)
     confirmed = confirmed_speakers or set()
 
     # Collect all referenced IDs
-    all_group_ids: Set[str] = set()
-    seen_ids: Set[str] = set()
+    seen_ids: set[str] = set()
 
     for group in output.groups:
         group_ids = set()
@@ -232,7 +243,11 @@ def validate_window_output(
             group_ids.add(fid)
 
         # Check for cross-hard-boundary merge
-        group_frags = [f for f in window.fragments if f.get("fragment_id", f.get("id", "")) in group_ids]
+        group_frags = [
+            f
+            for f in window.fragments
+            if f.get("fragment_id", f.get("id", "")) in group_ids
+        ]
         if len(group_frags) >= 2:
             for k in range(1, len(group_frags)):
                 if group_frags[k].get("hard_split_before", False):
@@ -250,8 +265,19 @@ def validate_window_output(
         if frag_id not in valid_ids:
             errors.append(f"speaker decision for unknown fragment: {frag_id}")
             continue
-        frag = next((f for f in window.fragments if f.get("fragment_id", f.get("id", "")) == frag_id), None)
-        if frag and frag.get("speaker_status") == "confirmed" and frag.get("candidate_speaker") in confirmed:
+        frag = next(
+            (
+                f
+                for f in window.fragments
+                if f.get("fragment_id", f.get("id", "")) == frag_id
+            ),
+            None,
+        )
+        if (
+            frag
+            and frag.get("speaker_status") == "confirmed"
+            and frag.get("candidate_speaker") in confirmed
+        ):
             errors.append(f"cannot modify confirmed speaker for fragment {frag_id}")
 
     return len(errors) == 0, errors
@@ -270,11 +296,11 @@ def merge_windows(
     if not outputs:
         return SemanticWindowOutput(window_id="empty")
 
-    all_groups: List[List[str]] = []
-    seen_ids: Set[str] = set()
-    all_text: Dict[str, str] = {}
-    all_speakers: Dict[str, int] = {}
-    all_reviews: List[Dict[str, Any]] = []
+    all_groups: list[list[str]] = []
+    seen_ids: set[str] = set()
+    all_text: dict[str, str] = {}
+    all_speakers: dict[str, int] = {}
+    all_reviews: list[dict[str, Any]] = []
 
     for output in outputs:
         for group in output.groups:

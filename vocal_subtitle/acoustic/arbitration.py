@@ -17,9 +17,10 @@
 同一约定,不引入新依赖。
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -35,13 +36,13 @@ R2_ENERGY_THRESHOLD_RATIO = 2.0
 class R1Decision:
     """单个事件的 R1 共识判定结果。"""
 
-    similarity: float          # 对齐重合字符 / 较短方字符数
-    overlap_chars: int         # 字符对齐的一致字符数
-    evidence_start: float      # 命中的 evidence 候选起点
-    evidence_end: float        # 命中的 evidence 候选终点
+    similarity: float  # 对齐重合字符 / 较短方字符数
+    overlap_chars: int  # 字符对齐的一致字符数
+    evidence_start: float  # 命中的 evidence 候选起点
+    evidence_end: float  # 命中的 evidence 候选终点
 
 
-def char_overlap(baseline: str, reference: str) -> Tuple[int, float]:
+def char_overlap(baseline: str, reference: str) -> tuple[int, float]:
     """按字符对齐比较两段文本。
 
     Returns:
@@ -63,14 +64,14 @@ def char_overlap(baseline: str, reference: str) -> Tuple[int, float]:
 
 
 def coerce_evidence_regions(
-    evidence: Optional[Sequence[Any]],
-) -> Tuple[Tuple[float, float, str], ...]:
+    evidence: Sequence[Any] | None,
+) -> tuple[tuple[float, float, str], ...]:
     """把全程 evidence 候选归一为 (start, end, text) 三元组序列。
 
     接受带 start/end/text 属性的对象(如 CandidateEvidence)或直接的
     三元组;无法解析的条目静默跳过(evidence 是参照文本,不是主路径)。
     """
-    regions: List[Tuple[float, float, str]] = []
+    regions: list[tuple[float, float, str]] = []
     for item in evidence or ():
         if isinstance(item, (tuple, list)):
             if len(item) != 3:
@@ -91,11 +92,11 @@ def coerce_evidence_regions(
 
 def r1_consensus_decisions(
     events: Sequence[Any],
-    evidence_regions: Sequence[Tuple[float, float, str]],
+    evidence_regions: Sequence[tuple[float, float, str]],
     *,
     min_overlap_chars: int,
     min_similarity: float,
-) -> Dict[int, R1Decision]:
+) -> dict[int, R1Decision]:
     """按事件判定 R1 共识(分段基线 vs 全程 evidence)。
 
     对每个事件,取与其时间范围有正重叠的 evidence 候选逐一做字符对齐,
@@ -104,7 +105,7 @@ def r1_consensus_decisions(
     Returns:
         {id(event): R1Decision};无 evidence 或无达标事件时为空 dict。
     """
-    decisions: Dict[int, R1Decision] = {}
+    decisions: dict[int, R1Decision] = {}
     if not evidence_regions:
         return decisions
     for event in events:
@@ -113,7 +114,7 @@ def r1_consensus_decisions(
             continue
         start = float(getattr(event, "start", 0.0))
         end = float(getattr(event, "end", 0.0))
-        best: Optional[R1Decision] = None
+        best: R1Decision | None = None
         for region_start, region_end, text in evidence_regions:
             if region_start >= end or region_end <= start:
                 continue
@@ -122,7 +123,8 @@ def r1_consensus_decisions(
                 continue
             # 一致字符数优先;并列时取重合率更高者。
             if best is None or (overlap, similarity) > (
-                best.overlap_chars, best.similarity,
+                best.overlap_chars,
+                best.similarity,
             ):
                 best = R1Decision(
                     similarity=round(similarity, 6),
@@ -138,10 +140,10 @@ def r1_consensus_decisions(
 def best_skeleton_segment(
     start: float,
     end: float,
-    skeleton: Sequence[Tuple[float, float]],
-) -> Optional[Tuple[float, float]]:
+    skeleton: Sequence[tuple[float, float]],
+) -> tuple[float, float] | None:
     """返回与 [start, end] 重叠最大的骨架成员段;无正重叠返回 None。"""
-    best: Optional[Tuple[float, float]] = None
+    best: tuple[float, float] | None = None
     best_overlap = 0.0
     for seg_start, seg_end in skeleton:
         overlap = min(end, seg_end) - max(start, seg_start)
@@ -151,14 +153,14 @@ def best_skeleton_segment(
     return best
 
 
-def event_word_spans(event: Any) -> List[Tuple[float, float]]:
+def event_word_spans(event: Any) -> list[tuple[float, float]]:
     """事件的词绝对时间跨度列表。
 
     词时间契约:SubtitleEvent.words 相对 event.start(time_mapper 契约);
     物理路径的 GlobalWord 带 raw_start/raw_end 绝对坐标,优先使用。
     """
     event_start = float(getattr(event, "start", 0.0) or 0.0)
-    spans: List[Tuple[float, float]] = []
+    spans: list[tuple[float, float]] = []
     for word in getattr(event, "words", None) or ():
         start = getattr(word, "raw_start", None)
         end = getattr(word, "raw_end", None)
@@ -182,10 +184,10 @@ def event_word_spans(event: Any) -> List[Tuple[float, float]]:
 
 
 def words_beyond(
-    spans: Sequence[Tuple[float, float]],
+    spans: Sequence[tuple[float, float]],
     boundary: float,
     side: str,
-) -> List[Tuple[float, float]]:
+) -> list[tuple[float, float]]:
     """找出会被端点吸附到 boundary 裁掉的词。
 
     end 回缩裁词尾(start < boundary < end),start 后移裁词头
@@ -193,7 +195,7 @@ def words_beyond(
     """
     if side not in {"start", "end"}:
         raise ValueError("side must be 'start' or 'end'")
-    cut: List[Tuple[float, float]] = []
+    cut: list[tuple[float, float]] = []
     for word_start, word_end in spans:
         if side == "end" and word_end > boundary + 1e-6:
             cut.append((word_start, word_end))
@@ -208,7 +210,7 @@ def local_silence_rms(
     center: float,
     *,
     half_window: float = LOCAL_NOISE_HALF_WINDOW,
-) -> Optional[float]:
+) -> float | None:
     """词周边局部窗口的噪声底(底部 20% 帧 RMS 中位数)。
 
     与 AudioUtils.estimate_silence_rms 同语义,但只采样词周边
@@ -221,12 +223,14 @@ def local_silence_rms(
         return None
     total_samples = len(audio)
     start_sample = max(0, int((center - half_window) * sample_rate))
-    end_sample = min(total_samples - frame_size, int((center + half_window) * sample_rate))
+    end_sample = min(
+        total_samples - frame_size, int((center + half_window) * sample_rate)
+    )
     if end_sample - start_sample < frame_size:
         return None
     rms_samples = []
     for pos in range(start_sample, end_sample, step):
-        frame = audio[pos:pos + frame_size]
+        frame = audio[pos : pos + frame_size]
         if len(frame) == 0:
             continue
         rms_samples.append(float(np.sqrt(np.mean(np.asarray(frame) ** 2))))
@@ -240,7 +244,7 @@ def local_silence_rms(
 def word_speech_confirmed(
     audio: Any,
     sample_rate: int,
-    word_span: Tuple[float, float],
+    word_span: tuple[float, float],
     *,
     local_noise: bool,
     threshold_ratio: float = R2_ENERGY_THRESHOLD_RATIO,

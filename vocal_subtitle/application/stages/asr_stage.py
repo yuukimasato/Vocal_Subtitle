@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from ..run_context import RunContext
-from ..stage_protocol import PipelineStage
 
 
 class ASRStage:

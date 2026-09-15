@@ -22,7 +22,6 @@ import vocal_subtitle
 import vocal_subtitle.feedback.dataset_export as dataset_export_module
 from vocal_subtitle.feedback import sample_manager as sample_manager_module
 from vocal_subtitle.feedback.dataset_export import (
-    collect_accepted_samples,
     export_dataset,
     summarize_export,
 )
@@ -34,9 +33,19 @@ SHA_A = "a" * 64
 SHA_B = "b" * 64
 
 
-def _ingest(manager, text, *, scene="inline-review", language="zh", speaker_count=2,
-            duration=12.5, status="accepted", task_id="task-1", sha256=SHA_A,
-            run_id="run-1"):
+def _ingest(
+    manager,
+    text,
+    *,
+    scene="inline-review",
+    language="zh",
+    speaker_count=2,
+    duration=12.5,
+    status="accepted",
+    task_id="task-1",
+    sha256=SHA_A,
+    run_id="run-1",
+):
     """入库一条样本并置为指定审核状态（与 test_dataset_export 同一做法）"""
     sample = manager.ingest(
         auto_subtitle=f"1\n00:00:00,000 --> 00:00:02,000\n自动{text}\n",
@@ -87,7 +96,8 @@ def client(sample_library, data_root):
 def sample_library(tmp_path, monkeypatch):
     """把路由内 FeedbackSampleManager 的解析整体替换为临时样本库"""
     monkeypatch.setattr(
-        sample_manager_module, "FeedbackSampleManager",
+        sample_manager_module,
+        "FeedbackSampleManager",
         lambda: FeedbackSampleManager(tmp_path / "lib"),
     )
     return tmp_path / "lib"
@@ -111,20 +121,30 @@ class TestSummarizeExport:
     def test_preview_count_equals_export_count(self, library, tmp_path):
         """预览 exportable_count == 导出 exported_count（全场景与场景过滤两种口径）"""
         _ingest(library, "甲")
-        _ingest(library, "乙", scene="from-scratch-timing", task_id="task-2", sha256=SHA_B)
-        _ingest(library, "丙", status="pending")   # pending 不出门
+        _ingest(
+            library, "乙", scene="from-scratch-timing", task_id="task-2", sha256=SHA_B
+        )
+        _ingest(library, "丙", status="pending")  # pending 不出门
         _ingest(library, "丁", status="rejected")  # rejected 不出门
 
         for scenarios, name in (([], "ds-all"), (["inline-review"], "ds-inline")):
             preview = summarize_export(library, scenarios)
-            outcome = export_dataset(library, tmp_path / name, license="CC-BY-4.0", scenarios=scenarios)
+            outcome = export_dataset(
+                library, tmp_path / name, license="CC-BY-4.0", scenarios=scenarios
+            )
             assert preview["exportable_count"] == outcome.exported_count
             assert preview["accepted_total"] == outcome.accepted_total
 
     def test_scenario_filter_and_language_distribution(self, library):
         _ingest(library, "甲", scene="inline-review", language="zh")
-        _ingest(library, "乙", scene="from-scratch-timing", language="ja",
-                task_id="task-2", sha256=SHA_B)
+        _ingest(
+            library,
+            "乙",
+            scene="from-scratch-timing",
+            language="ja",
+            task_id="task-2",
+            sha256=SHA_B,
+        )
         preview = summarize_export(library)
         assert preview["accepted_total"] == 2
         assert preview["by_scenario"] == {"inline-review": 1, "from-scratch-timing": 1}
@@ -185,8 +205,14 @@ class TestDatasetPreviewEndpoint:
     def test_preview_stats(self, client, sample_library):
         manager = FeedbackSampleManager(sample_library)
         _ingest(manager, "甲")
-        _ingest(manager, "乙", scene="external-correction", language="en",
-                task_id="task-2", sha256=SHA_B)
+        _ingest(
+            manager,
+            "乙",
+            scene="external-correction",
+            language="en",
+            task_id="task-2",
+            sha256=SHA_B,
+        )
         _ingest(manager, "丙", status="pending")
 
         resp = client.get("/api/feedback/dataset/preview")
@@ -204,15 +230,21 @@ class TestDatasetPreviewEndpoint:
     def test_preview_scenario_query_filter(self, client, sample_library):
         manager = FeedbackSampleManager(sample_library)
         _ingest(manager, "甲")
-        _ingest(manager, "乙", scene="from-scratch-timing", task_id="task-2", sha256=SHA_B)
-        resp = client.get("/api/feedback/dataset/preview", params={"scenarios": "inline-review"})
+        _ingest(
+            manager, "乙", scene="from-scratch-timing", task_id="task-2", sha256=SHA_B
+        )
+        resp = client.get(
+            "/api/feedback/dataset/preview", params={"scenarios": "inline-review"}
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["scenarios_filter"] == ["inline-review"]
         assert data["exportable_count"] == 1
 
     def test_preview_unknown_scenario_400(self, client):
-        resp = client.get("/api/feedback/dataset/preview", params={"scenarios": "bogus"})
+        resp = client.get(
+            "/api/feedback/dataset/preview", params={"scenarios": "bogus"}
+        )
         assert resp.status_code == 400
         assert "未知场景标签" in resp.json()["detail"]
 
@@ -248,7 +280,9 @@ class TestDatasetExportEndpoint:
 
     def test_empty_library_400(self, client):
         """真实样本库全是 pending 时的等价场景：无 accepted 样本 → 400 拒绝"""
-        resp = client.post("/api/feedback/dataset/export", json={"license": "CC-BY-4.0"})
+        resp = client.post(
+            "/api/feedback/dataset/export", json={"license": "CC-BY-4.0"}
+        )
         assert resp.status_code == 400
         assert "accepted" in resp.json()["detail"]
 
@@ -257,12 +291,18 @@ class TestDatasetExportEndpoint:
     ):
         manager = FeedbackSampleManager(sample_library)
         _ingest(manager, "甲")
-        _ingest(manager, "乙", scene="external-correction", task_id="task-2", sha256=SHA_B)
+        _ingest(
+            manager, "乙", scene="external-correction", task_id="task-2", sha256=SHA_B
+        )
         out_dir = tmp_path / "custom-ds"
 
         resp = client.post(
             "/api/feedback/dataset/export",
-            json={"license": "CC-BY-4.0", "scenarios": ["inline-review"], "out_dir": str(out_dir)},
+            json={
+                "license": "CC-BY-4.0",
+                "scenarios": ["inline-review"],
+                "out_dir": str(out_dir),
+            },
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -276,7 +316,9 @@ class TestDatasetExportEndpoint:
         assert (out_dir / "README.md").exists()
         assert (out_dir / "manifest.json").exists()
         assert "CC-BY-4.0" in (out_dir / "README.md").read_text(encoding="utf-8")
-        lines = (out_dir / "data/shard-0001.jsonl").read_text(encoding="utf-8").splitlines()
+        lines = (
+            (out_dir / "data/shard-0001.jsonl").read_text(encoding="utf-8").splitlines()
+        )
         assert len(lines) == 1
         assert json.loads(lines[0])["schema"] == "dataset-v1"
 
@@ -305,7 +347,9 @@ class TestDatasetExportEndpoint:
         manager = FeedbackSampleManager(sample_library)
         _ingest(manager, "甲")
 
-        first = client.post("/api/feedback/dataset/export", json={"license": "CC-BY-4.0"})
+        first = client.post(
+            "/api/feedback/dataset/export", json={"license": "CC-BY-4.0"}
+        )
         assert first.status_code == 200
         assert first.json()["exported_count"] == 1
 
@@ -313,7 +357,9 @@ class TestDatasetExportEndpoint:
         assert preview.json()["exportable_count"] == 0
         assert preview.json()["already_exported"] == 1
 
-        second = client.post("/api/feedback/dataset/export", json={"license": "CC-BY-4.0"})
+        second = client.post(
+            "/api/feedback/dataset/export", json={"license": "CC-BY-4.0"}
+        )
         assert second.status_code == 200
         assert second.json()["exported_count"] == 0
         assert second.json()["total_samples"] == 1
@@ -331,10 +377,24 @@ class TestDatasetWorkspaceFlow:
     ):
         manager = FeedbackSampleManager(sample_library)
         _ingest(manager, "甲", scene="inline-review", language="zh")
-        _ingest(manager, "乙", scene="inline-review", language="zh",
-                task_id="task-2", sha256=SHA_B, run_id="run-2")
-        _ingest(manager, "丙", scene="from-scratch-timing", language="ja",
-                task_id="task-3", sha256=SHA_B, run_id="run-3")
+        _ingest(
+            manager,
+            "乙",
+            scene="inline-review",
+            language="zh",
+            task_id="task-2",
+            sha256=SHA_B,
+            run_id="run-2",
+        )
+        _ingest(
+            manager,
+            "丙",
+            scene="from-scratch-timing",
+            language="ja",
+            task_id="task-3",
+            sha256=SHA_B,
+            run_id="run-3",
+        )
         _ingest(manager, "丁", status="pending")  # 真实库全 pending 的等价物：不参与
 
         # 1. 预览（前端进入工作区自动加载，全部场景）
@@ -374,7 +434,9 @@ class TestDatasetWorkspaceFlow:
         assert manifest["total_samples"] == export["total_samples"] == 2
         assert manifest["license"] == "CC-BY-4.0"
         assert manifest["scenarios_filter"] == ["inline-review"]
-        shard_lines = (out_dir / "data/shard-0001.jsonl").read_text(encoding="utf-8").splitlines()
+        shard_lines = (
+            (out_dir / "data/shard-0001.jsonl").read_text(encoding="utf-8").splitlines()
+        )
         assert len(shard_lines) == export["exported_count"] == 2
 
         # 5. 导出后同参数预览归零、累计数一致（追加式语义前后呼应）
@@ -401,7 +463,9 @@ class TestServiceLayerReuse:
         real = dataset_export_module.export_dataset
 
         def spy(*args, **kwargs):
-            calls.append({"license": kwargs.get("license"), "scenarios": kwargs.get("scenarios")})
+            calls.append(
+                {"license": kwargs.get("license"), "scenarios": kwargs.get("scenarios")}
+            )
             return real(*args, **kwargs)
 
         monkeypatch.setattr(dataset_export_module, "export_dataset", spy)
@@ -457,7 +521,9 @@ class TestStaticWorkspace:
         assert "DatasetWorkspace.refresh" in source
 
     def test_dataset_workspace_js_wiring(self):
-        source = (STATIC_DIR / "js" / "ui-dataset-workspace.js").read_text(encoding="utf-8")
+        source = (STATIC_DIR / "js" / "ui-dataset-workspace.js").read_text(
+            encoding="utf-8"
+        )
         assert "window.DatasetWorkspace" in source
         assert "datasetPreview" in source
         assert "datasetExport" in source

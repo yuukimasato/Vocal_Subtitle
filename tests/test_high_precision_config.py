@@ -114,24 +114,30 @@ def _word(start, end):
 
 
 def test_golden_gate_passes_full_coverage_non_overlapping_events():
-    result = evaluate_golden_set([{
-        "id": "case-ok",
-        "expected_events": [{
-            "kind": "speech",
-            "start": 1.0,
-            "end": 2.0,
-            "text": "hello",
-        }],
-        "predicted_events": [
-            _event(1, 1.0, 1.5, "hel", [_word(1.0, 1.2), _word(1.2, 1.5)]),
-            _event(2, 1.5, 2.0, "lo", [_word(1.5, 1.8)]),
-        ],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-        },
-    }])
+    result = evaluate_golden_set(
+        [
+            {
+                "id": "case-ok",
+                "expected_events": [
+                    {
+                        "kind": "speech",
+                        "start": 1.0,
+                        "end": 2.0,
+                        "text": "hello",
+                    }
+                ],
+                "predicted_events": [
+                    _event(1, 1.0, 1.5, "hel", [_word(1.0, 1.2), _word(1.2, 1.5)]),
+                    _event(2, 1.5, 2.0, "lo", [_word(1.5, 1.8)]),
+                ],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            }
+        ]
+    )
 
     metrics = result["metrics"]
     assert metrics["word_time_coverage_rate"] == 1.0
@@ -140,21 +146,28 @@ def test_golden_gate_passes_full_coverage_non_overlapping_events():
     assert result["checks"]["word_time_coverage"] is True
     assert result["checks"]["subtitle_overlap"] is True
     strict = evaluate_golden_set(
-        [{
-            **{"id": "case-ok"},
-            "expected_events": [{
-                "kind": "speech", "start": 1.0, "end": 2.0, "text": "hello",
-            }],
-            "predicted_events": [
-                _event(1, 1.0, 1.5, "hel", [_word(1.0, 1.2), _word(1.2, 1.5)]),
-                _event(2, 1.5, 2.0, "lo", [_word(1.5, 1.8)]),
-            ],
-            "diagnostics": {
-                "physical_violation_count": 0,
-                "cross_silence_count": 0,
-                "raw_event_bypass_count": 0,
-            },
-        }],
+        [
+            {
+                **{"id": "case-ok"},
+                "expected_events": [
+                    {
+                        "kind": "speech",
+                        "start": 1.0,
+                        "end": 2.0,
+                        "text": "hello",
+                    }
+                ],
+                "predicted_events": [
+                    _event(1, 1.0, 1.5, "hel", [_word(1.0, 1.2), _word(1.2, 1.5)]),
+                    _event(2, 1.5, 2.0, "lo", [_word(1.5, 1.8)]),
+                ],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            }
+        ],
         thresholds=GoldenQualityThresholds(
             min_word_time_coverage_rate=0.95,
             max_subtitle_overlap_rate=0.0,

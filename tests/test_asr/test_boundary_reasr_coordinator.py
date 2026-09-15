@@ -8,10 +8,8 @@
 from types import SimpleNamespace
 
 from vocal_subtitle.asr.boundary_reasr import (
-    SlidingWindow,
     SlidingWindowConfig,
     SlidingWindowReASR,
-    WindowASRResult,
 )
 from vocal_subtitle.asr.window_execution import WindowExecutionCoordinator
 

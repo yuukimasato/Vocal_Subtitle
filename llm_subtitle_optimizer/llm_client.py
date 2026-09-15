@@ -9,7 +9,7 @@
 """
 
 import os
-from typing import Any, List, Optional
+from typing import Any
 
 # 延迟导入可选依赖，仅在实际使用时才要求安装
 _openai_module = None
@@ -41,11 +41,19 @@ def _ensure_llm_deps():
         )
 
     try:
-        from tenacity import (
+        from tenacity import (  # noqa: F401 (可用性探测)
             RetryCallState,
+        )
+        from tenacity import (
             retry as _retry,
+        )
+        from tenacity import (
             retry_if_exception_type as _retry_if_exc,
+        )
+        from tenacity import (
             stop_after_attempt as _stop,
+        )
+        from tenacity import (
             wait_random_exponential as _wait,
         )
 
@@ -58,6 +66,7 @@ def _ensure_llm_deps():
             "LLM 重试机制需要 tenacity 库，请安装: pip install -e '.[llm]'\n"
             "或直接: pip install tenacity"
         )
+
 
 # ---- DeepSeek 默认配置 ----
 DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
@@ -72,7 +81,7 @@ _API_KEY_ENV_NAMES = ["DEEPSEEK_API_KEY", "OPENAI_API_KEY"]
 _BASE_URL_ENV_NAMES = ["DEEPSEEK_BASE_URL", "OPENAI_BASE_URL"]
 
 
-def _read_env(names: List[str]) -> str:
+def _read_env(names: list[str]) -> str:
     """从多个环境变量名中读取第一个非空值"""
     for name in names:
         val = os.getenv(name, "").strip()
@@ -107,8 +116,8 @@ def normalize_base_url(base_url: str) -> str:
 
 
 def get_llm_client(
-    base_url: Optional[str] = None,
-    api_key: Optional[str] = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
 ):
     """获取 LLM 客户端实例。
 
@@ -126,7 +135,9 @@ def get_llm_client(
     """
     _ensure_llm_deps()
     base_url = base_url or _read_env(_BASE_URL_ENV_NAMES) or DEFAULT_BASE_URL
-    api_key = api_key or _read_env(_API_KEY_ENV_NAMES) or "ollama"  # Ollama doesn't require a real key
+    api_key = (
+        api_key or _read_env(_API_KEY_ENV_NAMES) or "ollama"
+    )  # Ollama doesn't require a real key
 
     base_url = normalize_base_url(base_url)
 
@@ -139,7 +150,7 @@ def get_llm_client(
 
 def _call_llm_api(
     client,
-    messages: List[dict],
+    messages: list[dict],
     model: str,
     temperature: float = 1,
     **kwargs: Any,
@@ -155,11 +166,11 @@ def _call_llm_api(
 
 
 def call_llm(
-    messages: List[dict],
+    messages: list[dict],
     model: str = DEFAULT_MODEL,
     temperature: float = 1,
-    base_url: Optional[str] = None,
-    api_key: Optional[str] = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
     client=None,
     **kwargs: Any,
 ) -> Any:

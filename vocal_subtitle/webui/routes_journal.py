@@ -14,7 +14,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
@@ -32,7 +32,7 @@ _EVENT_REQUIRED_FIELDS = {"schema", "type", "seq", "command"}
 _SAFE_SESSION_ID = re.compile(r"[^A-Za-z0-9._-]+")
 
 
-def _event_session_id(record: Dict[str, Any]) -> Optional[str]:
+def _event_session_id(record: dict[str, Any]) -> str | None:
     value = record.get("session_id") or record.get("session")
     return str(value) if value else None
 
@@ -71,7 +71,7 @@ def _load_seen_seq(path: Path) -> set[int]:
     return seen
 
 
-def _parse_payload(body: bytes, content_type: str) -> Optional[List[Dict[str, Any]]]:
+def _parse_payload(body: bytes, content_type: str) -> list[dict[str, Any]] | None:
     """解析 NDJSON（application/x-ndjson）与 JSON（对象/数组）两种形态。
 
     整体 JSON 优先尝试（单行 NDJSON 本身也是合法 JSON，语义一致）；
@@ -93,9 +93,13 @@ def _parse_payload(body: bytes, content_type: str) -> Optional[List[Dict[str, An
             if isinstance(events, list):
                 return [record for record in events if isinstance(record, dict)]
             return [data]
-        if stripped.startswith("[") or "json" in content_type and not stripped.count("\n"):
+        if (
+            stripped.startswith("[")
+            or "json" in content_type
+            and not stripped.count("\n")
+        ):
             return None
-    records: List[Dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
     for line in text.splitlines():
         line = line.strip()
         if not line:
@@ -110,9 +114,9 @@ def _parse_payload(body: bytes, content_type: str) -> Optional[List[Dict[str, An
     return records or None
 
 
-def _validate(records: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], int]:
+def _validate(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     """schema 校验：首行 header（可选），其后 event；返回 (合格记录, 拒绝数)"""
-    valid: List[Dict[str, Any]] = []
+    valid: list[dict[str, Any]] = []
     rejected = 0
     for record in records:
         if record.get("schema") != JOURNAL_SCHEMA:
@@ -121,7 +125,11 @@ def _validate(records: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], int]
         if record.get("type") == "header":
             valid.append(record)
             continue
-        if record.get("type") == "event" and _EVENT_REQUIRED_FIELDS <= set(record) and _event_session_id(record):
+        if (
+            record.get("type") == "event"
+            and _EVENT_REQUIRED_FIELDS <= set(record)
+            and _event_session_id(record)
+        ):
             valid.append(record)
             continue
         rejected += 1
@@ -146,17 +154,25 @@ async def journal_sink(request: Request):
     if records is None:
         return JSONResponse(
             status_code=400,
-            content={"accepted": 0, "rejected": 0, "error": "invalid payload: expected NDJSON or JSON events"},
+            content={
+                "accepted": 0,
+                "rejected": 0,
+                "error": "invalid payload: expected NDJSON or JSON events",
+            },
         )
     valid, rejected = _validate(records)
     if not valid:
         return JSONResponse(
             status_code=422,
-            content={"accepted": 0, "rejected": rejected, "error": "no valid edit-journal-v1 records"},
+            content={
+                "accepted": 0,
+                "rejected": rejected,
+                "error": "no valid edit-journal-v1 records",
+            },
         )
 
     # 按 session 分组落盘；header 记录到对应会话文件首部（仅首次）
-    by_session: Dict[str, List[Dict[str, Any]]] = {}
+    by_session: dict[str, list[dict[str, Any]]] = {}
     for record in valid:
         session_id = _event_session_id(record) or "unknown-session"
         by_session.setdefault(session_id, []).append(record)
@@ -166,7 +182,7 @@ async def journal_sink(request: Request):
     for session_id, group in by_session.items():
         path = _sink_dir() / _session_filename(session_id)
         seen = _load_seen_seq(path)
-        lines: List[str] = []
+        lines: list[str] = []
         for record in group:
             if record.get("type") == "event":
                 try:

@@ -53,8 +53,7 @@ def nvidia_smi_available() -> tuple[bool, str]:
         result = subprocess.run(
             command,
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
             timeout=5,
         )
@@ -81,7 +80,9 @@ def detect_runtime() -> tuple[str, str, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--line", action="store_true", help="print pipe-delimited output")
+    parser.add_argument(
+        "--line", action="store_true", help="print pipe-delimited output"
+    )
     parser.add_argument("--platform", action="store_true", help="print platform only")
     args = parser.parse_args()
 

@@ -11,11 +11,11 @@
 """
 
 from .base import SpeechSegment, VADEngine
+from .boundary_fusion import BoundaryFusion, FusionConfig
+from .ffmpeg_vad import FFmpegSilenceVAD, unified_ffmpeg_pass
 from .silero_vad import SileroVAD
 from .ten_vad import TENVAD
 from .webrtc_vad import WebRTCVAD
-from .ffmpeg_vad import FFmpegSilenceVAD, unified_ffmpeg_pass
-from .boundary_fusion import BoundaryFusion, FusionConfig
 
 __all__ = [
     "VADEngine",

@@ -1,13 +1,18 @@
 """Chunk and skeleton-mode execution stages."""
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
+# 导入顺序敏感（勿重排）：asr 包必须先于 acoustic 初始化——asr/__init__ 经
+# global_transcriber → physical → decision_projection 反向依赖 mapping.time_mapper，
+# 若 acoustic/merging 链先触发 mapping 包初始化，time_mapper 尚未定义 SubtitleEvent
+# 即被 physical 引用，产生部分初始化 ImportError。
+# noqa: I001
 from ..asr.base import ASRInvalidResultError
 from ..asr.contracts import ASRRuntimePorts, SegmentedASRRequest
 from ..asr.segmented_path import SegmentedASRService
@@ -17,17 +22,16 @@ from ..diarization.early_turns import (
     dominant_speaker_at,
     spans_from_skeleton,
 )
-from .member_projection import reproject_events_to_members
-from ..mapping.time_mapper import SubtitleEvent
 from ..pipeline_context import NoiseProfile, PipelineContext
 from ..utils.audio_utils import AudioUtils
+from .member_projection import reproject_events_to_members
 
 logger = logging.getLogger(__name__)
 ASR_CONTEXT_PADDING_SECONDS = 0.25
 
 
 class PipelineChunkMixin:
-    def _resolve_active_modules(self) -> Dict[str, bool]:
+    def _resolve_active_modules(self) -> dict[str, bool]:
         """根据降级模式和运行时模式决定启用哪些模块 (文档 5.5.2 + 5.12.5)
 
         降级模式 (degradation.mode):
@@ -46,27 +50,32 @@ class PipelineChunkMixin:
         # 流式模式下，从流式降级映射开始
         if self.config.mode == "streaming":
             from .streaming import resolve_streaming_modules
+
             streaming_modules = resolve_streaming_modules()
 
             # 如果同时有降级模式 (degraded/minimal)，叠加降级
             if self.config.degradation.mode == "minimal":
                 # minimal 叠加：禁用更多
-                streaming_modules.update({
-                    "ffmpeg_vad": False,
-                    "pre_split": False,
-                    "asr_refine": False,
-                    "llm_merge": False,
-                    "frame_seamless": False,
-                    "diarization": False,
-                    "speaker_role": False,
-                })
+                streaming_modules.update(
+                    {
+                        "ffmpeg_vad": False,
+                        "pre_split": False,
+                        "asr_refine": False,
+                        "llm_merge": False,
+                        "frame_seamless": False,
+                        "diarization": False,
+                        "speaker_role": False,
+                    }
+                )
             elif self.config.degradation.mode == "degraded":
                 # degraded 叠加：关闭 LLM 相关
-                streaming_modules.update({
-                    "llm_merge": False,
-                    "speaker_role": False,
-                    "llm_optimize": False,
-                })
+                streaming_modules.update(
+                    {
+                        "llm_merge": False,
+                        "speaker_role": False,
+                        "llm_optimize": False,
+                    }
+                )
 
             return streaming_modules
 
@@ -126,7 +135,7 @@ class PipelineChunkMixin:
         return active
 
     @staticmethod
-    def _apply_enabled_experiments(active: Dict[str, bool]) -> None:
+    def _apply_enabled_experiments(active: dict[str, bool]) -> None:
         """查询 ExperimentRegistry，将已启用的实验映射到配置开关。
 
         每个 status=enabled 的实验对应一组配置覆盖。
@@ -134,7 +143,10 @@ class PipelineChunkMixin:
         模式也受益于实验注册。
         """
         try:
-            from ..governance.experiment_registry import ExperimentRegistry, ExperimentStatus
+            from ..governance.experiment_registry import (
+                ExperimentRegistry,
+                ExperimentStatus,
+            )
 
             registry = ExperimentRegistry()
             enabled_exps = registry.list_by_status(ExperimentStatus.ENABLED.value)
@@ -151,7 +163,9 @@ class PipelineChunkMixin:
                 elif exp_id == "exp-20260802-forced-aligner":
                     logger.info("Experiment %s active: ForcedAligner enabled", exp_id)
                 elif exp_id == "exp-20260802-sed-non-speech":
-                    logger.info("Experiment %s active: SED non-speech detection enabled", exp_id)
+                    logger.info(
+                        "Experiment %s active: SED non-speech detection enabled", exp_id
+                    )
                 elif exp_id == "exp-20260802-vad-fusion":
                     if "fusion" in active:
                         active["fusion"] = True
@@ -169,7 +183,9 @@ class PipelineChunkMixin:
     # [层1] 说话人身份主干（early_turns，2026-09-11 定案）
     # ------------------------------------------------------------------
 
-    def _attach_early_turns_context(self, ctx: PipelineContext, time_offset: float) -> None:
+    def _attach_early_turns_context(
+        self, ctx: PipelineContext, time_offset: float
+    ) -> None:
         """把前置全局 turns / 骨架×turns 跨度注入窗口 ctx。
 
         early_turns 未生效（关闭或全局 pass 失败）时不做任何事，
@@ -190,10 +206,10 @@ class PipelineChunkMixin:
 
     def _early_speaker_ids_for_segments(
         self,
-        segments: List[Any],
+        segments: list[Any],
         ctx: PipelineContext,
         duration: float,
-    ) -> List[Optional[int]]:
+    ) -> list[int | None]:
         """从 ctx 的全局 turns/spans 推导每个 ASR 段的说话人。
 
         - 有骨架×turns 跨度（spans）时优先按跨度取主覆盖身份；
@@ -206,7 +222,7 @@ class PipelineChunkMixin:
             return []
         offset = float(getattr(ctx, "early_turns_window_offset", 0.0) or 0.0)
         spans = list(getattr(ctx, "early_turn_spans", []) or [])
-        speaker_ids: List[Optional[int]] = []
+        speaker_ids: list[int | None] = []
         for seg in segments:
             start = float(seg.start) + offset
             end = float(seg.end) + offset
@@ -218,11 +234,11 @@ class PipelineChunkMixin:
 
     def _filter_tiny_fragments(
         self,
-        merged_segments: List[Any],
-        asr_results: List[Any],
-        speaker_ids: List[Optional[int]],
+        merged_segments: list[Any],
+        asr_results: list[Any],
+        speaker_ids: list[int | None],
         prefix: str = "",
-    ) -> Tuple[List[Any], List[Any], List[Optional[int]]]:
+    ) -> tuple[list[Any], list[Any], list[int | None]]:
         """过滤超短内容片段（编号碎片如 "1." "2."），合并到下一段。
 
         ★ 说话人安全检查：仅当碎片与下一段属于同一说话人（或说话人
@@ -232,7 +248,8 @@ class PipelineChunkMixin:
         "无信息 → 安全合并"的现状行为。
         """
         import re
-        _meaningful_pattern = re.compile(r'[A-Za-z一-鿿㐀-䶿]')
+
+        _meaningful_pattern = re.compile(r"[A-Za-z一-鿿㐀-䶿]")
         if len(merged_segments) <= 1 or len(asr_results) != len(merged_segments):
             return merged_segments, asr_results, speaker_ids
         filtered_segments = []
@@ -257,7 +274,10 @@ class PipelineChunkMixin:
                         logger.debug(
                             "%sTiny fragment speaker mismatch: "
                             "'%.40s' (spk=%s) vs next (spk=%s) — keeping separate",
-                            prefix, text, speaker_ids[i], speaker_ids[i + 1],
+                            prefix,
+                            text,
+                            speaker_ids[i],
+                            speaker_ids[i + 1],
                         )
                 else:
                     # 无说话人信息 → 安全合并
@@ -277,7 +297,10 @@ class PipelineChunkMixin:
                 logger.debug(
                     "%sFiltered tiny fragment: '%.40s' (%.2fs-%.2fs) → "
                     "merged into next segment (same speaker)",
-                    prefix, text, seg.start, seg.end,
+                    prefix,
+                    text,
+                    seg.start,
+                    seg.end,
                 )
                 # 跳过当前段（不追加到 filtered），下一轮迭代处理合并后的段
                 continue
@@ -290,7 +313,8 @@ class PipelineChunkMixin:
         if len(filtered_segments) < len(merged_segments):
             logger.info(
                 "%sFiltered %d tiny fragments (numbered-list artifacts)",
-                prefix, len(merged_segments) - len(filtered_segments),
+                prefix,
+                len(merged_segments) - len(filtered_segments),
             )
             return (
                 filtered_segments,
@@ -345,6 +369,7 @@ class PipelineChunkMixin:
         if self.config.noise_reduction.enabled:
             try:
                 from ..audio_preprocessor import AudioPreprocessor, DenoiseConfig
+
                 denoise_cfg = DenoiseConfig(
                     enabled=True,
                     engine=self.config.noise_reduction.engine,
@@ -379,12 +404,16 @@ class PipelineChunkMixin:
                     denoise_report.get("burst_events_detected", 0),
                 )
             except Exception as e:
-                logger.warning("%sDenoise failed, continuing with original: %s", prefix, e)
+                logger.warning(
+                    "%sDenoise failed, continuing with original: %s", prefix, e
+                )
                 ctx.add_diagnostic(f"Denoise FAILED: {e}")
 
         # ---- 环境底噪自适应采样 ----
         noise_profile = AudioUtils.estimate_noise_floor_per_chunk(
-            audio, sample_rate, chunk_duration=chunk_duration,
+            audio,
+            sample_rate,
+            chunk_duration=chunk_duration,
         )
         ctx.noise_profile = NoiseProfile(
             noise_rms=noise_profile["noise_rms"],
@@ -423,10 +452,15 @@ class PipelineChunkMixin:
 
                 with ThreadPoolExecutor(max_workers=2) as executor:
                     future_silero = executor.submit(
-                        self._run_vad, audio, sample_rate,
+                        self._run_vad,
+                        audio,
+                        sample_rate,
                     )
                     future_ffmpeg = executor.submit(
-                        self._run_ffmpeg_vad, vocals_path, ctx, prefix,
+                        self._run_ffmpeg_vad,
+                        vocals_path,
+                        ctx,
+                        prefix,
                     )
                     vad_segments = future_silero.result()
                     ffmpeg_result = future_ffmpeg.result()
@@ -435,7 +469,9 @@ class PipelineChunkMixin:
                 # 避免 ThreadPoolExecutor 嵌套带来的 PyTorch 线程死锁
                 vad_segments = self._run_vad(audio, sample_rate)
                 ffmpeg_result = self._run_ffmpeg_vad(
-                    vocals_path, ctx, prefix,
+                    vocals_path,
+                    ctx,
+                    prefix,
                 )
 
             # 三方法融合（如果启用，逻辑不变）
@@ -445,7 +481,10 @@ class PipelineChunkMixin:
                 fusion_engine = BoundaryFusion(self.config.fusion)
                 ffmpeg_segments = ffmpeg_result.get("coarse_speech", [])
                 vad_segments = fusion_engine.fuse(
-                    vad_segments, ffmpeg_segments, audio, sample_rate,
+                    vad_segments,
+                    ffmpeg_segments,
+                    audio,
+                    sample_rate,
                 )
                 ctx.add_diagnostic(
                     f"Fusion: {len(vad_segments)} segments after 3-method fusion"
@@ -461,13 +500,21 @@ class PipelineChunkMixin:
 
         # ---- Stage 3: 片段合并 ----
         self._progress.start_stage(
-            "merging", description=f"{chunk_label}片段合并", total_items=1,
+            "merging",
+            description=f"{chunk_label}片段合并",
+            total_items=1,
         )
         merged_segments = self._run_merging(
-            vad_segments, audio, sample_rate, chunk_duration,
+            vad_segments,
+            audio,
+            sample_rate,
+            chunk_duration,
         )
         self._progress.update_stage(
-            1, extra={"detail": f"片段合并: {len(vad_segments)} → {len(merged_segments)} 段"}
+            1,
+            extra={
+                "detail": f"片段合并: {len(vad_segments)} → {len(merged_segments)} 段"
+            },
         )
         self._progress.finish_stage()
 
@@ -477,13 +524,16 @@ class PipelineChunkMixin:
         #    （tiny-fragment 合并的说话人安全检查据此生效）；
         # 2) 否则保持空列表，下游碎片过滤按"无信息 → 安全合并"跳过，
         #    说话人标签由后处理统一注入（现状行为）。
-        speaker_ids: List[Optional[int]] = self._early_speaker_ids_for_segments(
-            merged_segments, ctx, chunk_duration,
+        speaker_ids: list[int | None] = self._early_speaker_ids_for_segments(
+            merged_segments,
+            ctx,
+            chunk_duration,
         )
 
         # ---- Stage 4: ASR 识别 ----
         self._progress.start_stage(
-            "asr", description=f"{chunk_label}语音识别",
+            "asr",
+            description=f"{chunk_label}语音识别",
             total_items=len(merged_segments),
         )
         if run_asr:
@@ -501,7 +551,10 @@ class PipelineChunkMixin:
         # 将它们合并到下一段，避免字幕中出现孤立的 "1." "2."
         # （说话人安全检查见 _filter_tiny_fragments）。
         merged_segments, asr_results, speaker_ids = self._filter_tiny_fragments(
-            merged_segments, asr_results, speaker_ids, prefix=prefix,
+            merged_segments,
+            asr_results,
+            speaker_ids,
+            prefix=prefix,
         )
 
         # ---- Stage 4.5: ASR 边界双向精修（方案四） ----
@@ -510,12 +563,16 @@ class PipelineChunkMixin:
                 from ..asr.boundary_refiner import BoundaryRefiner
 
                 self._progress.start_stage(
-                    "boundary_refine", description=f"{chunk_label}边界精修",
+                    "boundary_refine",
+                    description=f"{chunk_label}边界精修",
                     total_items=len(merged_segments),
                 )
                 refiner = BoundaryRefiner(self.config.boundary_refinement)
                 merged_segments, asr_results = refiner.refine_all(
-                    merged_segments, asr_results, audio, sample_rate,
+                    merged_segments,
+                    asr_results,
+                    audio,
+                    sample_rate,
                 )
                 self._progress.update_stage(
                     len(merged_segments),
@@ -533,12 +590,17 @@ class PipelineChunkMixin:
         if self.config.boundary_redundancy.enabled and len(merged_segments) > 1:
             try:
                 merged_segments, asr_results = self._run_boundary_redundancy(
-                    merged_segments, asr_results, audio, sample_rate,
+                    merged_segments,
+                    asr_results,
+                    audio,
+                    sample_rate,
                     chunk_label=chunk_label,
                 )
             except Exception as e:
                 logger.warning(
-                    "%sBoundary redundancy failed, continuing: %s", prefix, e,
+                    "%sBoundary redundancy failed, continuing: %s",
+                    prefix,
+                    e,
                 )
                 ctx.add_diagnostic(f"Boundary redundancy FAILED: {e}")
 
@@ -546,19 +608,23 @@ class PipelineChunkMixin:
         # 说话人信息在 _post_process_events 中通过事件级聚类统一注入，
         # 确保单块/多块/骨架三种路径都使用全局事件集合进行聚类。
         self._progress.start_stage(
-            "mapping", description=f"{chunk_label}字幕生成", total_items=1,
+            "mapping",
+            description=f"{chunk_label}字幕生成",
+            total_items=1,
         )
         events = self._run_mapping(
-            asr_results, merged_segments,
-            audio=audio, sample_rate=sample_rate,
-            speaker_ids=None, role_names=None,
+            asr_results,
+            merged_segments,
+            audio=audio,
+            sample_rate=sample_rate,
+            speaker_ids=None,
+            role_names=None,
         )
-        self._progress.update_stage(
-            1, extra={"detail": f"生成 {len(events)} 条字幕"}
-        )
+        self._progress.update_stage(1, extra={"detail": f"生成 {len(events)} 条字幕"})
         self._progress.finish_stage()
 
         from ..asr.trace_contract import attach_event_trace
+
         source_id = "chunk" if not chunk_label else f"chunk:{chunk_label}"
         for event_index, event in enumerate(events, start=1):
             attach_event_trace(
@@ -579,7 +645,7 @@ class PipelineChunkMixin:
         audio: np.ndarray,
         sample_rate: int,
         vocals_path: Path,
-    ) -> Tuple[List[Any], int, Optional[Dict]]:
+    ) -> tuple[list[Any], int, dict | None]:
         """Compatibility adapter for the explicit segmented ASR service."""
         request = SegmentedASRRequest(
             audio=audio,
@@ -609,7 +675,7 @@ class PipelineChunkMixin:
         audio: np.ndarray,
         sample_rate: int,
         vocals_path: Path,
-    ) -> Tuple[List[Any], int, Optional[Dict]]:
+    ) -> tuple[list[Any], int, dict | None]:
         """按声学骨架分段，每段独立处理（骨架分段模式）。
 
         与 VAD 分段不同，此方法使用 ffmpeg silencedetect 的物理
@@ -664,22 +730,28 @@ class PipelineChunkMixin:
         logger.info(
             "Skeleton segmentation: %d speech segments from %.1fs audio "
             "(noise=%.0fdB, min_silence=%.2fs, min_speech=%.2fs)",
-            len(speech_skeleton), total_duration,
-            skeleton_noise_db, skeleton_min_silence, min_speech_duration,
+            len(speech_skeleton),
+            total_duration,
+            skeleton_noise_db,
+            skeleton_min_silence,
+            min_speech_duration,
         )
 
         if not speech_skeleton:
-            logger.warning("No speech detected in skeleton, falling back to single chunk")
+            logger.warning(
+                "No speech detected in skeleton, falling back to single chunk"
+            )
             events, seg_count, _fallback_ctx = self._process_chunk_pipeline(
-                audio=audio, sample_rate=sample_rate,
-                vocals_path=vocals_path, chunk_label="",
+                audio=audio,
+                sample_rate=sample_rate,
+                vocals_path=vocals_path,
+                chunk_label="",
             )
             return events, seg_count, ffmpeg_result
 
         # 过滤过短的段（< min_speech_duration 的孤立爆发可能是噪音）
         filtered_skeleton = [
-            (s, e) for s, e in speech_skeleton
-            if (e - s) >= min_speech_duration
+            (s, e) for s, e in speech_skeleton if (e - s) >= min_speech_duration
         ]
 
         if len(filtered_skeleton) < len(speech_skeleton):
@@ -697,7 +769,8 @@ class PipelineChunkMixin:
         if len(asr_skeleton) != len(speech_skeleton):
             logger.info(
                 "Grouped %d physical skeleton segments into %d ASR windows",
-                len(speech_skeleton), len(asr_skeleton),
+                len(speech_skeleton),
+                len(asr_skeleton),
             )
 
         # ---- [层1] 骨架区间 × 全局 turns 求交（reconcile_regions 接线） ----
@@ -714,7 +787,8 @@ class PipelineChunkMixin:
             logger.info(
                 "Early turns reconcile: %d physical segments × %d global turns "
                 "→ %d speaker spans",
-                len(speech_skeleton), len(self._early_turns_state.turns),
+                len(speech_skeleton),
+                len(self._early_turns_state.turns),
                 len(self._early_turn_spans),
             )
         else:
@@ -722,7 +796,7 @@ class PipelineChunkMixin:
 
         # Step 2: 先用带上下文的 ASR 窗口处理；若一个聚合窗口失败，
         # 只回退该窗口包含的原始物理段，避免扩大失败范围或跨硬静音重试。
-        all_events: List[Any] = []
+        all_events: list[Any] = []
         total_seg_count = 0
 
         # ★ 跨段说话人偏移量（同多块路径）：每个骨架段独立运行 diarization，
@@ -730,15 +804,15 @@ class PipelineChunkMixin:
         # [层1] early_turns 生效时标签来自全局 turns（全局唯一），无需偏移。
         speaker_offset = 0
         empty_asr_segments = 0
-        first_empty_asr_error: Optional[Exception] = None
+        first_empty_asr_error: Exception | None = None
         grouped_window_fallbacks = 0
 
         total_segments = len(asr_skeleton)
         for idx, (window_start, window_end) in enumerate(asr_skeleton):
             window_members = [
-                item for item in speech_skeleton
-                if item[0] >= window_start - 1e-9
-                and item[1] <= window_end + 1e-9
+                item
+                for item in speech_skeleton
+                if item[0] >= window_start - 1e-9 and item[1] <= window_end + 1e-9
             ]
             # Give grouped windows limited context to compensate for
             # silencedetect clipping low-energy word edges. Single physical
@@ -777,12 +851,15 @@ class PipelineChunkMixin:
                         member_end,
                         f"skeleton:{idx}:fallback:{member_idx}",
                     )
-                    for member_idx, (member_start, member_end)
-                    in enumerate(window_members)
+                    for member_idx, (member_start, member_end) in enumerate(
+                        window_members
+                    )
                 )
 
             window_succeeded = False
-            for attempt_index, (seg_start, seg_end, event_source) in enumerate(attempts):
+            for attempt_index, (seg_start, seg_end, event_source) in enumerate(
+                attempts
+            ):
                 seg_duration = seg_end - seg_start
                 start_sample = max(0, int(seg_start * sample_rate))
                 end_sample = min(len(audio), int(seg_end * sample_rate))
@@ -794,7 +871,8 @@ class PipelineChunkMixin:
 
                 # 创建临时 WAV 文件供 ffmpeg 子进程调用
                 with tempfile.NamedTemporaryFile(
-                    suffix=".wav", delete=False,
+                    suffix=".wav",
+                    delete=False,
                 ) as tmp_f:
                     tmp_path = Path(tmp_f.name)
 
@@ -802,15 +880,18 @@ class PipelineChunkMixin:
                     AudioUtils.save_audio(seg_audio, tmp_path, sample_rate)
 
                     if attempt_index == 0:
-                        chunk_label = f"Seg {idx+1}/{total_segments}"
+                        chunk_label = f"Seg {idx + 1}/{total_segments}"
                     else:
                         chunk_label = (
-                            f"Seg {idx+1}/{total_segments} fallback "
+                            f"Seg {idx + 1}/{total_segments} fallback "
                             f"{attempt_index}/{len(attempts) - 1}"
                         )
                     logger.info(
                         "Processing skeleton segment %d/%d: %.2fs → %.2fs (%.2fs)%s",
-                        idx + 1, total_segments, seg_start, seg_end,
+                        idx + 1,
+                        total_segments,
+                        seg_start,
+                        seg_end,
                         seg_duration,
                         " [physical fallback]" if attempt_index else "",
                     )
@@ -850,15 +931,18 @@ class PipelineChunkMixin:
                         for member_start, member_end in window_members
                     ]
                     seg_events, projection_stats = reproject_events_to_members(
-                        seg_events, local_members,
+                        seg_events,
+                        local_members,
                         split_min_gap=self.config.acoustic_validation.member_split_min_gap,
                         max_duration=self.config.acoustic_validation.member_split_max_duration,
                     )
-                    if any((
-                        projection_stats.split_events,
-                        projection_stats.clamped_events,
-                        projection_stats.dropped_events,
-                    )):
+                    if any(
+                        (
+                            projection_stats.split_events,
+                            projection_stats.clamped_events,
+                            projection_stats.dropped_events,
+                        )
+                    ):
                         logger.info(
                             "%s member reprojection: %s",
                             chunk_label,
@@ -893,6 +977,7 @@ class PipelineChunkMixin:
 
                 # 偏移到全局时间轴；物理范围和来源追踪必须同步偏移。
                 from ..mapping.time_mapper import offset_subtitle_event
+
                 for evt in seg_events:
                     offset_subtitle_event(
                         evt,
@@ -900,6 +985,7 @@ class PipelineChunkMixin:
                         source=event_source,
                     )
                     from ..asr.trace_contract import attach_event_trace
+
                     attach_event_trace(
                         evt,
                         source_id="skeleton",
@@ -941,8 +1027,10 @@ class PipelineChunkMixin:
         logger.info(
             "Skeleton segmented: %d ASR windows (%d physical fallbacks) → "
             "%d events (%d VAD sub-segments)",
-            len(asr_skeleton), grouped_window_fallbacks,
-            len(all_events), total_seg_count,
+            len(asr_skeleton),
+            grouped_window_fallbacks,
+            len(all_events),
+            total_seg_count,
         )
 
         return all_events, total_seg_count, ffmpeg_result

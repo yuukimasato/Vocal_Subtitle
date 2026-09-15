@@ -20,9 +20,7 @@
 """
 
 import logging
-from collections import deque
-from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -38,18 +36,18 @@ logger = logging.getLogger(__name__)
 class PipelineMode:
     """Pipeline 运行模式"""
 
-    mode: str = "offline"                     # "offline" | "streaming"
+    mode: str = "offline"  # "offline" | "streaming"
 
     # 流式模式参数
-    streaming_chunk_duration: float = 2.0     # 每次处理的音频窗口（秒）
-    streaming_overlap_duration: float = 0.5   # 窗口重叠（秒）
-    streaming_max_latency: float = 3.0        # 最大允许延迟（秒）
+    streaming_chunk_duration: float = 2.0  # 每次处理的音频窗口（秒）
+    streaming_overlap_duration: float = 0.5  # 窗口重叠（秒）
+    streaming_max_latency: float = 3.0  # 最大允许延迟（秒）
 
     def is_streaming(self) -> bool:
         return self.mode == "streaming"
 
 
-def resolve_streaming_modules() -> Dict[str, bool]:
+def resolve_streaming_modules() -> dict[str, bool]:
     """根据流式模式决定启用哪些模块
 
     流式模式下自动降级依赖全局视角的模块。
@@ -58,17 +56,17 @@ def resolve_streaming_modules() -> Dict[str, bool]:
         dict: 模块名 → 是否启用
     """
     return {
-        "macro_chunk": False,            # ❌ 无全局视角
-        "ffmpeg_vad": True,              # ✅ 可在窗口内运行
-        "boundary_fusion": False,         # ❌ 简化（仅 Silero VAD）
-        "pre_split": True,               # ✅ 窗口内预切分
-        "asr_refine": True,              # ✅ 窗口内精修
-        "llm_merge": "local_only",       # ⚠️ 降级：仅本地 NLP
-        "frame_seamless": True,          # ✅ 窗口内无缝衔接
-        "acoustic_validation": False,     # ❌ 无全局标尺
-        "diarization": True,             # ✅ 窗口内说话人分离
-        "speaker_role": "local_only",    # ⚠️ 仅本地规则推断
-        "llm_optimize": False,           # ❌ 不可用
+        "macro_chunk": False,  # ❌ 无全局视角
+        "ffmpeg_vad": True,  # ✅ 可在窗口内运行
+        "boundary_fusion": False,  # ❌ 简化（仅 Silero VAD）
+        "pre_split": True,  # ✅ 窗口内预切分
+        "asr_refine": True,  # ✅ 窗口内精修
+        "llm_merge": "local_only",  # ⚠️ 降级：仅本地 NLP
+        "frame_seamless": True,  # ✅ 窗口内无缝衔接
+        "acoustic_validation": False,  # ❌ 无全局标尺
+        "diarization": True,  # ✅ 窗口内说话人分离
+        "speaker_role": "local_only",  # ⚠️ 仅本地规则推断
+        "llm_optimize": False,  # ❌ 不可用
     }
 
 
@@ -147,7 +145,7 @@ class StreamingBuffer:
         """缓冲区剩余样本数"""
         return len(self._buffer)
 
-    def flush(self) -> Optional[np.ndarray]:
+    def flush(self) -> np.ndarray | None:
         """处理剩余不足一个窗口的尾部数据
 
         Returns:
@@ -179,12 +177,12 @@ class StreamingMergeEngine:
 
     def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"):
         self.similarity_model = self._load_local_model(model_name)
-        self.sentence_buffer: List = []  # 保留最近 N 条未决字幕
+        self.sentence_buffer: list = []  # 保留最近 N 条未决字幕
 
     def decide_merge_streaming(
         self,
-        current: Dict,
-        previous: Dict,
+        current: dict,
+        previous: dict,
     ) -> bool:
         """实时合并决策（必须 <50ms 内完成）
 
@@ -233,8 +231,8 @@ class StreamingMergeEngine:
 
     def buffer_decision(
         self,
-        fragment: Dict,
-    ) -> Optional[List[Dict]]:
+        fragment: dict,
+    ) -> list[dict] | None:
         """缓冲决策模式：维护最近 3 条未决字幕
 
         当缓冲区满时（>=3条），对最早的两条做最终决策并输出。
@@ -269,7 +267,7 @@ class StreamingMergeEngine:
 
         return None
 
-    def flush_buffer(self) -> List[Dict]:
+    def flush_buffer(self) -> list[dict]:
         """输出缓冲区中所有剩余字幕"""
         result = list(self.sentence_buffer)
         self.sentence_buffer = []
@@ -289,6 +287,7 @@ class StreamingMergeEngine:
         3. 显式设置下载开关后才允许网络加载
         """
         from .utils.model_loader import load_sentence_transformer
+
         return load_sentence_transformer(model_name)
 
     def _compute_similarity(self, text_a: str, text_b: str) -> float:
@@ -305,7 +304,8 @@ class StreamingMergeEngine:
 
         try:
             embeddings = self.similarity_model.encode(
-                [text_a, text_b], convert_to_numpy=True,
+                [text_a, text_b],
+                convert_to_numpy=True,
             )
             dot = float(np.dot(embeddings[0], embeddings[1]))
             norm_a = float(np.linalg.norm(embeddings[0]))

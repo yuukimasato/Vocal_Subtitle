@@ -26,6 +26,7 @@ def main(host: str, port: int, no_browser: bool):
     from vocal_subtitle.webui.runtime import run_server
 
     if not no_browser:
+
         def _open_browser():
             time.sleep(1.0)
             webbrowser.open(f"http://{host}:{port}")

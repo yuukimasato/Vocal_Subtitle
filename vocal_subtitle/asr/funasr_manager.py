@@ -14,7 +14,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def funasr_package_installed() -> bool:
     return importlib.util.find_spec("funasr") is not None
 
 
-def _cache_roots(cache_dir: Optional[Path | str] = None) -> list[Path]:
+def _cache_roots(cache_dir: Path | str | None = None) -> list[Path]:
     if cache_dir:
         return [Path(cache_dir).expanduser()]
 
@@ -92,7 +92,9 @@ def _model_candidates(path: Path):
         yield from sorted(item for item in snapshots.iterdir() if item.is_dir())
 
 
-def find_local_model(model: str | None, cache_dir: Optional[Path | str] = None) -> Optional[Path]:
+def find_local_model(
+    model: str | None, cache_dir: Path | str | None = None
+) -> Path | None:
     """Find a complete local ModelScope snapshot without network access."""
     model_id = normalize_model_id(model)
     if not model_id:
@@ -150,12 +152,10 @@ def _install_funasr_package() -> None:
         )
     importlib.invalidate_caches()
     if not funasr_package_installed():
-        raise FunASRPrepareError(
-            "FunASR 安装完成但当前 Python 无法加载，请重启 WebUI"
-        )
+        raise FunASRPrepareError("FunASR 安装完成但当前 Python 无法加载，请重启 WebUI")
 
 
-def _download_model(model_id: str, cache_dir: Optional[Path | str] = None) -> Path:
+def _download_model(model_id: str, cache_dir: Path | str | None = None) -> Path:
     try:
         from modelscope import snapshot_download
     except ImportError as exc:
@@ -182,7 +182,7 @@ def _download_model(model_id: str, cache_dir: Optional[Path | str] = None) -> Pa
 
 def funasr_status(
     model: str | None = None,
-    cache_dir: Optional[Path | str] = None,
+    cache_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     """Return local-only readiness information."""
     model_id = normalize_model_id(model)
@@ -200,7 +200,7 @@ def funasr_status(
 
 def ensure_funasr_ready(
     model: str | None = None,
-    cache_dir: Optional[Path | str] = None,
+    cache_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     """Install missing package and download only a missing local model."""
     model_id = normalize_model_id(model)

@@ -4,8 +4,8 @@ from vocal_subtitle.physical.ir_cache import (
     decode_ir_value,
     encode_ir_value,
     fingerprint_ir,
-    make_ir_cache_key,
     load_ir_value,
+    make_ir_cache_key,
     persist_ir_value,
 )
 
@@ -27,7 +27,9 @@ def _key(**overrides):
 
 
 def test_fingerprint_is_order_independent_and_content_sensitive():
-    assert fingerprint_ir({"b": 2, "a": [1, 2]}) == fingerprint_ir({"a": [1, 2], "b": 2})
+    assert fingerprint_ir({"b": 2, "a": [1, 2]}) == fingerprint_ir(
+        {"a": [1, 2], "b": 2}
+    )
     assert fingerprint_ir({"a": [1, 2]}) != fingerprint_ir({"a": [1, 3]})
 
 
@@ -47,13 +49,34 @@ def test_none_duration_is_distinct_and_cache_value_is_json_safe():
     assert _key(audio_duration=None) != _key(audio_duration=0.0)
     value = encode_ir_value({"schema_version": "global-ir-v1", "words": []})
     assert value == {"schema_version": "global-ir-v1", "words": []}
-    assert decode_ir_value(value, lambda payload: payload["words"], expected_schema_version="global-ir-v1") == []
+    assert (
+        decode_ir_value(
+            value,
+            lambda payload: payload["words"],
+            expected_schema_version="global-ir-v1",
+        )
+        == []
+    )
 
 
 def test_damaged_or_wrong_schema_cache_value_is_a_miss():
     assert decode_ir_value(None, lambda payload: payload) is None
-    assert decode_ir_value({"schema_version": "old"}, lambda payload: payload, expected_schema_version="new") is None
-    assert decode_ir_value({"schema_version": "new"}, lambda payload: 1 / 0, expected_schema_version="new") is None
+    assert (
+        decode_ir_value(
+            {"schema_version": "old"},
+            lambda payload: payload,
+            expected_schema_version="new",
+        )
+        is None
+    )
+    assert (
+        decode_ir_value(
+            {"schema_version": "new"},
+            lambda payload: 1 / 0,
+            expected_schema_version="new",
+        )
+        is None
+    )
 
 
 def test_persist_and_load_use_json_safe_cache_boundary():
@@ -68,8 +91,16 @@ def test_persist_and_load_use_json_safe_cache_boundary():
             return self.values.get((stage, key))
 
     cache = FakeCache()
-    assert persist_ir_value(cache, "ir", "key", {"schema_version": "global-ir-v1", "words": []})
-    assert load_ir_value(
-        cache, "ir", "key", lambda payload: payload["words"],
-        expected_schema_version="global-ir-v1",
-    ) == []
+    assert persist_ir_value(
+        cache, "ir", "key", {"schema_version": "global-ir-v1", "words": []}
+    )
+    assert (
+        load_ir_value(
+            cache,
+            "ir",
+            "key",
+            lambda payload: payload["words"],
+            expected_schema_version="global-ir-v1",
+        )
+        == []
+    )

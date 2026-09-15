@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ..run_context import RunContext
-from ..stage_protocol import PipelineStage
 
 
 class PreflightStage:
@@ -16,7 +15,7 @@ class PreflightStage:
     def __init__(self, pipeline: Any):
         self.pipeline = pipeline
 
-    def execute(self, context: RunContext) -> Optional[Dict[str, Any]]:
+    def execute(self, context: RunContext) -> dict[str, Any] | None:
         return self.pipeline._run_preflight_stage(context)
 
 

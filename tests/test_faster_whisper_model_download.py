@@ -6,10 +6,7 @@ from vocal_subtitle.asr import model_download
 def test_faster_whisper_cache_probe_requires_model_and_config(tmp_path, monkeypatch):
     monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path))
     snapshot = (
-        tmp_path
-        / "models--Systran--faster-whisper-small"
-        / "snapshots"
-        / "revision"
+        tmp_path / "models--Systran--faster-whisper-small" / "snapshots" / "revision"
     )
     snapshot.mkdir(parents=True)
     (snapshot / "config.json").write_text("{}", encoding="utf-8")
@@ -21,10 +18,7 @@ def test_faster_whisper_cache_probe_requires_model_and_config(tmp_path, monkeypa
 def test_faster_whisper_cached_model_path_returns_snapshot(tmp_path, monkeypatch):
     monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path))
     snapshot = (
-        tmp_path
-        / "models--Systran--faster-whisper-tiny"
-        / "snapshots"
-        / "revision"
+        tmp_path / "models--Systran--faster-whisper-tiny" / "snapshots" / "revision"
     )
     snapshot.mkdir(parents=True)
     (snapshot / "config.json").write_text("{}", encoding="utf-8")

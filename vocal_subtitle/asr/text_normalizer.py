@@ -10,13 +10,12 @@
 
 import logging
 import re
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 # 内置专有名词纠错词典（可扩展）
-_DEFAULT_CORRECTIONS: Dict[str, str] = {
+_DEFAULT_CORRECTIONS: dict[str, str] = {
     # 常见 ASR 误识别 → 正确拼写
     "mahood": "Mehood",
     "lusty": "Lestie",
@@ -39,7 +38,7 @@ class TextNormalizer:
 
     def __init__(
         self,
-        custom_corrections: Optional[Dict[str, str]] = None,
+        custom_corrections: dict[str, str] | None = None,
         safe_mode: bool = False,
     ):
         self.safe_mode = safe_mode
@@ -52,13 +51,20 @@ class TextNormalizer:
         # 数字单词 → 编号模式
         # "One answer" → "1. Answer"（句子开头且后跟名词）
         self._number_word_pattern = re.compile(
-            r'^(One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)\s+(\w)',
+            r"^(One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)\s+(\w)",
             re.IGNORECASE,
         )
         self._number_map = {
-            "one": "1.", "two": "2.", "three": "3.", "four": "4.",
-            "five": "5.", "six": "6.", "seven": "7.", "eight": "8.",
-            "nine": "9.", "ten": "10.",
+            "one": "1.",
+            "two": "2.",
+            "three": "3.",
+            "four": "4.",
+            "five": "5.",
+            "six": "6.",
+            "seven": "7.",
+            "eight": "8.",
+            "nine": "9.",
+            "ten": "10.",
         }
 
     def normalize(self, text: str) -> str:
@@ -92,14 +98,14 @@ class TextNormalizer:
             if word in self._number_map:
                 # 仅当后跟的字母是大写或短文本时才转换
                 if rest_char.isupper() or len(text.split()) <= 6:
-                    rest = text[match.end(1):].strip()
+                    rest = text[match.end(1) :].strip()
                     return self._number_map[word] + " " + rest
 
         # 场景 2: 独立数字词（文本仅含一个数字词，如 "Two" / "three"）
         stripped = text.strip().rstrip(".,!?;:，。！？；：")
         word_lower = stripped.lower()
         if word_lower in self._number_map and len(text.split()) == 1:
-            suffix = text[len(text.rstrip(".,!?;:，。！？；：")):]
+            suffix = text[len(text.rstrip(".,!?;:，。！？；：")) :]
             return self._number_map[word_lower] + suffix
 
         return text
@@ -115,7 +121,8 @@ class TextNormalizer:
         # 按短语长度降序排列，优先匹配更长的短语
         multi_word_phrases = sorted(
             [(k, v) for k, v in self.corrections.items() if " " in k],
-            key=lambda x: len(x[0].split()), reverse=True,
+            key=lambda x: len(x[0].split()),
+            reverse=True,
         )
         for phrase_key, replacement in multi_word_phrases:
             # 大小写不敏感替换
@@ -135,7 +142,7 @@ class TextNormalizer:
                 elif w[0].isupper():
                     replacement = replacement[0].upper() + replacement[1:]
                 # 保留尾部标点
-                suffix = w[len(w.rstrip(".,!?;:，。！？；：")):]
+                suffix = w[len(w.rstrip(".,!?;:，。！？；：")) :]
                 w = replacement + suffix
             corrected.append(w)
         return " ".join(corrected)
@@ -147,10 +154,10 @@ class TextNormalizer:
             text += "."
 
         # 修复多余空格
-        text = re.sub(r'\s{2,}', ' ', text)
+        text = re.sub(r"\s{2,}", " ", text)
 
         return text
 
-    def normalize_batch(self, texts: List[str]) -> List[str]:
+    def normalize_batch(self, texts: list[str]) -> list[str]:
         """批量规范化"""
         return [self.normalize(t) for t in texts]

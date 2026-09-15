@@ -6,10 +6,9 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-from pathlib import Path
 import subprocess
 import sys
-
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -49,14 +48,20 @@ def revision_contract(revision: str) -> list[dict[str, str]]:
                 continue
             target = decorator.func
             if not isinstance(target, ast.Attribute) or target.attr not in {
-                "delete", "get", "post", "put", "patch",
+                "delete",
+                "get",
+                "post",
+                "put",
+                "patch",
             }:
                 continue
             if not decorator.args or not isinstance(decorator.args[0], ast.Constant):
                 continue
             if not isinstance(decorator.args[0].value, str):
                 continue
-            rows.append({"method": target.attr.upper(), "path": decorator.args[0].value})
+            rows.append(
+                {"method": target.attr.upper(), "path": decorator.args[0].value}
+            )
     return sorted(rows, key=lambda row: (row["path"], row["method"]))
 
 
@@ -83,7 +88,9 @@ def main() -> int:
         else revision_contract(args.baseline_revision)
     )
     mismatches = []
-    expected_count = args.expected_count if args.expected_count is not None else len(expected)
+    expected_count = (
+        args.expected_count if args.expected_count is not None else len(expected)
+    )
     if len(current) != expected_count:
         mismatches.append(f"route-count: expected {expected_count}, got {len(current)}")
     if current != expected:

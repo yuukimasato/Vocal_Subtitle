@@ -11,17 +11,18 @@ import json
 import logging
 import os
 import shutil
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # 默认持久化设置文件路径
 DEFAULT_PERSISTENCE_DIR = Path(__file__).parent.parent.parent / "cache"
-DEFAULT_PERSISTENCE_SETTINGS_PATH = DEFAULT_PERSISTENCE_DIR / "persistence_settings.json"
+DEFAULT_PERSISTENCE_SETTINGS_PATH = (
+    DEFAULT_PERSISTENCE_DIR / "persistence_settings.json"
+)
 DEFAULT_FILES_DIR = DEFAULT_PERSISTENCE_DIR / "persistent_files"
 
 
@@ -30,18 +31,18 @@ class PersistenceSettings:
     """文件持久化设置"""
 
     # 哪些文件类型需要持久化
-    persist_asr_subtitle: bool = True       # ASR 字幕文件
-    persist_llm_subtitle: bool = True       # LLM 优化字幕文件
-    persist_final_ass: bool = False         # 最终 ASS 字幕
-    persist_final_srt: bool = True          # 最终 SRT 字幕
-    persist_vocals: bool = True             # 人声分离音频
-    persist_accompaniment: bool = False     # 背景声分离音频
+    persist_asr_subtitle: bool = True  # ASR 字幕文件
+    persist_llm_subtitle: bool = True  # LLM 优化字幕文件
+    persist_final_ass: bool = False  # 最终 ASS 字幕
+    persist_final_srt: bool = True  # 最终 SRT 字幕
+    persist_vocals: bool = True  # 人声分离音频
+    persist_accompaniment: bool = False  # 背景声分离音频
 
     # 各类型的保留天数
-    ttl_subtitle_days: int = 90             # 字幕文件（较小，保留更久）
-    ttl_audio_days: int = 30                # 音频文件（较大，保留较短）
+    ttl_subtitle_days: int = 90  # 字幕文件（较小，保留更久）
+    ttl_audio_days: int = 30  # 音频文件（较大，保留较短）
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "persist_asr_subtitle": self.persist_asr_subtitle,
             "persist_llm_subtitle": self.persist_llm_subtitle,
@@ -54,7 +55,7 @@ class PersistenceSettings:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "PersistenceSettings":
+    def from_dict(cls, d: dict[str, Any]) -> "PersistenceSettings":
         return cls(
             persist_asr_subtitle=d.get("persist_asr_subtitle", True),
             persist_llm_subtitle=d.get("persist_llm_subtitle", True),
@@ -79,8 +80,8 @@ class PersistenceManager:
 
     def __init__(
         self,
-        settings_path: Optional[Path] = None,
-        files_dir: Optional[Path] = None,
+        settings_path: Path | None = None,
+        files_dir: Path | None = None,
     ):
         self._settings_path = Path(settings_path or DEFAULT_PERSISTENCE_SETTINGS_PATH)
         self._files_dir = Path(files_dir or DEFAULT_FILES_DIR)
@@ -98,7 +99,7 @@ class PersistenceManager:
                 raw = self._settings_path.read_text(encoding="utf-8")
                 data = json.loads(raw)
                 return PersistenceSettings.from_dict(data)
-            except (json.JSONDecodeError, IOError) as e:
+            except (OSError, json.JSONDecodeError) as e:
                 logger.warning("Failed to load persistence settings: %s", e)
         # 返回默认设置
         settings = PersistenceSettings()
@@ -113,7 +114,7 @@ class PersistenceManager:
                 encoding="utf-8",
             )
             logger.info("Persistence settings saved")
-        except IOError as e:
+        except OSError as e:
             logger.error("Failed to save persistence settings: %s", e)
 
     # ------------------------------------------------------------------
@@ -123,9 +124,9 @@ class PersistenceManager:
     def persist_task(
         self,
         task_id: str,
-        task_result: Dict[str, Any],
-        settings: Optional[PersistenceSettings] = None,
-    ) -> Dict[str, Any]:
+        task_result: dict[str, Any],
+        settings: PersistenceSettings | None = None,
+    ) -> dict[str, Any]:
         """将任务产出的文件持久化到 per-task 目录
 
         Args:
@@ -146,7 +147,7 @@ class PersistenceManager:
         now_iso = datetime.now().isoformat()
 
         # 辅助函数：复制文件并记录元数据
-        def _copy_file(src_path_str: Optional[str], label: str, ttl_days: int):
+        def _copy_file(src_path_str: str | None, label: str, ttl_days: int):
             if not src_path_str:
                 return
             src = Path(src_path_str)
@@ -162,17 +163,20 @@ class PersistenceManager:
                     "size_bytes": dst.stat().st_size,
                     "ttl_days": ttl_days,
                     "persisted_at": now_iso,
-                    "expires_at": (datetime.now() + timedelta(days=ttl_days)).isoformat(),
+                    "expires_at": (
+                        datetime.now() + timedelta(days=ttl_days)
+                    ).isoformat(),
                 }
                 persisted.append(file_info)
                 logger.info("Persisted %s: %s", label, dst.name)
-            except (IOError, OSError) as e:
+            except OSError as e:
                 logger.warning("Failed to persist %s: %s", label, e)
 
         # ASR 字幕（干净版）
         if settings.persist_asr_subtitle:
             _copy_file(
-                task_result.get("clean_subtitle_path") or task_result.get("subtitle_path"),
+                task_result.get("clean_subtitle_path")
+                or task_result.get("subtitle_path"),
                 "ASR字幕",
                 settings.ttl_subtitle_days,
             )
@@ -206,19 +210,22 @@ class PersistenceManager:
         if events and (settings.persist_final_ass or settings.persist_final_srt):
             try:
                 from ..mapping.subtitle_builder import SubtitleBuilder, SubtitleRule
-                from ..config import SubtitleBuildConfig
 
                 rebuilt_events = [
-                    type("SubtitleEvent", (), {
-                        "index": e["index"],
-                        "start": e["start"],
-                        "end": e["end"],
-                        "text": e["text"],
-                        "original_text": e.get("original_text"),
-                        "speaker_id": e.get("speaker_id"),
-                        "speaker_label": e.get("speaker_label"),
-                        "duration": e["end"] - e["start"],
-                    })
+                    type(
+                        "SubtitleEvent",
+                        (),
+                        {
+                            "index": e["index"],
+                            "start": e["start"],
+                            "end": e["end"],
+                            "text": e["text"],
+                            "original_text": e.get("original_text"),
+                            "speaker_id": e.get("speaker_id"),
+                            "speaker_label": e.get("speaker_label"),
+                            "duration": e["end"] - e["start"],
+                        },
+                    )
                     for e in events
                 ]
 
@@ -242,7 +249,9 @@ class PersistenceManager:
                         "size_bytes": srt_path.stat().st_size,
                         "ttl_days": settings.ttl_subtitle_days,
                         "persisted_at": now_iso,
-                        "expires_at": (datetime.now() + timedelta(days=settings.ttl_subtitle_days)).isoformat(),
+                        "expires_at": (
+                            datetime.now() + timedelta(days=settings.ttl_subtitle_days)
+                        ).isoformat(),
                     }
                     persisted.append(file_info)
                     logger.info("Generated and persisted final SRT")
@@ -257,7 +266,9 @@ class PersistenceManager:
                         "size_bytes": ass_path.stat().st_size,
                         "ttl_days": settings.ttl_subtitle_days,
                         "persisted_at": now_iso,
-                        "expires_at": (datetime.now() + timedelta(days=settings.ttl_subtitle_days)).isoformat(),
+                        "expires_at": (
+                            datetime.now() + timedelta(days=settings.ttl_subtitle_days)
+                        ).isoformat(),
                     }
                     persisted.append(file_info)
                     logger.info("Generated and persisted final ASS")
@@ -277,7 +288,7 @@ class PersistenceManager:
                 json.dumps(manifest, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-        except IOError as e:
+        except OSError as e:
             logger.warning("Failed to write persistence manifest: %s", e)
 
         # review-manifest-v1（编辑器审核出处）：final 字幕落盘时一并生成
@@ -286,20 +297,35 @@ class PersistenceManager:
         return manifest
 
     @staticmethod
-    def _write_review_manifest(task_id: str, task_result: Dict[str, Any], task_dir: Path) -> None:
+    def _write_review_manifest(
+        task_id: str, task_result: dict[str, Any], task_dir: Path
+    ) -> None:
         """在持久化目录与输入会话目录各写一份 <字幕同名>.manifest.json（失败不阻塞）"""
         try:
-            from ..contracts.review_manifest import build_review_manifest, write_review_manifest
+            from ..contracts.review_manifest import (
+                build_review_manifest,
+                write_review_manifest,
+            )
 
             events = task_result.get("events", [])
             stats = task_result.get("stats") or {}
-            final_engine = stats.get("final_engine") or stats.get("selected_engine") or ""
-            input_name = Path(task_result.get("input_path", "")).name if task_result.get("input_path") else None
+            final_engine = (
+                stats.get("final_engine") or stats.get("selected_engine") or ""
+            )
+            input_name = (
+                Path(task_result.get("input_path", "")).name
+                if task_result.get("input_path")
+                else None
+            )
             if not events:
                 return
             # 跟随实际持久化的 final 字幕（SRT 优先）
             subtitle_path = next(
-                (candidate for candidate in (task_dir / "final.srt", task_dir / "final.ass") if candidate.exists()),
+                (
+                    candidate
+                    for candidate in (task_dir / "final.srt", task_dir / "final.ass")
+                    if candidate.exists()
+                ),
                 None,
             )
             if subtitle_path is None:
@@ -320,16 +346,18 @@ class PersistenceManager:
             if session_subtitle:
                 write_review_manifest(Path(session_subtitle), manifest)
         except Exception as e:
-            logger.warning("Failed to write review manifest for task %s: %s", task_id, e)
+            logger.warning(
+                "Failed to write review manifest for task %s: %s", task_id, e
+            )
 
-    def get_persisted_files(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def get_persisted_files(self, task_id: str) -> dict[str, Any] | None:
         """获取任务的持久化文件信息"""
         manifest_path = self._files_dir / task_id / "manifest.json"
         if not manifest_path.exists():
             return None
         try:
             return json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return None
 
     def delete_persisted_task(self, task_id: str) -> bool:
@@ -391,12 +419,14 @@ class PersistenceManager:
                     cleaned += 1
                     logger.info("Cleaned expired persisted files: %s", task_dir.name)
 
-            except (json.JSONDecodeError, IOError, OSError) as e:
-                logger.warning("Failed to process persistence manifest %s: %s", task_dir.name, e)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(
+                    "Failed to process persistence manifest %s: %s", task_dir.name, e
+                )
 
         return cleaned
 
-    def get_persistence_stats(self) -> Dict[str, Any]:
+    def get_persistence_stats(self) -> dict[str, Any]:
         """获取持久化存储统计信息"""
         total_size = 0
         task_count = 0
@@ -436,7 +466,7 @@ class PersistenceManager:
                                 pass
                     if all_expired and files:
                         expired_count += 1
-                except (json.JSONDecodeError, IOError):
+                except (OSError, json.JSONDecodeError):
                     pass
 
         return {

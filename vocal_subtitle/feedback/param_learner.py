@@ -13,12 +13,11 @@
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
 from .diff_analyzer import DiffReport, ParamAdjustment
-from .user_profile import PARAM_TIER_HALF_LIFE, DEFAULT_HALF_LIFE_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,7 @@ logger = logging.getLogger(__name__)
 # 参数硬边界
 # ---------------------------------------------------------------------------
 
-PARAM_BOUNDS: Dict[str, Tuple[float, float]] = {
+PARAM_BOUNDS: dict[str, tuple[float, float]] = {
     "merging.padding": (0.02, 0.30),
     "merging.padding_max": (0.05, 0.40),
     "merging.padding_min": (0.01, 0.15),
@@ -66,23 +65,25 @@ class ParamDecoupler:
 
     COUPLED_GROUPS = [
         # (主参数, 从属参数, 耦合关系)
-        ("merge_decision.fast_merge_max_gap",
-         "merge_decision.llm_decision_min_gap",
-         "boundary"),
-        ("merge_decision.llm_decision_min_gap",
-         "merge_decision.llm_decision_max_gap",
-         "interval"),
-        ("merging.padding",
-         "merging.padding_max",
-         "dependent"),
+        (
+            "merge_decision.fast_merge_max_gap",
+            "merge_decision.llm_decision_min_gap",
+            "boundary",
+        ),
+        (
+            "merge_decision.llm_decision_min_gap",
+            "merge_decision.llm_decision_max_gap",
+            "interval",
+        ),
+        ("merging.padding", "merging.padding_max", "dependent"),
     ]
 
     @classmethod
     def select_adjustments(
         cls,
-        raw_attributions: Dict[str, ParamAdjustment],
-        profile_history: List[Dict],
-    ) -> Dict[str, ParamAdjustment]:
+        raw_attributions: dict[str, ParamAdjustment],
+        profile_history: list[dict],
+    ) -> dict[str, ParamAdjustment]:
         """从原始归因中选择本轮应执行的调整
 
         策略:
@@ -95,7 +96,9 @@ class ParamDecoupler:
             return {}
 
         selected = dict(raw_attributions)
-        pending_params: Dict[str, Tuple[str, float]] = {}  # param → (conflict_with, confidence)
+        pending_params: dict[
+            str, tuple[str, float]
+        ] = {}  # param → (conflict_with, confidence)
 
         for a, b, relation in cls.COUPLED_GROUPS:
             if a in selected and b in selected:
@@ -106,14 +109,22 @@ class ParamDecoupler:
                     del selected[b]
                     logger.info(
                         "ParamDecoupler: suppressed '%s' (confidence=%.2f) in favor of '%s' (confidence=%.2f, relation=%s)",
-                        b, b_conf, a, a_conf, relation,
+                        b,
+                        b_conf,
+                        a,
+                        a_conf,
+                        relation,
                     )
                 else:
                     pending_params[a] = (b, a_conf)
                     del selected[a]
                     logger.info(
                         "ParamDecoupler: suppressed '%s' (confidence=%.2f) in favor of '%s' (confidence=%.2f, relation=%s)",
-                        a, a_conf, b, b_conf, relation,
+                        a,
+                        a_conf,
+                        b,
+                        b_conf,
+                        relation,
                     )
 
         return selected
@@ -169,7 +180,7 @@ class ParamLearner:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def filter_outliers(values: List[float]) -> List[float]:
+    def filter_outliers(values: list[float]) -> list[float]:
         """使用 IQR 方法过滤异常值"""
         if len(values) < 4:
             return values
@@ -181,7 +192,11 @@ class ParamLearner:
         if len(filtered) < len(values):
             logger.info(
                 "Outlier filter: %d → %d values (IQR=%.3f, range=[%.3f, %.3f])",
-                len(values), len(filtered), iqr, lower, upper,
+                len(values),
+                len(filtered),
+                iqr,
+                lower,
+                upper,
             )
         return filtered
 
@@ -208,7 +223,9 @@ class ParamLearner:
         if clamped != new_value:
             logger.debug(
                 "Param '%s' clamped: %.4f → %.4f (bounds)",
-                param_path, new_value, clamped,
+                param_path,
+                new_value,
+                clamped,
             )
         return clamped
 
@@ -219,9 +236,9 @@ class ParamLearner:
     def learn_from_diff(
         self,
         diff_report: DiffReport,
-        current_config_overrides: Dict[str, Any],
+        current_config_overrides: dict[str, Any],
         profile_name: str = "user_default",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """根据差异分析结果更新用户配置
 
         Args:
@@ -285,7 +302,9 @@ class ParamLearner:
 
             # EMA 更新
             effective_lr = learn_rate * adj.learn_weight
-            new_value = self.ema_update(current_value, observed_target, effective_lr, param_path)
+            new_value = self.ema_update(
+                current_value, observed_target, effective_lr, param_path
+            )
 
             if abs(new_value - current_value) < 0.001:
                 continue  # 变化太小，跳过
@@ -295,7 +314,9 @@ class ParamLearner:
             adjustments_applied[param_path] = [current_value, new_value]
 
         # 记录历史
-        self._record_observation(profile, diff_report, feedback_count, adjustments_applied)
+        self._record_observation(
+            profile, diff_report, feedback_count, adjustments_applied
+        )
 
         # 更新 profile
         profile["feedback_count"] = feedback_count
@@ -308,7 +329,9 @@ class ParamLearner:
         if adjustments_applied:
             logger.info(
                 "Param learner: applied %d adjustments with learn_rate=%.2f (feedback #%d)",
-                len(adjustments_applied), learn_rate, feedback_count,
+                len(adjustments_applied),
+                learn_rate,
+                feedback_count,
             )
             for param, (old, new) in adjustments_applied.items():
                 logger.info("  %s: %.4f → %.4f", param, old, new)
@@ -321,10 +344,10 @@ class ParamLearner:
 
     def _record_observation(
         self,
-        profile: Dict[str, Any],
+        profile: dict[str, Any],
         diff_report: DiffReport,
         feedback_count: int,
-        adjustments: Dict[str, List[float]],
+        adjustments: dict[str, list[float]],
     ) -> None:
         """记录反馈历史到 profile"""
         history = profile.get("history", [])
@@ -346,8 +369,12 @@ class ParamLearner:
             "timestamp": datetime.now().isoformat(),
             "diff_report_summary": summary,
             "alignment_coverage": round(diff_report.alignment_coverage, 3),
-            "median_semantic_similarity": round(diff_report.median_semantic_similarity, 3),
-            "adjustments": {k: [round(v[0], 4), round(v[1], 4)] for k, v in adjustments.items()},
+            "median_semantic_similarity": round(
+                diff_report.median_semantic_similarity, 3
+            ),
+            "adjustments": {
+                k: [round(v[0], 4), round(v[1], 4)] for k, v in adjustments.items()
+            },
         }
         history.append(entry)
 
@@ -355,7 +382,7 @@ class ParamLearner:
         profile["history"] = history[-50:]
 
     @staticmethod
-    def _get_nested_value(overrides: Dict[str, Any], param_path: str) -> Optional[float]:
+    def _get_nested_value(overrides: dict[str, Any], param_path: str) -> float | None:
         """从 overrides 字典中获取嵌套参数值"""
         parts = param_path.split(".")
         current = overrides
@@ -367,7 +394,9 @@ class ParamLearner:
         return current if isinstance(current, (int, float)) else None
 
     @staticmethod
-    def _set_nested_value(overrides: Dict[str, Any], param_path: str, value: float) -> None:
+    def _set_nested_value(
+        overrides: dict[str, Any], param_path: str, value: float
+    ) -> None:
         """在 overrides 字典中设置嵌套参数值"""
         parts = param_path.split(".")
         current = overrides
@@ -378,14 +407,14 @@ class ParamLearner:
         current[parts[-1]] = round(value, 4)
 
     @staticmethod
-    def _get_default_value(param_path: str) -> Optional[float]:
+    def _get_default_value(param_path: str) -> float | None:
         """获取参数的默认值（从 PipelineConfig 默认工厂）"""
         from ..config import (
-            MergingConfig,
             MergeDecisionConfig,
+            MergingConfig,
+            NoiseReductionConfig,
             SubtitleBuildConfig,
             VADConfig,
-            NoiseReductionConfig,
         )
 
         defaults = {

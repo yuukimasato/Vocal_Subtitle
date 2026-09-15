@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import copy
 import math
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any
 
 from ..asr.base import TranscriptionSegment
 from ..diarization.base import DiarizationResult, SpeakerTurn
-
 
 SCHEMA_VERSION = "global-ir-v1"
 
@@ -23,7 +23,9 @@ def _number(value: Any, name: str, *, non_negative: bool = False) -> float:
     return result
 
 
-def _range(start: Any, end: Any, name: str, *, duration: Optional[float] = None) -> tuple[float, float]:
+def _range(
+    start: Any, end: Any, name: str, *, duration: float | None = None
+) -> tuple[float, float]:
     first = _number(start, f"{name}_start", non_negative=True)
     last = _number(end, f"{name}_end", non_negative=True)
     if last <= first:
@@ -39,13 +41,13 @@ def _text(value: Any, name: str) -> str:
     return value
 
 
-def _optional_number(value: Any, name: str) -> Optional[float]:
+def _optional_number(value: Any, name: str) -> float | None:
     if value is None:
         return None
     return _number(value, name)
 
 
-def _metadata(value: Any) -> Dict[str, Any]:
+def _metadata(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, Mapping):
@@ -53,7 +55,7 @@ def _metadata(value: Any) -> Dict[str, Any]:
     return copy.deepcopy(dict(value))
 
 
-def _speaker_id(value: Any) -> Optional[int]:
+def _speaker_id(value: Any) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -67,15 +69,15 @@ class GlobalWord:
     text: str
     raw_start: float
     raw_end: float
-    confidence: Optional[float] = None
+    confidence: float | None = None
     source_window_id: str = ""
     segment_id: str = ""
-    language: Optional[str] = None
-    speaker_id: Optional[int] = None
-    no_speech_prob: Optional[float] = None
-    avg_logprob: Optional[float] = None
-    compression_ratio: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    language: str | None = None
+    speaker_id: int | None = None
+    no_speech_prob: float | None = None
+    avg_logprob: float | None = None
+    compression_ratio: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _text(self.id, "id"))
@@ -83,14 +85,21 @@ class GlobalWord:
         start, end = _range(self.raw_start, self.raw_end, "raw time")
         object.__setattr__(self, "raw_start", start)
         object.__setattr__(self, "raw_end", end)
-        object.__setattr__(self, "source_window_id", _text(self.source_window_id, "source_window_id"))
+        object.__setattr__(
+            self, "source_window_id", _text(self.source_window_id, "source_window_id")
+        )
         object.__setattr__(self, "segment_id", _text(self.segment_id, "segment_id"))
-        for name in ("confidence", "no_speech_prob", "avg_logprob", "compression_ratio"):
+        for name in (
+            "confidence",
+            "no_speech_prob",
+            "avg_logprob",
+            "compression_ratio",
+        ):
             object.__setattr__(self, name, _optional_number(getattr(self, name), name))
         object.__setattr__(self, "speaker_id", _speaker_id(self.speaker_id))
         object.__setattr__(self, "metadata", _metadata(self.metadata))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "text": self.text,
@@ -108,7 +117,7 @@ class GlobalWord:
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "GlobalWord":
+    def from_dict(cls, payload: Mapping[str, Any]) -> GlobalWord:
         if not isinstance(payload, Mapping):
             raise ValueError("global word must be a mapping")
         return cls(**dict(payload))
@@ -120,24 +129,30 @@ class GlobalTranscriptSegment:
     text: str
     raw_start: float
     raw_end: float
-    word_ids: List[str] = field(default_factory=list)
-    language: Optional[str] = None
-    avg_logprob: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    word_ids: list[str] = field(default_factory=list)
+    language: str | None = None
+    avg_logprob: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _text(self.id, "id"))
-        object.__setattr__(self, "text", self.text if isinstance(self.text, str) else str(self.text))
+        object.__setattr__(
+            self, "text", self.text if isinstance(self.text, str) else str(self.text)
+        )
         start, end = _range(self.raw_start, self.raw_end, "segment time")
         object.__setattr__(self, "raw_start", start)
         object.__setattr__(self, "raw_end", end)
-        if not isinstance(self.word_ids, list) or any(not isinstance(item, str) or not item.strip() for item in self.word_ids):
+        if not isinstance(self.word_ids, list) or any(
+            not isinstance(item, str) or not item.strip() for item in self.word_ids
+        ):
             raise ValueError("word_ids must be a list of non-empty strings")
         object.__setattr__(self, "word_ids", list(self.word_ids))
-        object.__setattr__(self, "avg_logprob", _optional_number(self.avg_logprob, "avg_logprob"))
+        object.__setattr__(
+            self, "avg_logprob", _optional_number(self.avg_logprob, "avg_logprob")
+        )
         object.__setattr__(self, "metadata", _metadata(self.metadata))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "text": self.text,
@@ -150,7 +165,7 @@ class GlobalTranscriptSegment:
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "GlobalTranscriptSegment":
+    def from_dict(cls, payload: Mapping[str, Any]) -> GlobalTranscriptSegment:
         if not isinstance(payload, Mapping):
             raise ValueError("global transcript segment must be a mapping")
         return cls(**dict(payload))
@@ -159,21 +174,29 @@ class GlobalTranscriptSegment:
 @dataclass
 class GlobalTranscript:
     schema_version: str = SCHEMA_VERSION
-    audio_duration: Optional[float] = None
-    words: List[GlobalWord] = field(default_factory=list)
-    segments: List[GlobalTranscriptSegment] = field(default_factory=list)
+    audio_duration: float | None = None
+    words: list[GlobalWord] = field(default_factory=list)
+    segments: list[GlobalTranscriptSegment] = field(default_factory=list)
     backend: str = "unknown"
     status: str = "unknown"
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.schema_version != SCHEMA_VERSION:
             raise ValueError("unsupported global IR schema")
         if self.audio_duration is not None:
-            object.__setattr__(self, "audio_duration", _number(self.audio_duration, "audio_duration", non_negative=True))
-        if not isinstance(self.words, list) or not all(isinstance(item, GlobalWord) for item in self.words):
+            object.__setattr__(
+                self,
+                "audio_duration",
+                _number(self.audio_duration, "audio_duration", non_negative=True),
+            )
+        if not isinstance(self.words, list) or not all(
+            isinstance(item, GlobalWord) for item in self.words
+        ):
             raise ValueError("words must be a list of GlobalWord")
-        if not isinstance(self.segments, list) or not all(isinstance(item, GlobalTranscriptSegment) for item in self.segments):
+        if not isinstance(self.segments, list) or not all(
+            isinstance(item, GlobalTranscriptSegment) for item in self.segments
+        ):
             raise ValueError("segments must be a list of GlobalTranscriptSegment")
         self.words.sort(key=lambda item: (item.raw_start, item.raw_end, item.id))
         self.segments.sort(key=lambda item: (item.raw_start, item.raw_end, item.id))
@@ -182,9 +205,9 @@ class GlobalTranscript:
         self.diagnostics = _metadata(self.diagnostics)
         self.validate()
 
-    def validate(self) -> List[str]:
-        errors: List[str] = []
-        word_by_id: Dict[str, GlobalWord] = {}
+    def validate(self) -> list[str]:
+        errors: list[str] = []
+        word_by_id: dict[str, GlobalWord] = {}
         for word in self.words:
             if word.id in word_by_id:
                 errors.append(f"duplicate global word id: {word.id}")
@@ -203,16 +226,21 @@ class GlobalTranscript:
                 errors.append(f"segment {segment.id} has a dangling word id")
                 continue
             words = [word for word in referenced if word is not None]
-            ordered = sorted(words, key=lambda item: (item.raw_start, item.raw_end, item.id))
+            ordered = sorted(
+                words, key=lambda item: (item.raw_start, item.raw_end, item.id)
+            )
             if [item.id for item in words] != [item.id for item in ordered]:
                 errors.append(f"segment {segment.id} word_ids are not time ordered")
-            if words and (segment.raw_start > min(item.raw_start for item in words) or segment.raw_end < max(item.raw_end for item in words)):
+            if words and (
+                segment.raw_start > min(item.raw_start for item in words)
+                or segment.raw_end < max(item.raw_end for item in words)
+            ):
                 errors.append(f"segment {segment.id} does not cover its words")
         if errors:
             raise ValueError("invalid global transcript: " + "; ".join(errors))
         return errors
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "audio_duration": self.audio_duration,
@@ -224,14 +252,20 @@ class GlobalTranscript:
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "GlobalTranscript":
-        if not isinstance(payload, Mapping) or payload.get("schema_version") != SCHEMA_VERSION:
+    def from_dict(cls, payload: Mapping[str, Any]) -> GlobalTranscript:
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("schema_version") != SCHEMA_VERSION
+        ):
             raise ValueError("unsupported global IR schema")
         return cls(
             schema_version=payload["schema_version"],
             audio_duration=payload.get("audio_duration"),
             words=[GlobalWord.from_dict(item) for item in payload.get("words", [])],
-            segments=[GlobalTranscriptSegment.from_dict(item) for item in payload.get("segments", [])],
+            segments=[
+                GlobalTranscriptSegment.from_dict(item)
+                for item in payload.get("segments", [])
+            ],
             backend=payload.get("backend", "unknown"),
             status=payload.get("status", "unknown"),
             diagnostics=payload.get("diagnostics", {}),
@@ -242,12 +276,12 @@ class GlobalTranscript:
 class GlobalSpeakerTimeline:
     schema_version: str = SCHEMA_VERSION
     duration: float = 0.0
-    turns: List[SpeakerTurn] = field(default_factory=list)
-    exclusive_turns: List[SpeakerTurn] = field(default_factory=list)
-    speaker_ids: List[int] = field(default_factory=list)
+    turns: list[SpeakerTurn] = field(default_factory=list)
+    exclusive_turns: list[SpeakerTurn] = field(default_factory=list)
+    speaker_ids: list[int] = field(default_factory=list)
     backend: str = "unknown"
     status: str = "unknown"
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.schema_version != SCHEMA_VERSION:
@@ -256,13 +290,19 @@ class GlobalSpeakerTimeline:
         if self.duration <= 0:
             raise ValueError("duration must be greater than zero")
         self.turns = self._normalize_turns(self.turns, "turns")
-        self.exclusive_turns = self._normalize_turns(self.exclusive_turns, "exclusive_turns")
-        self.speaker_ids = sorted({turn.speaker_id for turn in self.turns + self.exclusive_turns})
+        self.exclusive_turns = self._normalize_turns(
+            self.exclusive_turns, "exclusive_turns"
+        )
+        self.speaker_ids = sorted(
+            {turn.speaker_id for turn in self.turns + self.exclusive_turns}
+        )
         self.backend = _text(self.backend, "backend")
         self.status = _text(self.status, "status")
         self.diagnostics = _metadata(self.diagnostics)
 
-    def _normalize_turns(self, turns: Iterable[SpeakerTurn], name: str) -> List[SpeakerTurn]:
+    def _normalize_turns(
+        self, turns: Iterable[SpeakerTurn], name: str
+    ) -> list[SpeakerTurn]:
         if not isinstance(turns, list):
             turns = list(turns)
         normalized = []
@@ -274,10 +314,12 @@ class GlobalSpeakerTimeline:
             if turn.confidence is not None:
                 _number(turn.confidence, "turn confidence")
             normalized.append(turn)
-        return sorted(normalized, key=lambda item: (item.start, item.end, item.speaker_id))
+        return sorted(
+            normalized, key=lambda item: (item.start, item.end, item.speaker_id)
+        )
 
-    def to_dict(self) -> Dict[str, Any]:
-        def turn_dict(turn: SpeakerTurn) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        def turn_dict(turn: SpeakerTurn) -> dict[str, Any]:
             return {
                 "start": turn.start,
                 "end": turn.end,
@@ -285,6 +327,7 @@ class GlobalSpeakerTimeline:
                 "confidence": turn.confidence,
                 "overlapped": turn.overlapped,
             }
+
         return {
             "schema_version": self.schema_version,
             "duration": self.duration,
@@ -297,23 +340,31 @@ class GlobalSpeakerTimeline:
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "GlobalSpeakerTimeline":
-        if not isinstance(payload, Mapping) or payload.get("schema_version") != SCHEMA_VERSION:
+    def from_dict(cls, payload: Mapping[str, Any]) -> GlobalSpeakerTimeline:
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("schema_version") != SCHEMA_VERSION
+        ):
             raise ValueError("unsupported global IR schema")
+
         def parse_turn(item: Mapping[str, Any]) -> SpeakerTurn:
             if not isinstance(item, Mapping):
                 raise ValueError("speaker turn must be a mapping")
             return SpeakerTurn(
-                start=item.get("start"), end=item.get("end"),
+                start=item.get("start"),
+                end=item.get("end"),
                 speaker_id=item.get("speaker_id"),
                 confidence=item.get("confidence"),
                 overlapped=bool(item.get("overlapped", False)),
             )
+
         return cls(
             schema_version=payload["schema_version"],
             duration=payload.get("duration"),
             turns=[parse_turn(item) for item in payload.get("turns", [])],
-            exclusive_turns=[parse_turn(item) for item in payload.get("exclusive_turns", [])],
+            exclusive_turns=[
+                parse_turn(item) for item in payload.get("exclusive_turns", [])
+            ],
             speaker_ids=[],
             backend=payload.get("backend", "unknown"),
             status=payload.get("status", "unknown"),
@@ -327,9 +378,9 @@ def adapt_transcription_segments(
     source_window_id: str,
     segment_id_prefix: str,
     time_offset: float = 0.0,
-    language: Optional[str] = None,
-    audio_duration: Optional[float] = None,
-    word_time_source: Optional[str] = None,
+    language: str | None = None,
+    audio_duration: float | None = None,
+    word_time_source: str | None = None,
 ) -> GlobalTranscript:
     """Adapt relative-window ASR segments into absolute global IR.
 
@@ -340,23 +391,33 @@ def adapt_transcription_segments(
     offset = _number(time_offset, "time_offset")
     source_window_id = _text(source_window_id, "source_window_id")
     prefix = _text(segment_id_prefix, "segment_id_prefix")
-    words: List[GlobalWord] = []
-    transcript_segments: List[GlobalTranscriptSegment] = []
-    diagnostics: Dict[str, Any] = {"skipped_segments": 0, "skipped_words": 0}
+    words: list[GlobalWord] = []
+    transcript_segments: list[GlobalTranscriptSegment] = []
+    diagnostics: dict[str, Any] = {"skipped_segments": 0, "skipped_words": 0}
     for index, segment in enumerate(segments):
         if not isinstance(segment, TranscriptionSegment):
             diagnostics["skipped_segments"] += 1
             continue
         segment_id = f"{prefix}:{index:04d}"
         try:
-            seg_start, seg_end = _range(segment.start + offset, segment.end + offset, "segment", duration=audio_duration)
+            seg_start, seg_end = _range(
+                segment.start + offset,
+                segment.end + offset,
+                "segment",
+                duration=audio_duration,
+            )
         except ValueError:
             diagnostics["skipped_segments"] += 1
             continue
-        word_ids: List[str] = []
+        word_ids: list[str] = []
         for word_index, word in enumerate(segment.words or []):
             try:
-                word_start, word_end = _range(word.start + offset, word.end + offset, "word", duration=audio_duration)
+                word_start, word_end = _range(
+                    word.start + offset,
+                    word.end + offset,
+                    "word",
+                    duration=audio_duration,
+                )
                 word_id = f"gw:{source_window_id}:{segment_id}:w{word_index:04d}"
                 global_word = GlobalWord(
                     id=word_id,
@@ -373,7 +434,11 @@ def adapt_transcription_segments(
                     compression_ratio=segment.compression_ratio,
                     metadata={
                         "source": "transcription_segment",
-                        **({"time_source": word_time_source} if word_time_source else {}),
+                        **(
+                            {"time_source": word_time_source}
+                            if word_time_source
+                            else {}
+                        ),
                     },
                 )
             except (AttributeError, TypeError, ValueError):
@@ -381,19 +446,25 @@ def adapt_transcription_segments(
                 continue
             words.append(global_word)
             word_ids.append(word_id)
-        transcript_segments.append(GlobalTranscriptSegment(
-            id=segment_id,
-            text=segment.text,
-            raw_start=seg_start,
-            raw_end=seg_end,
-            word_ids=word_ids,
-            language=segment.language or language,
-            avg_logprob=segment.avg_logprob,
-            metadata={
-                "source": "transcription_segment",
-                **({"speaker_id": segment.speaker_id} if segment.speaker_id is not None else {}),
-            },
-        ))
+        transcript_segments.append(
+            GlobalTranscriptSegment(
+                id=segment_id,
+                text=segment.text,
+                raw_start=seg_start,
+                raw_end=seg_end,
+                word_ids=word_ids,
+                language=segment.language or language,
+                avg_logprob=segment.avg_logprob,
+                metadata={
+                    "source": "transcription_segment",
+                    **(
+                        {"speaker_id": segment.speaker_id}
+                        if segment.speaker_id is not None
+                        else {}
+                    ),
+                },
+            )
+        )
     status = "ok" if not diagnostics["skipped_segments"] else "degraded"
     return GlobalTranscript(
         audio_duration=audio_duration,
@@ -405,7 +476,9 @@ def adapt_transcription_segments(
     )
 
 
-def adapt_diarization_result(result: DiarizationResult, *, duration: float) -> GlobalSpeakerTimeline:
+def adapt_diarization_result(
+    result: DiarizationResult, *, duration: float
+) -> GlobalSpeakerTimeline:
     if not isinstance(result, DiarizationResult):
         raise ValueError("result must be a DiarizationResult")
     return GlobalSpeakerTimeline(

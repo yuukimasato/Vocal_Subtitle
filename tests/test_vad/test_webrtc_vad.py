@@ -1,7 +1,5 @@
 """测试 WebRTC VAD 引擎"""
 
-import numpy as np
-
 from vocal_subtitle.vad.webrtc_vad import WebRTCVAD
 
 

@@ -1,9 +1,9 @@
 """FastAPI 应用工厂"""
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
-from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,7 +28,9 @@ def _mark_stale_running_tasks():
             import logging
 
             logger = logging.getLogger(__name__)
-            logger.info("Marked %d stale running task(s) as failed after restart", fixed)
+            logger.info(
+                "Marked %d stale running task(s) as failed after restart", fixed
+            )
     except Exception:
         pass
 
@@ -82,6 +84,7 @@ def create_app() -> FastAPI:
         async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
             if scope.get("type") == "websocket":
                 from starlette.websockets import WebSocketClose
+
                 await WebSocketClose(code=1008)(scope, receive, send)
                 return
             await self._asgi_app(scope, receive, send)

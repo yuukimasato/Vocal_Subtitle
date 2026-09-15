@@ -33,7 +33,12 @@ class TestCLI:
         """info 命令"""
         result = runner.invoke(main, ["info"])
         assert result.exit_code == 0
-        assert "系统信息" in result.output or "System" in result.output or "GPU" in result.output or "操作系统" in result.output
+        assert (
+            "系统信息" in result.output
+            or "System" in result.output
+            or "GPU" in result.output
+            or "操作系统" in result.output
+        )
 
     def test_download_models_no_args(self, runner):
         """download-models 无参数"""
@@ -103,7 +108,15 @@ class TestCLI:
     def test_run_with_profile(self, runner):
         """run 指定 profile 但文件不存在"""
         result = runner.invoke(
-            main, ["run", "/nonexistent/test.mp3", "--profile", "podcast", "--language", "zh"]
+            main,
+            [
+                "run",
+                "/nonexistent/test.mp3",
+                "--profile",
+                "podcast",
+                "--language",
+                "zh",
+            ],
         )
         assert result.exit_code != 0  # 文件不存在会报错
 

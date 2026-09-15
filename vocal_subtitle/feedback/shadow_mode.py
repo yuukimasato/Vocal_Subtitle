@@ -11,8 +11,8 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any
 
 import numpy as np
 
@@ -25,9 +25,9 @@ class ShadowRunResult:
 
     timestamp: str = ""
     health_current: float = 0.0  # 旧参数健康度
-    health_shadow: float = 0.0   # 新参数健康度
-    health_detail_current: Dict[str, float] = field(default_factory=dict)
-    health_detail_shadow: Dict[str, float] = field(default_factory=dict)
+    health_shadow: float = 0.0  # 新参数健康度
+    health_detail_current: dict[str, float] = field(default_factory=dict)
+    health_detail_shadow: dict[str, float] = field(default_factory=dict)
     alignment_coverage: float = 0.0
     diff_summary: str = ""
 
@@ -42,8 +42,10 @@ class ShadowEvaluation:
     shadow_mean_health: float = 0.0
     health_delta: float = 0.0  # shadow - current
     total_runs: int = 0
-    degraded_dims: List[str] = field(default_factory=list)  # 有退化的子维度
-    recommendation: str = ""  # "upgrade" | "discard" | "continue" | "timeout_upgrade" | "timeout_discard"
+    degraded_dims: list[str] = field(default_factory=list)  # 有退化的子维度
+    recommendation: str = (
+        ""  # "upgrade" | "discard" | "continue" | "timeout_upgrade" | "timeout_discard"
+    )
 
 
 class ShadowModeEvaluator:
@@ -67,7 +69,7 @@ class ShadowModeEvaluator:
         self.upgrade_threshold = upgrade_threshold
         self.max_shadow_duration_days = max_shadow_duration_days
         self.max_dim_degradation = max_dim_degradation
-        self._runs: List[ShadowRunResult] = []
+        self._runs: list[ShadowRunResult] = []
 
     @property
     def run_count(self) -> int:
@@ -133,7 +135,8 @@ class ShadowModeEvaluator:
                 if elapsed_days > self.max_shadow_duration_days:
                     logger.info(
                         "Shadow mode exceeded max duration (%.1f days > %d days)",
-                        elapsed_days, self.max_shadow_duration_days,
+                        elapsed_days,
+                        self.max_shadow_duration_days,
                     )
                     # 超期：强行决策
                     if delta > 0:
@@ -166,8 +169,8 @@ class ShadowModeEvaluator:
         relative_improvement = delta / max(current_mean, 1.0)
         if relative_improvement < self.upgrade_threshold:
             eval_result.reason = (
-                f"Insufficient improvement: {relative_improvement*100:+.1f}% "
-                f"< {self.upgrade_threshold*100:.0f}% threshold "
+                f"Insufficient improvement: {relative_improvement * 100:+.1f}% "
+                f"< {self.upgrade_threshold * 100:.0f}% threshold "
                 f"(current={current_mean:.1f}, shadow={shadow_mean:.1f})"
             )
             eval_result.recommendation = "discard"
@@ -186,13 +189,13 @@ class ShadowModeEvaluator:
         # ---- 全部通过 ----
         eval_result.should_upgrade = True
         eval_result.reason = (
-            f"Shadow parameters improve health by {relative_improvement*100:+.1f}% "
+            f"Shadow parameters improve health by {relative_improvement * 100:+.1f}% "
             f"({current_mean:.1f} → {shadow_mean:.1f}) over {n} runs"
         )
         eval_result.recommendation = "upgrade"
         return eval_result
 
-    def _check_dim_degradation(self) -> List[str]:
+    def _check_dim_degradation(self) -> list[str]:
         """检查子维度是否有显著退化
 
         Returns:
@@ -201,7 +204,12 @@ class ShadowModeEvaluator:
         if not self._runs:
             return []
 
-        dims = ["alignment_coverage", "semantic_similarity", "time_iou", "structure_consistency"]
+        dims = [
+            "alignment_coverage",
+            "semantic_similarity",
+            "time_iou",
+            "structure_consistency",
+        ]
         degraded = []
 
         for dim in dims:
@@ -223,7 +231,7 @@ class ShadowModeEvaluator:
             if current_mean > 0:
                 relative_change = (shadow_mean - current_mean) / current_mean
                 if relative_change < -self.max_dim_degradation:
-                    degraded.append(f"{dim} ({relative_change*100:+.1f}%)")
+                    degraded.append(f"{dim} ({relative_change * 100:+.1f}%)")
 
         return degraded
 
@@ -232,7 +240,7 @@ class ShadowModeEvaluator:
         self._runs.clear()
         logger.info("Shadow mode data reset")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """序列化为字典"""
         return {
             "total_runs": len(self._runs),

@@ -8,8 +8,7 @@ segmented 路径。门禁只做合法性检查,不改变任何识别文本。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
-
+from typing import Any
 
 DEFAULT_MIN_SPEECH_COVERAGE = 0.6
 DEFAULT_MIN_CHARS_PER_SECOND = 0.5
@@ -22,7 +21,7 @@ class GlobalPrimaryGateResult:
     """Outcome of one global-primary suitability evaluation."""
 
     passed: bool
-    reason: Optional[str] = None
+    reason: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
     def as_diagnostics(self) -> dict[str, Any]:
@@ -33,7 +32,7 @@ class GlobalPrimaryGateResult:
         }
 
 
-def _word_span(word: Any) -> Optional[tuple[float, float]]:
+def _word_span(word: Any) -> tuple[float, float] | None:
     start = getattr(word, "raw_start", getattr(word, "start", None))
     end = getattr(word, "raw_end", getattr(word, "end", None))
     try:
@@ -57,7 +56,9 @@ def _speech_spans(physical_timeline: Any) -> list[tuple[float, float]]:
     return result
 
 
-def _overlap(total: float, span: tuple[float, float], windows: list[tuple[float, float]]) -> float:
+def _overlap(
+    total: float, span: tuple[float, float], windows: list[tuple[float, float]]
+) -> float:
     covered = 0.0
     cursor = span[0]
     for start, end in sorted(windows):
@@ -72,20 +73,26 @@ def _overlap(total: float, span: tuple[float, float], windows: list[tuple[float,
 def evaluate_global_primary_suitability(
     transcript: Any,
     *,
-    audio_duration: Optional[float] = None,
+    audio_duration: float | None = None,
     physical_timeline: Any = None,
     config: Any = None,
 ) -> GlobalPrimaryGateResult:
     """Check whether a global transcript may act as the primary candidate."""
 
     min_coverage = float(
-        getattr(config, "global_primary_min_speech_coverage", DEFAULT_MIN_SPEECH_COVERAGE)
+        getattr(
+            config, "global_primary_min_speech_coverage", DEFAULT_MIN_SPEECH_COVERAGE
+        )
     )
     min_density = float(
-        getattr(config, "global_primary_min_chars_per_second", DEFAULT_MIN_CHARS_PER_SECOND)
+        getattr(
+            config, "global_primary_min_chars_per_second", DEFAULT_MIN_CHARS_PER_SECOND
+        )
     )
     max_density = float(
-        getattr(config, "global_primary_max_chars_per_second", DEFAULT_MAX_CHARS_PER_SECOND)
+        getattr(
+            config, "global_primary_max_chars_per_second", DEFAULT_MAX_CHARS_PER_SECOND
+        )
     )
 
     words = list(getattr(transcript, "words", ()) or ())

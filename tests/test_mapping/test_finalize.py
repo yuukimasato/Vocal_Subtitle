@@ -1,18 +1,14 @@
 """Tests for subtitle event finalization."""
 
-import pytest
-
-from vocal_subtitle.mapping.display_timeline import DisplayCue
+from vocal_subtitle.asr.base import WordTimestamp
 from vocal_subtitle.mapping.finalize import (
     FinalizeConfig,
-    FinalizeResult,
-    finalize_subtitle_events,
-    _validate_input_events,
     _events_to_semantic_groups,
+    _validate_input_events,
+    finalize_subtitle_events,
 )
 from vocal_subtitle.mapping.strict_segmenter import repair_cross_boundary_fragments
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
-from vocal_subtitle.asr.base import WordTimestamp
 
 
 def _make_event(index, start, end, text, **kwargs):
@@ -20,6 +16,7 @@ def _make_event(index, start, end, text, **kwargs):
 
 
 # ── FinalizeConfig ───────────────────────────────────────────────────
+
 
 def test_config_defaults():
     cfg = FinalizeConfig()
@@ -29,6 +26,7 @@ def test_config_defaults():
 
 
 # ── _validate_input_events ───────────────────────────────────────────
+
 
 def test_validate_filters_empty_text():
     events = [
@@ -54,13 +52,21 @@ def test_validate_filters_inverted_time():
 
 # ── _events_to_semantic_groups ───────────────────────────────────────
 
+
 def test_events_to_groups_preserves_metadata():
     events = [
-        _make_event(1, 1.0, 2.0, "hello",
-                    physical_start=0.9, physical_end=2.1,
-                    speaker_id=1, speaker_label="Speaker A",
-                    source_word_ids=["w1", "w2"],
-                    physical_spans=[{"physical_clip_id": "clip-a", "start": 0.9, "end": 2.1}]),
+        _make_event(
+            1,
+            1.0,
+            2.0,
+            "hello",
+            physical_start=0.9,
+            physical_end=2.1,
+            speaker_id=1,
+            speaker_label="Speaker A",
+            source_word_ids=["w1", "w2"],
+            physical_spans=[{"physical_clip_id": "clip-a", "start": 0.9, "end": 2.1}],
+        ),
     ]
     groups = _events_to_semantic_groups(events)
     assert len(groups) == 1
@@ -72,6 +78,7 @@ def test_events_to_groups_preserves_metadata():
 
 
 # ── finalize_subtitle_events ─────────────────────────────────────────
+
 
 def test_finalize_preserves_event_count():
     events = [
@@ -89,8 +96,7 @@ def test_finalize_preserves_event_count():
 def test_finalize_clips_to_audio_duration():
     """Events with audio_duration clamp should not exceed the duration."""
     events = [
-        _make_event(1, 1.0, 2.0, "test",
-                    physical_start=1.0, physical_end=2.0),
+        _make_event(1, 1.0, 2.0, "test", physical_start=1.0, physical_end=2.0),
     ]
     result = finalize_subtitle_events(events, audio_duration=3.0)
     # With sufficient audio_duration, display_end covers physical_end
@@ -139,9 +145,7 @@ def test_finalize_handles_empty_input():
 
 
 def test_finalize_does_not_mutate_source_events():
-    event = _make_event(
-        8, 1.0, 1.2, "hello", physical_start=1.0, physical_end=1.2
-    )
+    event = _make_event(8, 1.0, 1.2, "hello", physical_start=1.0, physical_end=1.2)
 
     result = finalize_subtitle_events([event], audio_duration=3.0)
 
@@ -225,6 +229,7 @@ def test_finalize_does_not_merge_short_events_across_physical_bins():
 
 
 # ── repair_cross_boundary_fragments ──────────────────────────────────
+
 
 def test_repair_moves_trailing_fragment_to_next_event():
     """ASR 段边界切在句中：上一条尾部的残句片段移交给下一条开头。"""

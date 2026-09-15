@@ -86,10 +86,12 @@ class TestSpeakerModelDownloadAPI:
             return {"model_id": model_id, "status": "ready", "cache_dir": "hidden"}
 
         monkeypatch.setattr(
-            "vocal_subtitle.utils.hf_token_store.store_hf_token", fake_store,
+            "vocal_subtitle.utils.hf_token_store.store_hf_token",
+            fake_store,
         )
         monkeypatch.setattr(
-            "vocal_subtitle.diarization.model_registry.download_model", fake_download,
+            "vocal_subtitle.diarization.model_registry.download_model",
+            fake_download,
         )
 
         response = client.post(
@@ -259,21 +261,29 @@ class TestStaticFiles:
         assert 'id="workspace-quality"' not in resp.text
         assert 'id="task-detail-panel"' in resp.text
         assert 'id="quality-report-content"' in resp.text
-        assert '/js/waveform.js' not in resp.text
-        assert '/js/ui-review.js' not in resp.text
-        assert '/js/ui-subtitles.js' not in resp.text
+        assert "/js/waveform.js" not in resp.text
+        assert "/js/ui-review.js" not in resp.text
+        assert "/js/ui-subtitles.js" not in resp.text
         assert '<button type="button" class="btn-run" id="btn-run"' in resp.text
         assert 'id="process-error"' in resp.text
         # 2026-09-11 UX 精简：模型行仅保留下载按钮（检查缓存按钮已移除）
         assert 'data-action="download"' in resp.text
         assert "'speaker_embedding_hf_token'," not in resp.text
-        assert "'speaker_embedding_hf_token': 'speaker_embedding_token'" not in resp.text
+        assert (
+            "'speaker_embedding_hf_token': 'speaker_embedding_token'" not in resp.text
+        )
 
     def test_credential_fields_do_not_use_password_manager_semantics(self, client):
         html = client.get("/").text
 
-        assert 'id="llm-api-key" name="llm-api-key" type="text" class="credential-mask"' in html
-        assert 'data-key="speaker_embedding_hf_token" name="speaker-embedding-token" type="text" class="credential-mask"' in html
+        assert (
+            'id="llm-api-key" name="llm-api-key" type="text" class="credential-mask"'
+            in html
+        )
+        assert (
+            'data-key="speaker_embedding_hf_token" name="speaker-embedding-token" type="text" class="credential-mask"'
+            in html
+        )
         assert 'autocomplete="off"' in html
         assert 'data-form-type="other"' in html
         assert 'type="password"' not in html
@@ -283,11 +293,16 @@ class TestStaticFiles:
 
         assert "/api/asr/funasr/status" in html
         assert "/api/asr/funasr/prepare" in html
-        assert "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch" in html
+        assert (
+            "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+            in html
+        )
         assert "syncASREngineOptions" in html
         assert "funasrPreparing" in html
 
-    def test_funasr_prepare_endpoints_use_local_first_manager(self, client, monkeypatch):
+    def test_funasr_prepare_endpoints_use_local_first_manager(
+        self, client, monkeypatch
+    ):
         monkeypatch.setattr(
             "vocal_subtitle.webui.api.funasr_status",
             lambda model: {

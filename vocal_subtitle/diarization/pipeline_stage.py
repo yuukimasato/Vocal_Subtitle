@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -23,9 +22,9 @@ class PipelineDiarizationMixin:
         self,
         audio: np.ndarray,
         sample_rate: int,
-        segments: List[SpeechSegment],
+        segments: list[SpeechSegment],
         stats,
-    ) -> List[int]:
+    ) -> list[int]:
         """Stage 3.5: 声学特征聚类 → 说话人分离"""
         diar_cfg = self.config.diarization
 
@@ -46,17 +45,17 @@ class PipelineDiarizationMixin:
 
         speaker_ids = diarizer.diarize(segments, audio, sample_rate)
         stats.speaker_count = len(set(speaker_ids)) if speaker_ids else 0
-        stats.diarization_silhouette = diarizer.last_silhouette_ if hasattr(diarizer, 'last_silhouette_') else None
-        logger.info(
-            "Diarization: %d speakers detected", len(set(speaker_ids))
+        stats.diarization_silhouette = (
+            diarizer.last_silhouette_ if hasattr(diarizer, "last_silhouette_") else None
         )
+        logger.info("Diarization: %d speakers detected", len(set(speaker_ids)))
         return speaker_ids
 
     def _run_role_labeling(
         self,
-        asr_results: List[List[TranscriptionSegment]],
-        speaker_ids: List[int],
-    ) -> Dict[int, str]:
+        asr_results: list[list[TranscriptionSegment]],
+        speaker_ids: list[int],
+    ) -> dict[int, str]:
         """Stage 4.5: LLM 上下文分析 → 说话人角色命名"""
         role_cfg = self.config.speaker_role
 
@@ -67,7 +66,7 @@ class PipelineDiarizationMixin:
             return {}
 
         # 按说话人聚合对话文本
-        speaker_texts: Dict[int, List[str]] = defaultdict(list)
+        speaker_texts: dict[int, list[str]] = defaultdict(list)
         for seg_result, spk_id in zip(asr_results, speaker_ids):
             text = " ".join(ts.text for ts in seg_result).strip()
             if text:
@@ -93,7 +92,7 @@ class PipelineDiarizationMixin:
         self,
         audio: np.ndarray,
         sample_rate: int,
-        stats: "PipelineStats",
+        stats: PipelineStats,
     ) -> None:
         """[层1] 身份主干 P1:全局 diarization 前置（early_turns）。
 
@@ -107,7 +106,9 @@ class PipelineDiarizationMixin:
         from ..diarization.early_turns import run_early_global_pass
 
         self._early_turns_state = run_early_global_pass(
-            audio, sample_rate, self.config,
+            audio,
+            sample_rate,
+            self.config,
             duration=len(audio) / max(sample_rate, 1),
         )
         state = self._early_turns_state
@@ -151,24 +152,26 @@ class PipelineDiarizationMixin:
             if engine.model_loaded:
                 logger.info(
                     "Speaker embedding engine loaded: %s (dim=%d)",
-                    engine.name, engine.embedding_dim,
+                    engine.name,
+                    engine.embedding_dim,
                 )
                 self._embedding_engine = engine
                 return engine
         except Exception as e:
             logger.warning(
                 "Failed to load speaker embedding engine: %s. "
-                "Speaker identity will remain unknown unless global diarization is available.", e,
+                "Speaker identity will remain unknown unless global diarization is available.",
+                e,
             )
 
         return None
 
     def _run_event_speaker_clustering(
         self,
-        events: List[SubtitleEvent],
+        events: list[SubtitleEvent],
         audio: np.ndarray,
         sample_rate: int,
-    ) -> List[SubtitleEvent]:
+    ) -> list[SubtitleEvent]:
         """事件级说话人聚类（替代段级 diarization）
 
         采用滑动窗口策略：将音频切成重叠的固定长度窗口（3s），
@@ -192,8 +195,8 @@ class PipelineDiarizationMixin:
             return events
 
         # ---- Step 1: 滑动窗口特征提取 ----
-        WINDOW_SEC = 3.0
-        HOP_SEC = 1.0
+        window_sec = 3.0
+        hop_sec = 1.0
         audio_duration = len(audio) / sample_rate
 
         # 尝试加载说话人嵌入引擎（pyannote 等）。
@@ -204,9 +207,9 @@ class PipelineDiarizationMixin:
         window_times = []  # (start, end) per window
 
         t = 0.0
-        while t + WINDOW_SEC <= audio_duration:
+        while t + window_sec <= audio_duration:
             s = int(t * sample_rate)
-            e = int((t + WINDOW_SEC) * sample_rate)
+            e = int((t + window_sec) * sample_rate)
             snippet = audio[s:e].astype(np.float32)
 
             if embedding_engine is not None:
@@ -216,9 +219,9 @@ class PipelineDiarizationMixin:
 
             if feats is not None and np.any(feats):
                 window_features.append(feats)
-                window_times.append((t, t + WINDOW_SEC))
+                window_times.append((t, t + window_sec))
 
-            t += HOP_SEC
+            t += hop_sec
 
         if len(window_features) < 2:
             logger.warning("Too few windows for clustering")
@@ -232,7 +235,9 @@ class PipelineDiarizationMixin:
         feature_matrix = np.vstack(window_features)
         logger.info(
             "Sliding window: %d windows (%.1fs each, hop=%.1fs)",
-            len(window_features), WINDOW_SEC, HOP_SEC,
+            len(window_features),
+            window_sec,
+            hop_sec,
         )
 
         # ---- Step 2: 窗口聚类 ----
@@ -270,7 +275,8 @@ class PipelineDiarizationMixin:
                 n_window_speakers = len(set(best))
                 logger.info(
                     "Window retry: %d speakers (silhouette=%.3f)",
-                    n_window_speakers, silhouette,
+                    n_window_speakers,
+                    silhouette,
                 )
 
         # 质量门控：聚类质量太差时保留 unknown，禁止伪造 speaker。
@@ -278,7 +284,8 @@ class PipelineDiarizationMixin:
             logger.warning(
                 "Window clustering quality insufficient "
                 "(silhouette=%.3f, %d speakers). Keeping speakers unknown.",
-                silhouette, n_window_speakers,
+                silhouette,
+                n_window_speakers,
             )
             for ev in events:
                 ev.speaker_id = None
@@ -289,7 +296,9 @@ class PipelineDiarizationMixin:
 
         logger.info(
             "Window clustering: %d windows → %d speakers (silhouette=%.3f)",
-            len(window_features), n_window_speakers, silhouette,
+            len(window_features),
+            n_window_speakers,
+            silhouette,
         )
 
         # ---- Step 3: 事件→窗口→说话人映射 ----
@@ -320,7 +329,8 @@ class PipelineDiarizationMixin:
         n_event_speakers = len(set(e.speaker_id for e in events))
         logger.info(
             "Event mapping: %d events → %d speakers",
-            len(events), n_event_speakers,
+            len(events),
+            n_event_speakers,
         )
 
         return events
@@ -328,7 +338,7 @@ class PipelineDiarizationMixin:
     @staticmethod
     def _extract_pitch_energy_features_single(
         snippet: np.ndarray, sample_rate: int
-    ) -> Optional[np.ndarray]:
+    ) -> np.ndarray | None:
         """从单个音频片段提取音高+能量特征（8 维）"""
         try:
             import librosa
@@ -343,12 +353,25 @@ class PipelineDiarizationMixin:
                 fmax=librosa.note_to_hz("C7"),
                 sr=sample_rate,
             )
-            f0_voiced = f0[voiced_flag] if voiced_flag is not None and np.any(voiced_flag) else f0
+            f0_voiced = (
+                f0[voiced_flag]
+                if voiced_flag is not None and np.any(voiced_flag)
+                else f0
+            )
             f0_clean = f0_voiced[~np.isnan(f0_voiced)]
             if len(f0_clean) > 0:
-                feats.extend([float(np.mean(f0_clean)), float(np.std(f0_clean)),
-                              float(np.median(f0_clean))])
-                feats.append(float(np.sum(voiced_flag)/len(voiced_flag)) if voiced_flag is not None else 0.0)
+                feats.extend(
+                    [
+                        float(np.mean(f0_clean)),
+                        float(np.std(f0_clean)),
+                        float(np.median(f0_clean)),
+                    ]
+                )
+                feats.append(
+                    float(np.sum(voiced_flag) / len(voiced_flag))
+                    if voiced_flag is not None
+                    else 0.0
+                )
             else:
                 feats.extend([0.0, 0.0, 0.0, 0.0])
         except Exception:
@@ -361,7 +384,7 @@ class PipelineDiarizationMixin:
             feats.extend([0.0, 0.0])
 
         try:
-            S = np.abs(librosa.stft(snippet, n_fft=2048, hop_length=512))
+            S = np.abs(librosa.stft(snippet, n_fft=2048, hop_length=512))  # noqa: N806 (librosa 惯例：S=幅度谱)
             centroid = librosa.feature.spectral_centroid(S=S, sr=sample_rate)
             feats.extend([float(np.mean(centroid)), float(np.std(centroid))])
         except Exception:
@@ -373,8 +396,8 @@ class PipelineDiarizationMixin:
 
     def _gap_based_speaker_assignment(
         self,
-        events: List[SubtitleEvent],
-    ) -> List[SubtitleEvent]:
+        events: list[SubtitleEvent],
+    ) -> list[SubtitleEvent]:
         """纯间隙驱动的说话人交替（声学特征完全失效时的最后兜底）
 
         计算段间间隙的分布，使用中位数作为基准：
@@ -411,7 +434,10 @@ class PipelineDiarizationMixin:
         logger.info(
             "Gap-based: median=%.3fs, switch_threshold=%.3fs, "
             "back_threshold=%.3fs, %d gaps",
-            median_gap, switch_threshold, back_switch_threshold, len(gaps),
+            median_gap,
+            switch_threshold,
+            back_switch_threshold,
+            len(gaps),
         )
 
         # 多人交替：每次切换递增 speaker_id
@@ -419,7 +445,7 @@ class PipelineDiarizationMixin:
         current_speaker = 0
         next_speaker = 1
         prev_speaker = None  # 用于回切检测
-        speaker_stack = []   # 说话人栈，用于回切
+        speaker_stack = []  # 说话人栈，用于回切
 
         for i, evt in enumerate(events):
             evt.speaker_id = current_speaker
@@ -446,14 +472,16 @@ class PipelineDiarizationMixin:
 
         n_speakers = len(set(e.speaker_id for e in events))
         logger.info(
-            "Gap-based: %d events → %d speakers", len(events), n_speakers,
+            "Gap-based: %d events → %d speakers",
+            len(events),
+            n_speakers,
         )
         return events
 
     def _run_event_role_labeling(
         self,
-        events: List[SubtitleEvent],
-    ) -> List[SubtitleEvent]:
+        events: list[SubtitleEvent],
+    ) -> list[SubtitleEvent]:
         """事件级 LLM 说话人角色标注
 
         从已聚类的 SubtitleEvent 按 speaker_id 聚合文本，
@@ -466,7 +494,7 @@ class PipelineDiarizationMixin:
             return events
 
         # 按说话人聚合文本
-        speaker_texts: Dict[int, List[str]] = defaultdict(list)
+        speaker_texts: dict[int, list[str]] = defaultdict(list)
         for evt in events:
             if evt.speaker_id is not None and evt.text.strip():
                 speaker_texts[evt.speaker_id].append(evt.text)
@@ -495,18 +523,19 @@ class PipelineDiarizationMixin:
                 evt.speaker_label = role_names[evt.speaker_id]
 
         logger.info(
-            "Event-level role labeling: %d speakers named", len(role_names),
+            "Event-level role labeling: %d speakers named",
+            len(role_names),
         )
         return events
 
     def _run_boundary_redundancy(
         self,
-        segments: List[SpeechSegment],
-        asr_results: List[List[TranscriptionSegment]],
+        segments: list[SpeechSegment],
+        asr_results: list[list[TranscriptionSegment]],
         audio: np.ndarray,
         sample_rate: int,
         chunk_label: str = "",
-    ) -> Tuple[List[SpeechSegment], List[List[TranscriptionSegment]]]:
+    ) -> tuple[list[SpeechSegment], list[list[TranscriptionSegment]]]:
         """Stage 4.6: 边界滑动窗口冗余识别
 
         对低置信度边界执行偏移窗口重 ASR + LLM 语义仲裁，
@@ -518,18 +547,18 @@ class PipelineDiarizationMixin:
         3. BoundaryArbitrator 用 LLM/规则决定词归属
         4. 应用仲裁结果到 segments 和 asr_results
         """
+        from ..asr.boundary_arbitration import (
+            ArbitrationConfig,
+            BoundaryArbitrator,
+            apply_arbitration_results,
+        )
         from ..asr.boundary_confidence import (
             BoundaryConfidenceEstimator,
-            BoundaryRedundancyConfig as BRC,
+            BoundaryRedundancyConfig,
         )
         from ..asr.boundary_reasr import (
-            SlidingWindowReASR,
             SlidingWindowConfig,
-        )
-        from ..asr.boundary_arbitration import (
-            BoundaryArbitrator,
-            ArbitrationConfig,
-            apply_arbitration_results,
+            SlidingWindowReASR,
         )
 
         cfg = self.config.boundary_redundancy
@@ -544,7 +573,7 @@ class PipelineDiarizationMixin:
                 total_items=len(segments) - 1,
             )
 
-        estimator_cfg = BRC(
+        estimator_cfg = BoundaryRedundancyConfig(
             enabled=True,
             min_gap_trigger=cfg.min_gap_trigger,
             max_energy_slope_trigger=cfg.max_energy_slope_trigger,
@@ -553,14 +582,19 @@ class PipelineDiarizationMixin:
         estimator = BoundaryConfidenceEstimator(estimator_cfg)
 
         boundaries = estimator.evaluate_all(
-            segments, asr_results, audio, sample_rate,
+            segments,
+            asr_results,
+            audio,
+            sample_rate,
         )
         low_conf_indices = estimator.get_low_confidence_boundaries(boundaries)
 
         if progress:
             progress.update_stage(
                 len(boundaries),
-                extra={"detail": f"{len(low_conf_indices)}/{len(boundaries)} 边界需冗余"},
+                extra={
+                    "detail": f"{len(low_conf_indices)}/{len(boundaries)} 边界需冗余"
+                },
             )
             progress.finish_stage()
 
@@ -588,7 +622,7 @@ class PipelineDiarizationMixin:
         # ★ 边界窗口 ASR 也需要准确的 language 参数。
         # 窗口音频极短（500-1000ms），自动检测几乎必定失败。
         # 如果用户未锁定语言，从完整音频中做一次全局检测。
-        boundary_language: Optional[str] = self.config.asr.language
+        boundary_language: str | None = self.config.asr.language
         if boundary_language is None:
             asr_engine = self._get_asr_engine()
             asr_engine.load_model()
@@ -599,10 +633,13 @@ class PipelineDiarizationMixin:
                 detect = getattr(asr_engine, "detect_language_info", None)
                 if callable(detect):
                     lang_info = detect(audio, sample_rate)
-                    boundary_language = getattr(lang_info, "language", None) or lang_info
+                    boundary_language = (
+                        getattr(lang_info, "language", None) or lang_info
+                    )
             if boundary_language:
                 logger.info(
-                    "Boundary re-ASR: using detected language=%s", boundary_language,
+                    "Boundary re-ASR: using detected language=%s",
+                    boundary_language,
                 )
             else:
                 logger.warning(
@@ -617,8 +654,11 @@ class PipelineDiarizationMixin:
             language=boundary_language,
         )
         reasr_results = reasr.process_boundaries(
-            low_conf_indices, segments, asr_results,
-            audio, sample_rate,
+            low_conf_indices,
+            segments,
+            asr_results,
+            audio,
+            sample_rate,
             total_duration=len(audio) / sample_rate,
         )
         if progress:
@@ -692,8 +732,9 @@ class PipelineDiarizationMixin:
 
         # Step 4: 应用仲裁结果
         asr_results, segments = apply_arbitration_results(
-            arbitration_results, asr_results, segments,
+            arbitration_results,
+            asr_results,
+            segments,
         )
 
         return segments, asr_results
-

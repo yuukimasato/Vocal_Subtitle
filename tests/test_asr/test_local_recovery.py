@@ -6,12 +6,11 @@ import pytest
 from vocal_subtitle.asr.base import ASREngine, TranscriptionSegment, WordTimestamp
 from vocal_subtitle.asr.local_recovery import (
     LocalRecoveryConfig,
+    LocalRecoveryEngine,
     LocalRecoveryRequest,
     LocalRecoveryResult,
-    LocalRecoveryEngine,
     RecoveryCandidate,
 )
-from vocal_subtitle.physical.ir import GlobalWord
 
 
 class _StubASR(ASREngine):
@@ -44,6 +43,7 @@ class _StubASR(ASREngine):
 
 # ── RecoveryCandidate ────────────────────────────────────────────────
 
+
 def test_recovery_candidate_requires_non_empty_word_id():
     with pytest.raises(ValueError, match="word_id"):
         RecoveryCandidate(word_id="", text="hello", start=1.0, end=1.3, confidence=0.9)
@@ -51,12 +51,16 @@ def test_recovery_candidate_requires_non_empty_word_id():
 
 def test_recovery_candidate_rejects_inverted_time():
     with pytest.raises(ValueError, match="start.*end"):
-        RecoveryCandidate(word_id="w1", text="hello", start=1.3, end=1.0, confidence=0.9)
+        RecoveryCandidate(
+            word_id="w1", text="hello", start=1.3, end=1.0, confidence=0.9
+        )
 
 
 def test_recovery_candidate_rejects_negative_time():
     with pytest.raises(ValueError):
-        RecoveryCandidate(word_id="w1", text="hello", start=-0.1, end=1.0, confidence=0.9)
+        RecoveryCandidate(
+            word_id="w1", text="hello", start=-0.1, end=1.0, confidence=0.9
+        )
 
 
 def test_recovery_candidate_accepts_default_confidence():
@@ -65,14 +69,20 @@ def test_recovery_candidate_accepts_default_confidence():
 
 
 def test_recovery_candidate_clamps_confidence():
-    candidate = RecoveryCandidate(word_id="w1", text="hello", start=0.5, end=0.8, confidence=1.5)
+    candidate = RecoveryCandidate(
+        word_id="w1", text="hello", start=0.5, end=0.8, confidence=1.5
+    )
     assert candidate.confidence == 1.0
-    candidate2 = RecoveryCandidate(word_id="w2", text="hi", start=0.5, end=0.8, confidence=-0.3)
+    candidate2 = RecoveryCandidate(
+        word_id="w2", text="hi", start=0.5, end=0.8, confidence=-0.3
+    )
     assert candidate2.confidence == 0.0
 
 
 def test_recovery_candidate_to_dict():
-    candidate = RecoveryCandidate(word_id="w1", text="hello", start=0.5, end=0.8, confidence=0.85)
+    candidate = RecoveryCandidate(
+        word_id="w1", text="hello", start=0.5, end=0.8, confidence=0.85
+    )
     d = candidate.to_dict()
     assert d["word_id"] == "w1"
     assert d["text"] == "hello"
@@ -82,6 +92,7 @@ def test_recovery_candidate_to_dict():
 
 
 # ── LocalRecoveryConfig ──────────────────────────────────────────────
+
 
 def test_config_defaults_are_valid():
     cfg = LocalRecoveryConfig()
@@ -108,6 +119,7 @@ def test_config_rejects_negative_request_tolerance():
 
 # ── LocalRecoveryRequest ─────────────────────────────────────────────
 
+
 def test_request_requires_at_least_one_reason():
     with pytest.raises(ValueError, match="reason"):
         LocalRecoveryRequest(start=0.0, end=1.0, reasons=[])
@@ -125,11 +137,16 @@ def test_request_requires_positive_range():
 
 # ── LocalRecoveryResult ──────────────────────────────────────────────
 
+
 def test_result_marks_outcome():
     """An outcome of 'recovered' with candidates is success."""
     result = LocalRecoveryResult(
         request=LocalRecoveryRequest(start=0.0, end=1.0, reasons=["uncovered"]),
-        candidates=[RecoveryCandidate(word_id="w1", text="hello", start=0.2, end=0.5, confidence=0.9)],
+        candidates=[
+            RecoveryCandidate(
+                word_id="w1", text="hello", start=0.2, end=0.5, confidence=0.9
+            )
+        ],
         attempt_count=1,
         outcome="recovered",
     )
@@ -169,23 +186,26 @@ def test_result_requires_positive_attempt_count():
 
 # ── LocalRecoveryEngine ──────────────────────────────────────────────
 
+
 def test_engine_processes_uncovered_range():
     """ASR returns words within the request range — they should be accepted."""
     # Segment-local word at 1.0-1.3s, request is [0.5, 1.5], context_start=0.0.
     # Global word position: [1.0, 1.3] which overlaps with [0.5, 1.5].
-    engine_stub = _StubASR(responses=[
-        [
-            TranscriptionSegment(
-                text="recovered text",
-                start=1.0,
-                end=1.3,
-                words=[
-                    WordTimestamp("recovered", 1.0, 1.15, confidence=0.9),
-                    WordTimestamp("text", 1.15, 1.3, confidence=0.9),
-                ],
-            )
+    engine_stub = _StubASR(
+        responses=[
+            [
+                TranscriptionSegment(
+                    text="recovered text",
+                    start=1.0,
+                    end=1.3,
+                    words=[
+                        WordTimestamp("recovered", 1.0, 1.15, confidence=0.9),
+                        WordTimestamp("text", 1.15, 1.3, confidence=0.9),
+                    ],
+                )
+            ]
         ]
-    ])
+    )
     engine = LocalRecoveryEngine(asr_engine=engine_stub)
     audio = np.zeros(48000, dtype=np.float32)  # 3s @ 16kHz
 
@@ -222,16 +242,18 @@ def test_engine_respects_max_attempts():
 
 
 def test_engine_rejects_candidates_below_min_confidence():
-    engine_stub = _StubASR(responses=[
-        [
-            TranscriptionSegment(
-                text="low conf",
-                start=0.0,
-                end=0.3,
-                words=[WordTimestamp("low", 0.0, 0.15, confidence=0.3)],
-            )
+    engine_stub = _StubASR(
+        responses=[
+            [
+                TranscriptionSegment(
+                    text="low conf",
+                    start=0.0,
+                    end=0.3,
+                    words=[WordTimestamp("low", 0.0, 0.15, confidence=0.3)],
+                )
+            ]
         ]
-    ])
+    )
     engine = LocalRecoveryEngine(
         asr_engine=engine_stub,
         config=LocalRecoveryConfig(min_confidence=0.5),
@@ -240,7 +262,8 @@ def test_engine_rejects_candidates_below_min_confidence():
 
     results = engine.process_requests(
         [LocalRecoveryRequest(start=0.0, end=0.3, reasons=["low_conf"])],
-        audio, sample_rate=16000,
+        audio,
+        sample_rate=16000,
     )
     assert len(results[0].candidates) == 0
 
@@ -249,17 +272,19 @@ def test_engine_stops_early_on_success():
     """When first attempt recovers, don't try again."""
     # Word returned at local [0.3, 0.5], request [0.2, 0.8], context_start=0.0.
     # Global: [0.3, 0.5] overlaps with request [0.2, 0.8].
-    engine_stub = _StubASR(responses=[
-        [
-            TranscriptionSegment(
-                text="ok",
-                start=0.3,
-                end=0.5,
-                words=[WordTimestamp("ok", 0.3, 0.5, confidence=0.9)],
-            )
-        ],
-        [],  # second response would be empty but should never be called
-    ])
+    engine_stub = _StubASR(
+        responses=[
+            [
+                TranscriptionSegment(
+                    text="ok",
+                    start=0.3,
+                    end=0.5,
+                    words=[WordTimestamp("ok", 0.3, 0.5, confidence=0.9)],
+                )
+            ],
+            [],  # second response would be empty but should never be called
+        ]
+    )
     engine = LocalRecoveryEngine(
         asr_engine=engine_stub,
         config=LocalRecoveryConfig(max_attempts_per_range=3),
@@ -268,16 +293,22 @@ def test_engine_stops_early_on_success():
 
     engine.process_requests(
         [LocalRecoveryRequest(start=0.2, end=0.8, reasons=["uncovered"])],
-        audio, sample_rate=16000,
+        audio,
+        sample_rate=16000,
     )
     assert len(engine_stub.calls) == 1
 
 
 def test_engine_applies_context_window():
-    engine_stub = _StubASR(responses=[
-        [TranscriptionSegment(text="x", start=0.0, end=0.1,
-                              words=[WordTimestamp("x", 0.0, 0.1)])]
-    ])
+    engine_stub = _StubASR(
+        responses=[
+            [
+                TranscriptionSegment(
+                    text="x", start=0.0, end=0.1, words=[WordTimestamp("x", 0.0, 0.1)]
+                )
+            ]
+        ]
+    )
     engine = LocalRecoveryEngine(
         asr_engine=engine_stub,
         config=LocalRecoveryConfig(context_window=0.5),
@@ -286,7 +317,8 @@ def test_engine_applies_context_window():
 
     engine.process_requests(
         [LocalRecoveryRequest(start=1.0, end=2.0, reasons=["uncovered"])],
-        audio, sample_rate=16000,
+        audio,
+        sample_rate=16000,
     )
     # Window should be [0.5, 2.5] = 2.0s = 32000 samples
     call = engine_stub.calls[0]
@@ -309,23 +341,28 @@ def test_engine_maps_recovery_to_global_words():
     # Segment audio from context_start=0.0 to context_end=2.0.
     # ASR returns words at local [0.6, 0.8] and [0.8, 1.0].
     # Global: [0.6, 0.8] and [0.8, 1.0], both overlap with request [0.5, 1.5].
-    engine_stub = _StubASR(responses=[
-        [
-            TranscriptionSegment(
-                text="found word",
-                start=0.6,
-                end=1.0,
-                words=[WordTimestamp("found", 0.6, 0.8, confidence=0.88),
-                       WordTimestamp("word", 0.8, 1.0, confidence=0.92)],
-            )
+    engine_stub = _StubASR(
+        responses=[
+            [
+                TranscriptionSegment(
+                    text="found word",
+                    start=0.6,
+                    end=1.0,
+                    words=[
+                        WordTimestamp("found", 0.6, 0.8, confidence=0.88),
+                        WordTimestamp("word", 0.8, 1.0, confidence=0.92),
+                    ],
+                )
+            ]
         ]
-    ])
+    )
     engine = LocalRecoveryEngine(asr_engine=engine_stub, word_id_prefix="rec")
     audio = np.zeros(48000, dtype=np.float32)  # 3s
 
     results = engine.process_requests(
         [LocalRecoveryRequest(start=0.5, end=1.5, reasons=["uncovered"])],
-        audio, sample_rate=16000,
+        audio,
+        sample_rate=16000,
     )
 
     assert len(results[0].candidates) == 2
@@ -339,10 +376,15 @@ def test_engine_fallback_asr():
     primary = _StubASR(responses=[])  # always empty
     # Fallback returns word at local [0.3, 0.5], request [0.2, 0.8]
     # Global: [0.3, 0.5] overlaps with [0.2, 0.8].
-    fallback = _StubASR(responses=[
-        [TranscriptionSegment(text="fb", start=0.3, end=0.5,
-                              words=[WordTimestamp("fb", 0.3, 0.5)])]
-    ])
+    fallback = _StubASR(
+        responses=[
+            [
+                TranscriptionSegment(
+                    text="fb", start=0.3, end=0.5, words=[WordTimestamp("fb", 0.3, 0.5)]
+                )
+            ]
+        ]
+    )
     engine = LocalRecoveryEngine(
         asr_engine=primary,
         fallback_asr=fallback,
@@ -352,7 +394,8 @@ def test_engine_fallback_asr():
 
     results = engine.process_requests(
         [LocalRecoveryRequest(start=0.2, end=0.8, reasons=["uncovered"])],
-        audio, sample_rate=16000,
+        audio,
+        sample_rate=16000,
     )
     assert results[0].success
     assert results[0].candidates[0].text == "fb"
@@ -362,15 +405,18 @@ def test_engine_fallback_asr():
 def test_engine_rejects_overlapping_candidates_without_physical_evidence():
     """Candidate words outside the request range must be rejected."""
     # ASR returns word far from the request range
-    engine_stub = _StubASR(responses=[
-        [
-            TranscriptionSegment(
-                text="far away",
-                start=5.0, end=5.5,
-                words=[WordTimestamp("far", 5.0, 5.25, confidence=0.9)],
-            )
+    engine_stub = _StubASR(
+        responses=[
+            [
+                TranscriptionSegment(
+                    text="far away",
+                    start=5.0,
+                    end=5.5,
+                    words=[WordTimestamp("far", 5.0, 5.25, confidence=0.9)],
+                )
+            ]
         ]
-    ])
+    )
     engine = LocalRecoveryEngine(
         asr_engine=engine_stub,
         config=LocalRecoveryConfig(min_confidence=0.5),
@@ -381,7 +427,8 @@ def test_engine_rejects_overlapping_candidates_without_physical_evidence():
     # ASR returns word at local 5.0s, global [5.0, 5.25], far outside [0.5, 1.5].
     results = engine.process_requests(
         [LocalRecoveryRequest(start=0.5, end=1.5, reasons=["uncovered"])],
-        audio, sample_rate=16000,
+        audio,
+        sample_rate=16000,
     )
     # Word is outside request range — should be rejected
     assert len(results[0].candidates) == 0
@@ -389,18 +436,20 @@ def test_engine_rejects_overlapping_candidates_without_physical_evidence():
 
 def test_engine_accepts_candidate_just_outside_short_recovery_range():
     """A short uncovered bin may end just before the ASR word boundary."""
-    engine_stub = _StubASR(responses=[
-        [
-            TranscriptionSegment(
-                text="edge",
-                # The ASR timestamps are local to context [0.5, 1.7], so
-                # local [0.8, 1.0] maps to global [1.3, 1.5].
-                start=0.80,
-                end=1.00,
-                words=[WordTimestamp("edge", 0.80, 1.00, confidence=0.9)],
-            )
+    engine_stub = _StubASR(
+        responses=[
+            [
+                TranscriptionSegment(
+                    text="edge",
+                    # The ASR timestamps are local to context [0.5, 1.7], so
+                    # local [0.8, 1.0] maps to global [1.3, 1.5].
+                    start=0.80,
+                    end=1.00,
+                    words=[WordTimestamp("edge", 0.80, 1.00, confidence=0.9)],
+                )
+            ]
         ]
-    ])
+    )
     engine = LocalRecoveryEngine(
         asr_engine=engine_stub,
         config=LocalRecoveryConfig(request_tolerance=0.15),
@@ -420,8 +469,12 @@ def test_engine_accepts_candidate_just_outside_short_recovery_range():
 
 def test_recovery_global_word_conversion():
     """RecoveryCandidate.to_global_word produces a valid GlobalWord."""
-    candidate = RecoveryCandidate(word_id="rec:001", text="hello", start=1.0, end=1.3, confidence=0.85)
-    gw = candidate.to_global_word(source_window_id="recovery", segment_id="recovery-seg")
+    candidate = RecoveryCandidate(
+        word_id="rec:001", text="hello", start=1.0, end=1.3, confidence=0.85
+    )
+    gw = candidate.to_global_word(
+        source_window_id="recovery", segment_id="recovery-seg"
+    )
     assert gw.id == "rec:001"
     assert gw.text == "hello"
     assert gw.raw_start == 1.0
@@ -436,11 +489,14 @@ def test_engine_handles_asr_exception_gracefully():
         @property
         def name(self):
             return "failing"
+
         @property
         def model_name(self):
             return "failing"
+
         def load_model(self):
             return None
+
         def transcribe(self, audio, sample_rate=16000, language=None, **kwargs):
             raise RuntimeError("ASR crash")
 
@@ -452,7 +508,8 @@ def test_engine_handles_asr_exception_gracefully():
 
     results = engine.process_requests(
         [LocalRecoveryRequest(start=0.2, end=0.8, reasons=["uncovered"])],
-        audio, sample_rate=16000,
+        audio,
+        sample_rate=16000,
     )
     assert not results[0].success
     assert results[0].outcome == "asr_error"

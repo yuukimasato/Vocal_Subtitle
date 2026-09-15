@@ -26,7 +26,6 @@ from vocal_subtitle.reporting import (
     QualityInfo,
     RunReport,
     RunReportBuilder,
-    StageInfo,
 )
 from vocal_subtitle.reporting.run_report import _sanitize_for_yaml
 from vocal_subtitle.reporting.run_report_schema import (
@@ -44,16 +43,29 @@ class _FakeConfig:
 
 
 ALL_ENGINE_KEYS = {
-    "separation_uvr", "separation_spleeter", "separation_open_unmix",
-    "vad_silero", "vad_webrtc",
-    "asr_faster_whisper", "asr_funasr", "asr_qwen", "asr_whisper_cpp",
-    "review_global_evidence", "review_context_reasr", "review_qwen",
-    "review_forced_aligner", "review_sed", "review_semantic",
-    "diarization_speechbrain", "diarization_pyannote",
+    "separation_uvr",
+    "separation_spleeter",
+    "separation_open_unmix",
+    "vad_silero",
+    "vad_webrtc",
+    "asr_faster_whisper",
+    "asr_funasr",
+    "asr_qwen",
+    "asr_whisper_cpp",
+    "review_global_evidence",
+    "review_context_reasr",
+    "review_qwen",
+    "review_forced_aligner",
+    "review_sed",
+    "review_semantic",
+    "diarization_speechbrain",
+    "diarization_pyannote",
 }
 
 
-def _write_audio_file(directory: Path, name: str = "input.wav", size: int = 1024) -> Path:
+def _write_audio_file(
+    directory: Path, name: str = "input.wav", size: int = 1024
+) -> Path:
     path = directory / name
     path.write_bytes(b"\x00" * size)
     return path
@@ -63,10 +75,16 @@ def _make_snapshot() -> EngineAvailabilitySnapshot:
     return EngineAvailabilitySnapshot(
         entries={
             "vad_silero": EngineStatusEntry(
-                engine="silero", model="silero_vad", status="ready_default", device="cpu"
+                engine="silero",
+                model="silero_vad",
+                status="ready_default",
+                device="cpu",
             ),
             "asr_faster_whisper": EngineStatusEntry(
-                engine="faster-whisper", model="large-v3", status="ready_default", device="cpu"
+                engine="faster-whisper",
+                model="large-v3",
+                status="ready_default",
+                device="cpu",
             ),
         },
         host_info={"platform": "Linux", "python": "3.12"},
@@ -76,6 +94,7 @@ def _make_snapshot() -> EngineAvailabilitySnapshot:
 # ---------------------------------------------------------------------------
 # _sanitize_for_yaml
 # ---------------------------------------------------------------------------
+
 
 class TestSanitizeForYaml:
     def test_flat_tuple_becomes_list(self):
@@ -88,7 +107,9 @@ class TestSanitizeForYaml:
         assert result == [1, [2, [3, 4]]]
 
     def test_tuple_inside_dict(self):
-        result = _sanitize_for_yaml({"route": ("quality_first", "cost_first"), "mode": "offline"})
+        result = _sanitize_for_yaml(
+            {"route": ("quality_first", "cost_first"), "mode": "offline"}
+        )
         assert result == {"route": ["quality_first", "cost_first"], "mode": "offline"}
         assert isinstance(result["route"], list)
 
@@ -107,6 +128,7 @@ class TestSanitizeForYaml:
 
     def test_no_python_tuple_tag_in_yaml_output(self):
         import yaml
+
         text = yaml.dump(_sanitize_for_yaml({"labels": ("a", "b")}), allow_unicode=True)
         assert "!!python/tuple" not in text
 
@@ -115,32 +137,50 @@ class TestSanitizeForYaml:
 # RunReportBuilder
 # ---------------------------------------------------------------------------
 
+
 class TestRunReportBuilder:
     def test_full_build_cycle(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             audio = _write_audio_file(root)
-            builder = RunReportBuilder("run-offline-001", "offline-20260803-001", reports_root=root)
+            builder = RunReportBuilder(
+                "run-offline-001", "offline-20260803-001", reports_root=root
+            )
             builder.set_input(audio, duration=12.34, sample_rate=16000, channels=1)
             builder.set_engine_snapshot(_make_snapshot())
-            builder.set_engine_status({
-                "faster-whisper": {
-                    "selected": True,
-                    "enabled": True,
-                    "available": True,
-                    "status": "completed",
-                    "windows_processed": 3,
-                    "windows_failed": 0,
-                },
-            })
-            builder.set_pipeline_path(mode="offline", production_path="quality_first", route_version="v3")
-            builder.set_stage("asr", status="completed", duration=10.0,
-                              engine="faster-whisper", model="large-v3", quality_score=0.95)
+            builder.set_engine_status(
+                {
+                    "faster-whisper": {
+                        "selected": True,
+                        "enabled": True,
+                        "available": True,
+                        "status": "completed",
+                        "windows_processed": 3,
+                        "windows_failed": 0,
+                    },
+                }
+            )
+            builder.set_pipeline_path(
+                mode="offline", production_path="quality_first", route_version="v3"
+            )
+            builder.set_stage(
+                "asr",
+                status="completed",
+                duration=10.0,
+                engine="faster-whisper",
+                model="large-v3",
+                quality_score=0.95,
+            )
             builder.set_stage("vad", status="completed", duration=5.0)
             builder.add_warning("asr", "low confidence segment")
             builder.add_error("asr", "engine retried", category="retry")
-            builder.record_degradation("asr", "faster-whisper", "whisper_cpp",
-                                       reason="CUDA OOM", category="resource_exhausted")
+            builder.record_degradation(
+                "asr",
+                "faster-whisper",
+                "whisper_cpp",
+                reason="CUDA OOM",
+                category="resource_exhausted",
+            )
             builder.stage_timings["asr"] = 10.0
             builder.stage_timings["vad"] = 5.0
 
@@ -153,15 +193,21 @@ class TestRunReportBuilder:
             assert data["input"]["path"] == str(audio)
             assert data["input"]["format"] == "wav"
             assert data["input"]["duration_seconds"] == 12.34
-            assert data["engine_availability"]["vad_silero"]["status"] == "ready_default"
+            assert (
+                data["engine_availability"]["vad_silero"]["status"] == "ready_default"
+            )
             assert data["engine_status"]["asr_faster_whisper"]["windows_processed"] == 3
             assert data["pipeline_path"]["mode"] == "offline"
             assert data["pipeline_path"]["route_version"] == "v3"
             assert "asr" in data["stages"]
             assert "vad" in data["stages"]
             assert data["stages"]["asr"]["quality_score"] == 0.95
-            assert data["warnings"] == [{"stage": "asr", "message": "low confidence segment"}]
-            assert data["errors"] == [{"stage": "asr", "message": "engine retried", "category": "retry"}]
+            assert data["warnings"] == [
+                {"stage": "asr", "message": "low confidence segment"}
+            ]
+            assert data["errors"] == [
+                {"stage": "asr", "message": "engine retried", "category": "retry"}
+            ]
             assert data["timing"]["total_wall_seconds"] == 15.0
 
             report_path = builder.persist(report)
@@ -209,6 +255,7 @@ class TestRunReportBuilder:
 
     def test_persist_with_config_writes_yaml_no_tuples(self):
         import yaml
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             builder = RunReportBuilder("run-1", "task-1", reports_root=root)
@@ -225,6 +272,7 @@ class TestRunReportBuilder:
 # EngineAvailabilityChecker
 # ---------------------------------------------------------------------------
 
+
 class TestEngineAvailabilityChecker:
     def test_check_all_returns_all_engine_keys(self):
         snapshot = EngineAvailabilityChecker().check_all()
@@ -232,7 +280,13 @@ class TestEngineAvailabilityChecker:
 
     def test_check_all_entries_have_valid_status(self):
         snapshot = EngineAvailabilityChecker().check_all()
-        valid = ("unavailable", "model_missing", "ready_shadow", "ready_review", "ready_default")
+        valid = (
+            "unavailable",
+            "model_missing",
+            "ready_shadow",
+            "ready_review",
+            "ready_default",
+        )
         for entry in snapshot.entries.values():
             assert entry.status in valid
 
@@ -255,12 +309,17 @@ class TestEngineAvailabilityChecker:
         expected_asr = any(
             snapshot.entries[key].status.startswith("ready")
             for key in (
-                "asr_faster_whisper", "asr_funasr", "asr_qwen", "asr_whisper_cpp",
+                "asr_faster_whisper",
+                "asr_funasr",
+                "asr_qwen",
+                "asr_whisper_cpp",
             )
         )
         assert result["vad_available"] is expected_vad
         assert result["asr_available"] is expected_asr
-        assert result["all_critical_ready"] == (result["vad_available"] and result["asr_available"])
+        assert result["all_critical_ready"] == (
+            result["vad_available"] and result["asr_available"]
+        )
 
     def test_deterministic_engine_statuses(self):
         entries = EngineAvailabilityChecker().check_all().entries
@@ -291,12 +350,18 @@ class TestEngineAvailabilityChecker:
 # DegradationLogger
 # ---------------------------------------------------------------------------
 
+
 class TestDegradationLogger:
     def test_record_then_flush_writes_jsonl(self):
         with tempfile.TemporaryDirectory() as tmp:
             dlog = DegradationLogger(Path(tmp))
-            dlog.record("asr", "faster-whisper", "whisper_cpp",
-                        reason="CUDA OOM", category="resource_exhausted")
+            dlog.record(
+                "asr",
+                "faster-whisper",
+                "whisper_cpp",
+                reason="CUDA OOM",
+                category="resource_exhausted",
+            )
             assert dlog.count == 1
             dlog.flush()
             assert dlog.path.exists()
@@ -336,16 +401,30 @@ class TestDegradationLogger:
 # RunReport Schema
 # ---------------------------------------------------------------------------
 
+
 class TestRunReportSchema:
     def test_input_info_to_dict(self):
-        info = InputInfo(path="/tmp/in.wav", file_hash="abc", file_size_bytes=1024,
-                         duration_seconds=3.5, sample_rate=16000, channels=1, format="wav")
+        info = InputInfo(
+            path="/tmp/in.wav",
+            file_hash="abc",
+            file_size_bytes=1024,
+            duration_seconds=3.5,
+            sample_rate=16000,
+            channels=1,
+            format="wav",
+        )
         data = info.to_dict()
         assert data["path"] == "/tmp/in.wav"
         assert data["format"] == "wav"
 
     def test_engine_status_entry_valid_statuses(self):
-        for status in ("unavailable", "model_missing", "ready_shadow", "ready_review", "ready_default"):
+        for status in (
+            "unavailable",
+            "model_missing",
+            "ready_shadow",
+            "ready_review",
+            "ready_default",
+        ):
             entry = EngineStatusEntry(engine="test", status=status)
             assert entry.status == status
 

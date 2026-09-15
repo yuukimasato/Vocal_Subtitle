@@ -1,8 +1,9 @@
 """测试 AudioUtils 音频工具模块"""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
-from pathlib import Path
 
 from vocal_subtitle.utils.audio_utils import AudioUtils
 

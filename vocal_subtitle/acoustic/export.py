@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict
 
 logger = logging.getLogger(__name__)
+
 
 def export_skeleton_segments(
     audio_path: Path,
@@ -16,7 +16,7 @@ def export_skeleton_segments(
     min_speech_duration: float = 0.05,
     include_silence: bool = True,
     include_mixed: bool = False,
-) -> Dict:
+) -> dict:
     """将声学骨架的语音段和静音段导出为独立音频文件。
 
     用途：人工验证 ffmpeg silencedetect 的静音/人声划分是否准确。
@@ -43,7 +43,6 @@ def export_skeleton_segments(
         }
     """
     import json
-    import wave
 
     from ..utils.audio_utils import AudioUtils
     from ..vad.ffmpeg_vad import FFmpegSilenceVAD
@@ -54,11 +53,15 @@ def export_skeleton_segments(
 
     # Step 1: 获取声学骨架
     silence_intervals = FFmpegSilenceVAD._detect_silence(
-        audio_path, noise_db=noise_db, min_silence_duration=min_silence_duration,
+        audio_path,
+        noise_db=noise_db,
+        min_silence_duration=min_silence_duration,
     )
     total_duration = FFmpegSilenceVAD._get_duration(audio_path)
     speech_skeleton = FFmpegSilenceVAD._invert_intervals(
-        silence_intervals, total_duration, min_speech_duration=min_speech_duration,
+        silence_intervals,
+        total_duration,
+        min_speech_duration=min_speech_duration,
     )
 
     # Step 2: 加载音频
@@ -114,7 +117,9 @@ def export_skeleton_segments(
         seg_audio = audio[start_sample:end_sample].copy()
 
         # 文件名
-        type_prefix = {"speech": "S", "speech_short": "SS", "silence": "M"}.get(seg_type, "X")
+        type_prefix = {"speech": "S", "speech_short": "SS", "silence": "M"}.get(
+            seg_type, "X"
+        )
         time_label = f"{seg_start:.2f}s-{seg_end:.2f}s"
         filename = f"{idx:04d}_{type_prefix}_{time_label}.wav"
         filepath = segments_dir / filename
@@ -170,12 +175,10 @@ def export_skeleton_segments(
         "speech_segments": speech_count,
         "silence_segments": silence_count,
         "speech_skeleton": [
-            {"start": round(s, 3), "end": round(e, 3)}
-            for s, e in speech_skeleton
+            {"start": round(s, 3), "end": round(e, 3)} for s, e in speech_skeleton
         ],
         "silence_intervals": [
-            {"start": round(s, 3), "end": round(e, 3)}
-            for s, e in silence_intervals
+            {"start": round(s, 3), "end": round(e, 3)} for s, e in silence_intervals
         ],
         "segments": metadata_segments,
     }
@@ -186,7 +189,10 @@ def export_skeleton_segments(
 
     logger.info(
         "Exported %d skeleton segments → %s (speech=%d, silence=%d)",
-        len(metadata_segments), segments_dir, speech_count, silence_count,
+        len(metadata_segments),
+        segments_dir,
+        speech_count,
+        silence_count,
     )
 
     return {
@@ -198,4 +204,3 @@ def export_skeleton_segments(
         "skeleton": speech_skeleton,
         "silence_intervals": silence_intervals,
     }
-

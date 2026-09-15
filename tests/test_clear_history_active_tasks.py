@@ -93,6 +93,4 @@ def test_clear_history_with_older_than_days_unchanged(monkeypatch):
     resp = client.delete("/api/history?older_than_days=30")
 
     assert resp.status_code == 200
-    assert history.cleared == [
-        {"older_than_days": 30, "exclude_ids": None}
-    ]
+    assert history.cleared == [{"older_than_days": 30, "exclude_ids": None}]

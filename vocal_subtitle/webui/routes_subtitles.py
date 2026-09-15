@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -22,7 +22,7 @@ _TERMINAL_TASK_STATUSES = {"completed", "degraded_completed"}
 _INPUT_AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".m4a", ".ogg", ".aac", ".webm"}
 
 
-def _find_input_file(session_dir_str: str) -> Optional[str]:
+def _find_input_file(session_dir_str: str) -> str | None:
     """Find the uploaded input audio in a session directory.
 
     The helper is shared by download and streaming routes.  Session metadata
@@ -48,7 +48,7 @@ def _find_input_file(session_dir_str: str) -> Optional[str]:
     return None
 
 
-def _input_path_from_result(result: dict) -> Optional[str]:
+def _input_path_from_result(result: dict) -> str | None:
     """Return the original input audio path recorded by an offline (CLI) run.
 
     CLI 任务不经过 WebUI 上传，没有 session 目录可查，只能依赖
@@ -60,7 +60,7 @@ def _input_path_from_result(result: dict) -> Optional[str]:
     return None
 
 
-@router.get("/subtitle/{task_id}", response_model=List[SubtitleEventResponse])
+@router.get("/subtitle/{task_id}", response_model=list[SubtitleEventResponse])
 async def get_subtitles(task_id: str):
     """获取任务的字幕事件列表"""
     task = state.task_store.get(task_id)
@@ -86,7 +86,9 @@ def _subtitle_event_to_payload(event: SubtitleEvent) -> dict:
     return event.to_dict()
 
 
-def _load_completed_subtitle_task(task_id: str) -> tuple[Dict[str, Any], Dict[str, Any]]:
+def _load_completed_subtitle_task(
+    task_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Load a completed task from memory, falling back to persisted history."""
     task = state.task_store.get(task_id)
     if not task:
@@ -95,7 +97,9 @@ def _load_completed_subtitle_task(task_id: str) -> tuple[Dict[str, Any], Dict[st
             try:
                 result = json.loads(hist_task["result_json"])
             except (json.JSONDecodeError, TypeError) as exc:
-                raise HTTPException(status_code=404, detail=f"Task not found: {task_id}") from exc
+                raise HTTPException(
+                    status_code=404, detail=f"Task not found: {task_id}"
+                ) from exc
             task = {
                 "task_id": task_id,
                 "status": result.get("status", "completed"),
@@ -109,7 +113,7 @@ def _load_completed_subtitle_task(task_id: str) -> tuple[Dict[str, Any], Dict[st
         raise HTTPException(status_code=400, detail="Task not completed yet")
     result = task.get("result", {})
     if not isinstance(result, dict) or not isinstance(result.get("events"), list):
-        raise HTTPException(status_code=404, detail=f"Task has no subtitle events")
+        raise HTTPException(status_code=404, detail="Task has no subtitle events")
     return task, result
 
 
@@ -166,12 +170,12 @@ async def export_subtitle(
     )
 
     # 验证格式（提前捕获不支持的格式，避免 500）
-    SUPPORTED_FORMATS = {"srt", "vtt", "ass"}
+    supported_formats = {"srt", "vtt", "ass"}
     normalized_fmt = fmt.lower()
-    if normalized_fmt not in SUPPORTED_FORMATS:
+    if normalized_fmt not in supported_formats:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported subtitle format: '{fmt}'. Supported: {', '.join(sorted(SUPPORTED_FORMATS))}",
+            detail=f"Unsupported subtitle format: '{fmt}'. Supported: {', '.join(sorted(supported_formats))}",
         )
 
     subtitle_text = builder.build_to_string(events, fmt=normalized_fmt)
@@ -208,7 +212,9 @@ async def download_separated_audio(
         type: 音频类型 — 'vocals'（人声）或 'accompaniment'（背景声/伴奏）
     """
     if type not in ("vocals", "accompaniment", "input"):
-        raise HTTPException(status_code=400, detail="type must be 'vocals', 'accompaniment' or 'input'")
+        raise HTTPException(
+            status_code=400, detail="type must be 'vocals', 'accompaniment' or 'input'"
+        )
 
     # 先查内存中的任务
     task = state.task_store.get(task_id)
@@ -231,7 +237,11 @@ async def download_separated_audio(
             try:
                 r = json.loads(hist_task["result_json"])
                 if type == "input":
-                    session_dir = str(Path(r.get("subtitle_path", "")).parent) if r.get("subtitle_path") else ""
+                    session_dir = (
+                        str(Path(r.get("subtitle_path", "")).parent)
+                        if r.get("subtitle_path")
+                        else ""
+                    )
                     file_path = _find_input_file(session_dir)
                     if not file_path:
                         file_path = _find_input_file(str(state.upload_dir / task_id))
@@ -246,7 +256,7 @@ async def download_separated_audio(
         raise HTTPException(
             status_code=404,
             detail=f"No {type} audio found for this task. "
-                    "The task may not have run separation, or the files have been cleaned up.",
+            "The task may not have run separation, or the files have been cleaned up.",
         )
 
     file_path = Path(file_path)
@@ -257,7 +267,9 @@ async def download_separated_audio(
         )
 
     # 确定下载文件名
-    type_label = {"vocals": "人声", "accompaniment": "背景声", "input": "原始音频"}[type]
+    type_label = {"vocals": "人声", "accompaniment": "背景声", "input": "原始音频"}[
+        type
+    ]
     original_name = task.get("input_file_name", "audio") if task else "audio"
     download_name = f"{Path(original_name).stem}_{type_label}.wav"
 
@@ -354,14 +366,14 @@ async def stream_audio(
     if not file_path:
         raise HTTPException(
             status_code=404,
-            detail=f"No audio found for streaming. The task may not have audio files available.",
+            detail="No audio found for streaming. The task may not have audio files available.",
         )
 
     file_path = Path(file_path)
     if not file_path.exists():
         raise HTTPException(
             status_code=404,
-            detail=f"Audio file no longer exists on disk.",
+            detail="Audio file no longer exists on disk.",
         )
 
     from fastapi.responses import FileResponse
@@ -395,7 +407,6 @@ async def download_subtitle_file(
     # 先查内存中的任务
     task = state.task_store.get(task_id)
     file_path = None
-    input_name = "subtitle"
 
     if task and task.get("result"):
         if version == "llm":
@@ -404,7 +415,6 @@ async def download_subtitle_file(
             file_path = task["result"].get("clean_subtitle_path")
         if not file_path:
             file_path = task["result"].get("subtitle_path")
-        input_name = task.get("input_file_name", "subtitle") if hasattr(task, "get") else "subtitle"
 
     # 内存中找不到，查持久化历史
     if not file_path:
@@ -424,14 +434,14 @@ async def download_subtitle_file(
     if not file_path:
         raise HTTPException(
             status_code=404,
-            detail=f"No subtitle file found for this task.",
+            detail="No subtitle file found for this task.",
         )
 
     file_path = Path(file_path)
     if not file_path.exists():
         raise HTTPException(
             status_code=404,
-            detail=f"Subtitle file no longer exists on disk.",
+            detail="Subtitle file no longer exists on disk.",
         )
 
     # 确定下载文件名
@@ -453,7 +463,7 @@ async def download_subtitle_file(
 
 # 预设供应商（OpenAI 兼容协议，截至 2026-06）
 # 参考 qwen-tts-webui 的 _LLM_PROVIDER_PRESETS 设计
-LLM_PROVIDERS: Dict[str, Dict[str, Any]] = {
+LLM_PROVIDERS: dict[str, dict[str, Any]] = {
     # ── 国际主流 ──────────────────────────────────────────────────
     "deepseek": {
         "id": "deepseek",

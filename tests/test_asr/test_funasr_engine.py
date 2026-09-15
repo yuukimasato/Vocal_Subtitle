@@ -1,8 +1,9 @@
 """测试 FunASR 引擎"""
 
+import numpy as np
+
 from vocal_subtitle.asr.funasr_engine import FunASREngine
 from vocal_subtitle.asr.funasr_manager import DEFAULT_FUNASR_MODEL
-import numpy as np
 
 
 class TestFunASREngine:
@@ -35,9 +36,7 @@ class TestFunASREngine:
         assert engine._ncpu == 8
 
     def test_model_name_extraction(self):
-        engine = FunASREngine(
-            model="iic/speech_custom_model_name"
-        )
+        engine = FunASREngine(model="iic/speech_custom_model_name")
         assert engine.model_name == "speech_custom_model_name"
 
     def test_repr(self):

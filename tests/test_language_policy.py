@@ -6,12 +6,14 @@ import numpy as np
 
 from llm_subtitle_optimizer.optimizer import SubtitleOptimizer as _BaseOptimizer
 
+
 class SubtitleOptimizer(_BaseOptimizer):
     """Enhanced optimizer wrapper with threshold sanitisation and cross-speaker guards.
 
     The production pipeline uses ``_build_safe_optimizer`` which mirrors this
     wrapper.  These tests verify the wrapper behaviour against the real library.
     """
+
     def __init__(self, **kwargs):
         min_similarity = kwargs.pop("min_similarity", None)
         max_length_ratio = kwargs.pop("max_length_ratio", None)
@@ -41,14 +43,19 @@ class SubtitleOptimizer(_BaseOptimizer):
                     if other_key == key:
                         continue
                     other_original = str(original_chunk.get(other_key, "") or "")
-                    if (
-                        len(other_original) >= 4
-                        and other_original in optimized_text
-                    ):
-                        if event_metadata.get(key, {}).get("speaker") != event_metadata.get(other_key, {}).get("speaker"):
+                    if len(other_original) >= 4 and other_original in optimized_text:
+                        if event_metadata.get(key, {}).get(
+                            "speaker"
+                        ) != event_metadata.get(other_key, {}).get("speaker"):
                             return False, "cross_speaker_text_transfer"
         return True, reason
-from vocal_subtitle.asr.base import LanguageDetection, TranscriptionSegment, WordTimestamp
+
+
+from vocal_subtitle.asr.base import (
+    LanguageDetection,
+    TranscriptionSegment,
+    WordTimestamp,
+)
 from vocal_subtitle.asr.boundary_reasr import SlidingWindow, SlidingWindowReASR
 from vocal_subtitle.asr.faster_whisper_engine import FasterWhisperEngine
 from vocal_subtitle.asr.router import ASRRouteDecision
@@ -302,12 +309,12 @@ def test_boolean_mixed_language_override_is_normalized():
     loader = ConfigLoader()
     config = loader.load_profile("default")
 
-    assert loader.merge_with_overrides(config, mixed_language=True).asr.language_mode == (
-        "mixed"
-    )
-    assert loader.merge_with_overrides(config, mixed_language="false").asr.language_mode == (
-        "single"
-    )
+    assert loader.merge_with_overrides(
+        config, mixed_language=True
+    ).asr.language_mode == ("mixed")
+    assert loader.merge_with_overrides(
+        config, mixed_language="false"
+    ).asr.language_mode == ("single")
 
 
 def test_default_language_policy_is_single():
@@ -359,7 +366,7 @@ def test_llm_guard_rejects_cross_speaker_text_transfer():
 
     valid, _ = optimizer._validate(
         {"1": "主持人开始介绍", "2": "嘉宾回答问题"},
-        {"1": "主持人开始介绍，嘉宾回答问题" , "2": "嘉宾回答问题"},
+        {"1": "主持人开始介绍，嘉宾回答问题", "2": "嘉宾回答问题"},
         event_metadata={
             "1": {"speaker": "host"},
             "2": {"speaker": "guest"},

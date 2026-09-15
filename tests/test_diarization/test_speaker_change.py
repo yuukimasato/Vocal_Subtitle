@@ -4,43 +4,61 @@ import numpy as np
 import pytest
 
 from vocal_subtitle.diarization.speaker_change import (
-    SpeakerChangeSignal,
     SpeakerChangeConfig,
     SpeakerChangeResult,
+    SpeakerChangeSignal,
     detect_speaker_change_from_features,
     detect_volume_surge,
 )
 
-
 # ── SpeakerChangeSignal ──────────────────────────────────────────────
+
 
 def test_signal_rejects_negative_time():
     with pytest.raises(ValueError, match="start"):
-        SpeakerChangeSignal(start=-0.1, end=1.0, signal_type="embedding_distance",
-                            confidence=0.8, source="embedding")
+        SpeakerChangeSignal(
+            start=-0.1,
+            end=1.0,
+            signal_type="embedding_distance",
+            confidence=0.8,
+            source="embedding",
+        )
 
 
 def test_signal_rejects_start_gt_end():
     with pytest.raises(ValueError, match="start.*end"):
-        SpeakerChangeSignal(start=1.5, end=0.5, signal_type="embedding_distance",
-                            confidence=0.8, source="embedding")
+        SpeakerChangeSignal(
+            start=1.5,
+            end=0.5,
+            signal_type="embedding_distance",
+            confidence=0.8,
+            source="embedding",
+        )
 
 
 def test_signal_clamps_confidence():
-    sig = SpeakerChangeSignal(start=0.0, end=1.0, signal_type="rms_surge",
-                              confidence=1.5, source="rms")
+    sig = SpeakerChangeSignal(
+        start=0.0, end=1.0, signal_type="rms_surge", confidence=1.5, source="rms"
+    )
     assert sig.confidence == 1.0
 
 
 def test_signal_requires_valid_type():
     with pytest.raises(ValueError, match="signal_type"):
-        SpeakerChangeSignal(start=0.0, end=1.0, signal_type="",
-                            confidence=0.5, source="rms")
+        SpeakerChangeSignal(
+            start=0.0, end=1.0, signal_type="", confidence=0.5, source="rms"
+        )
 
 
 def test_signal_to_dict():
-    sig = SpeakerChangeSignal(start=1.0, end=2.5, signal_type="embedding_distance",
-                              confidence=0.75, source="embedding", metadata={"dist": 0.95})
+    sig = SpeakerChangeSignal(
+        start=1.0,
+        end=2.5,
+        signal_type="embedding_distance",
+        confidence=0.75,
+        source="embedding",
+        metadata={"dist": 0.95},
+    )
     d = sig.to_dict()
     assert d["start"] == 1.0
     assert d["end"] == 2.5
@@ -51,6 +69,7 @@ def test_signal_to_dict():
 
 
 # ── SpeakerChangeConfig ──────────────────────────────────────────────
+
 
 def test_config_defaults():
     cfg = SpeakerChangeConfig()
@@ -72,6 +91,7 @@ def test_config_rejects_negative_rms_ratio():
 
 # ── detect_speaker_change_from_features ──────────────────────────────
 
+
 def _fake_features(n_frames=10, n_features=87):
     rng = np.random.RandomState(42)
     return rng.randn(n_frames, n_features).astype(np.float64)
@@ -83,7 +103,8 @@ def test_detect_no_change_with_similar_features():
     feats2 = feats1.copy()  # identical
 
     result = detect_speaker_change_from_features(
-        feats1, feats2,
+        feats1,
+        feats2,
         time1=(0.0, 0.5),
         time2=(0.5, 1.0),
     )
@@ -94,7 +115,8 @@ def test_detect_no_change_with_similar_features():
 def test_detect_no_change_with_empty_features():
     """Empty feature arrays should return a clear no-change result."""
     result = detect_speaker_change_from_features(
-        np.empty((0, 87)), np.empty((0, 87)),
+        np.empty((0, 87)),
+        np.empty((0, 87)),
         time1=(0.0, 0.5),
         time2=(0.5, 1.0),
     )
@@ -105,8 +127,10 @@ def test_detect_no_change_with_empty_features():
 
 def test_detect_reports_feature_dimensionality_mismatch():
     result = detect_speaker_change_from_features(
-        _fake_features(5, 87), _fake_features(5, 50),
-        time1=(0.0, 0.5), time2=(0.5, 1.0),
+        _fake_features(5, 87),
+        _fake_features(5, 50),
+        time1=(0.0, 0.5),
+        time2=(0.5, 1.0),
     )
     assert not result.is_hard_boundary
     assert result.confidence == 0.0
@@ -118,19 +142,27 @@ def test_detect_candidate_signal():
     feats2 = feats1 + 0.8  # moderate shift
 
     result = detect_speaker_change_from_features(
-        feats1, feats2,
-        time1=(0.0, 1.0), time2=(1.0, 2.0),
+        feats1,
+        feats2,
+        time1=(0.0, 1.0),
+        time2=(1.0, 2.0),
     )
     assert result.confidence > 0.0
-    assert result.signal_type in ("embedding_distance", "feature_divergence",
-                                  "insufficient_data", "no_change")
+    assert result.signal_type in (
+        "embedding_distance",
+        "feature_divergence",
+        "insufficient_data",
+        "no_change",
+    )
 
 
 def test_detect_returns_valid_times():
     """The change_time should reflect the boundary between the two segments."""
     result = detect_speaker_change_from_features(
-        _fake_features(5), _fake_features(5),
-        time1=(1.0, 2.5), time2=(2.5, 4.0),
+        _fake_features(5),
+        _fake_features(5),
+        time1=(1.0, 2.5),
+        time2=(2.5, 4.0),
     )
     assert result.before_start == 1.0
     assert result.after_end == 4.0
@@ -139,6 +171,7 @@ def test_detect_returns_valid_times():
 
 
 # ── detect_volume_surge ──────────────────────────────────────────────
+
 
 def test_volume_surge_detected():
     """Rms surge above ratio should be detected."""
@@ -174,10 +207,16 @@ def test_volume_surge_rejects_short_audio():
 
 # ── SpeakerChangeResult ──────────────────────────────────────────────
 
+
 def test_result_to_dict():
     signals = [
-        SpeakerChangeSignal(start=1.0, end=3.0, signal_type="embedding_distance",
-                            confidence=0.85, source="embedding"),
+        SpeakerChangeSignal(
+            start=1.0,
+            end=3.0,
+            signal_type="embedding_distance",
+            confidence=0.85,
+            source="embedding",
+        ),
     ]
     result = SpeakerChangeResult(
         signals=tuple(signals),

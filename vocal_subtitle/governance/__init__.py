@@ -6,7 +6,12 @@
   - RELEASE_GOVERNANCE.md (release-governance-v1)
 """
 
-from .engine_lifecycle import EngineLifecycle, EngineRegistry, EngineStatus, LifecycleManager
+from .engine_lifecycle import (
+    EngineLifecycle,
+    EngineRegistry,
+    EngineStatus,
+    LifecycleManager,
+)
 from .experiment_registry import ExperimentRecord, ExperimentRegistry
 from .release import (
     AlertReport,

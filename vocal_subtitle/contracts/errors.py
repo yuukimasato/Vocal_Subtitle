@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class PipelineError(Exception):
@@ -19,9 +19,9 @@ class PipelineError(Exception):
         self,
         message: str,
         *,
-        category: Optional[str] = None,
-        recoverable: Optional[bool] = None,
-        detail: Optional[str] = None,
+        category: str | None = None,
+        recoverable: bool | None = None,
+        detail: str | None = None,
     ) -> None:
         super().__init__(message)
         if category is not None:
@@ -30,7 +30,7 @@ class PipelineError(Exception):
             self.recoverable = recoverable
         self.detail = detail
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "category": self.category,
             "message": str(self),

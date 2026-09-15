@@ -5,7 +5,6 @@ returned. It never invents speakers from pauses or subtitle ordering.
 """
 
 from dataclasses import replace
-from typing import Dict, Optional
 
 import numpy as np
 
@@ -14,13 +13,17 @@ from .base import DiarizationResult, SpeakerTurn
 
 def _ordered_speakers(result: DiarizationResult) -> list[int]:
     turns = list(result.turns) + list(result.exclusive_turns)
-    return list(dict.fromkeys(
-        turn.speaker_id
-        for turn in sorted(turns, key=lambda item: (item.start, item.end))
-    ))
+    return list(
+        dict.fromkeys(
+            turn.speaker_id
+            for turn in sorted(turns, key=lambda item: (item.start, item.end))
+        )
+    )
 
 
-def _profile(audio: np.ndarray, sample_rate: int, turns: list[SpeakerTurn]) -> np.ndarray:
+def _profile(
+    audio: np.ndarray, sample_rate: int, turns: list[SpeakerTurn]
+) -> np.ndarray:
     """Build a small dependency-free acoustic profile for one speaker."""
     samples = []
     total = len(audio)
@@ -40,15 +43,17 @@ def _profile(audio: np.ndarray, sample_rate: int, turns: list[SpeakerTurn]) -> n
     spectrum = np.abs(np.fft.rfft(signal[: min(signal.size, sample_rate * 2)]))
     freqs = np.arange(spectrum.size, dtype=np.float32)
     spectral_total = float(spectrum.sum())
-    centroid = float((freqs * spectrum).sum() / spectral_total) if spectral_total else 0.0
+    centroid = (
+        float((freqs * spectrum).sum() / spectral_total) if spectral_total else 0.0
+    )
     return np.array([rms, zcr, centroid / max(sample_rate, 1)], dtype=np.float32)
 
 
 def canonicalize_diarization_result(
     result: DiarizationResult,
     *,
-    max_speakers: Optional[int] = None,
-    audio: Optional[np.ndarray] = None,
+    max_speakers: int | None = None,
+    audio: np.ndarray | None = None,
     sample_rate: int = 16000,
 ) -> DiarizationResult:
     """Normalize speaker IDs and enforce an optional maximum.
@@ -64,11 +69,13 @@ def canonicalize_diarization_result(
     diagnostics["raw_diarization_speaker_count"] = raw_count
 
     if not ordered:
-        diagnostics.update({
-            "canonical_speaker_count": 0,
-            "speaker_merge_map": {},
-            "canonicalization_status": "ok",
-        })
+        diagnostics.update(
+            {
+                "canonical_speaker_count": 0,
+                "speaker_merge_map": {},
+                "canonicalization_status": "ok",
+            }
+        )
         return replace(result, speaker_count=0, diagnostics=diagnostics)
 
     if max_speakers is not None and max_speakers <= 0:
@@ -76,17 +83,19 @@ def canonicalize_diarization_result(
 
     target_count = min(raw_count, max_speakers) if max_speakers else raw_count
     roots = ordered[:target_count]
-    turns_by_speaker: Dict[int, list[SpeakerTurn]] = {speaker: [] for speaker in ordered}
+    turns_by_speaker: dict[int, list[SpeakerTurn]] = {
+        speaker: [] for speaker in ordered
+    }
     for turn in list(result.turns) + list(result.exclusive_turns):
         turns_by_speaker.setdefault(turn.speaker_id, []).append(turn)
 
-    profiles: Dict[int, np.ndarray] = {}
+    profiles: dict[int, np.ndarray] = {}
     if audio is not None and max_speakers and raw_count > max_speakers:
         array = np.asarray(audio, dtype=np.float32)
         for speaker in ordered:
             profiles[speaker] = _profile(array, sample_rate, turns_by_speaker[speaker])
 
-    merge_map: Dict[int, int] = {speaker: index for index, speaker in enumerate(roots)}
+    merge_map: dict[int, int] = {speaker: index for index, speaker in enumerate(roots)}
     root_durations = {
         index: sum(turn.duration for turn in turns_by_speaker[speaker])
         for index, speaker in enumerate(roots)
@@ -131,11 +140,13 @@ def canonicalize_diarization_result(
     exclusive_turns = [remap(turn) for turn in result.exclusive_turns]
     merged = any(source != target for source, target in merge_map.items())
     status = "degraded" if merged else (result.status or "ok")
-    diagnostics.update({
-        "canonical_speaker_count": target_count,
-        "speaker_merge_map": merge_map,
-        "canonicalization_status": status,
-    })
+    diagnostics.update(
+        {
+            "canonical_speaker_count": target_count,
+            "speaker_merge_map": merge_map,
+            "canonicalization_status": status,
+        }
+    )
     if merged:
         diagnostics["canonicalization_reason"] = (
             f"backend returned {raw_count} speakers; constrained to {target_count}"

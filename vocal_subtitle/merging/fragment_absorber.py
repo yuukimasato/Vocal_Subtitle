@@ -14,7 +14,7 @@ ASR 词级时间戳在换人/换句边界普遍偏早时，真实下一句的第
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from ..utils.text_utils import smart_join_texts
 
@@ -26,16 +26,19 @@ def _overlap(a0: float, a1: float, b0: float, b1: float) -> float:
 
 
 def _speech_coverage(
-    start: float, end: float, skeleton: List[Tuple[float, float]],
+    start: float,
+    end: float,
+    skeleton: list[tuple[float, float]],
 ) -> float:
     span = max(1e-6, end - start)
     return sum(_overlap(start, end, s, e) for s, e in skeleton) / span
 
 
 def _next_onset_after(
-    t: float, skeleton: List[Tuple[float, float]],
-) -> Optional[float]:
-    best: Optional[float] = None
+    t: float,
+    skeleton: list[tuple[float, float]],
+) -> float | None:
+    best: float | None = None
     for s_start, _s_end in skeleton:
         if s_start > t - 0.02 and (best is None or s_start < best):
             best = s_start
@@ -50,7 +53,7 @@ def _merge_words(fragment: Any, target: Any) -> None:
 
 
 def reanchor_word_timestamps(
-    events: List[Any],
+    events: list[Any],
     audio: Any,
     sample_rate: int,
     *,
@@ -83,11 +86,17 @@ def reanchor_word_timestamps(
                 continue
             # 词首已有语音能量 → 时间戳可信，不动
             if not _leading_silence_ahead(
-                audio, sample_rate, w_start, window_sec=0.10,
+                audio,
+                sample_rate,
+                w_start,
+                window_sec=0.10,
             ):
                 continue
             onset = _next_energy_onset_after(
-                audio, sample_rate, w_start, max_reanchor_distance,
+                audio,
+                sample_rate,
+                w_start,
+                max_reanchor_distance,
             )
             if onset is None:
                 continue
@@ -107,14 +116,13 @@ def reanchor_word_timestamps(
     return shifted
 
 
-
 def resolve_speech_skeleton(
     vocals_path,
     ffmpeg_unified_result,
     acoustic_config,
     audio,
     sample_rate: int,
-) -> List[Tuple[float, float]]:
+) -> list[tuple[float, float]]:
     """获取能量骨架：优先复用统一 ffmpeg 结果，否则独立检测。
 
     惰性导入 AcousticValidator 以避免 merging → acoustic 的模块级循环
@@ -124,18 +132,21 @@ def resolve_speech_skeleton(
 
     validator = AcousticValidator(acoustic_config)
     return validator._get_skeleton(
-        vocals_path, ffmpeg_unified_result, audio, sample_rate,
+        vocals_path,
+        ffmpeg_unified_result,
+        audio,
+        sample_rate,
     )
 
 
 def absorb_silent_fragments(
-    events: List[Any],
-    speech_skeleton: List[Tuple[float, float]],
+    events: list[Any],
+    speech_skeleton: list[tuple[float, float]],
     *,
     min_coverage: float = 0.4,
     max_fragment_duration: float = 0.8,
     max_reanchor_distance: float = 0.5,
-) -> List[Any]:
+) -> list[Any]:
     """吸收骑在静音上的幻听碎片事件，返回精简后的事件列表。
 
     Args:
@@ -162,13 +173,13 @@ def absorb_silent_fragments(
     for index, frag in enumerate(ordered):
         if id(frag) in absorbed:
             continue
-        duration = float(getattr(frag, "end", 0.0)) - float(
-            getattr(frag, "start", 0.0)
-        )
+        duration = float(getattr(frag, "end", 0.0)) - float(getattr(frag, "start", 0.0))
         if duration <= 0 or duration > max_fragment_duration:
             continue
         coverage = _speech_coverage(
-            float(frag.start), float(frag.end), speech_skeleton,
+            float(frag.start),
+            float(frag.end),
+            speech_skeleton,
         )
         if coverage >= min_coverage:
             continue
@@ -182,23 +193,19 @@ def absorb_silent_fragments(
         # 前向吸收：碎片结束后第一个语音起点所在的后继事件
         onset = _next_onset_after(float(frag.end), speech_skeleton)
         target = None
-        if (
-            onset is not None
-            and onset - float(frag.end) <= max_reanchor_distance
-        ):
-            for candidate in ordered[index + 1:]:
+        if onset is not None and onset - float(frag.end) <= max_reanchor_distance:
+            for candidate in ordered[index + 1 :]:
                 if id(candidate) in absorbed:
                     continue
-                if (
-                    float(candidate.start) <= onset + 0.1
-                    and _physical_owner_compatible_for_events(frag, candidate)
+                if float(
+                    candidate.start
+                ) <= onset + 0.1 and _physical_owner_compatible_for_events(
+                    frag, candidate
                 ):
                     target = candidate
                 break
         if target is not None:
-            target.text = smart_join_texts(
-                [text, getattr(target, "text", "") or ""]
-            )
+            target.text = smart_join_texts([text, getattr(target, "text", "") or ""])
             _merge_words(frag, target)
             # 后继事件 start 锚定到真实语音起点（只后移，不前拖）
             if float(target.start) < onset:
@@ -207,7 +214,10 @@ def absorb_silent_fragments(
             forward_count += 1
             logger.info(
                 "Silent fragment absorbed forward: %.2f-%.2f '%s' → onset %.2f",
-                float(frag.start), float(frag.end), text[:12], onset,
+                float(frag.start),
+                float(frag.end),
+                text[:12],
+                onset,
             )
             continue
 
@@ -221,15 +231,15 @@ def absorb_silent_fragments(
                 0 <= float(frag.start) - prev_end <= max_reanchor_distance
                 and _physical_owner_compatible_for_events(prev, frag)
             ):
-                prev.text = smart_join_texts(
-                    [getattr(prev, "text", "") or "", text]
-                )
+                prev.text = smart_join_texts([getattr(prev, "text", "") or "", text])
                 _merge_words(frag, prev)
                 absorbed.add(id(frag))
                 backward_count += 1
                 logger.info(
                     "Silent fragment absorbed backward: %.2f-%.2f '%s'",
-                    float(frag.start), float(frag.end), text[:12],
+                    float(frag.start),
+                    float(frag.end),
+                    text[:12],
                 )
                 target = prev
                 break
@@ -241,7 +251,9 @@ def absorb_silent_fragments(
         dropped_count += 1
         logger.info(
             "Silent fragment dropped: %.2f-%.2f '%s'",
-            float(frag.start), float(frag.end), text[:12],
+            float(frag.start),
+            float(frag.end),
+            text[:12],
         )
 
     if absorbed:
@@ -249,8 +261,11 @@ def absorb_silent_fragments(
         logger.info(
             "Fragment absorber: %d events in, %d removed "
             "(forward=%d, backward=%d, dropped=%d)",
-            len(events), len(events) - len(result),
-            forward_count, backward_count, dropped_count,
+            len(events),
+            len(events) - len(result),
+            forward_count,
+            backward_count,
+            dropped_count,
         )
         return result
     return events

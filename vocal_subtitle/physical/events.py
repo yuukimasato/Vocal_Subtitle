@@ -151,7 +151,9 @@ def _build_bin_events(
     word-level subtitles. Only hard physical or speaker boundaries may split
     a bin.
     """
-    ordered_bins = sorted(subtitle_bins, key=lambda item: (item.start, item.end, item.id))
+    ordered_bins = sorted(
+        subtitle_bins, key=lambda item: (item.start, item.end, item.id)
+    )
     grouped: dict[str, tuple[PhysicalSubtitleBin, list[WordAllocation]]] = {}
     for item in allocation.accepted:
         assigned = assign_word_to_bin(item.word, ordered_bins)
@@ -224,7 +226,8 @@ def _split_bin_hard_boundaries(
     """
     groups: list[list[WordAllocation]] = []
     for item in sorted(
-        items, key=lambda value: (value.word.raw_start, value.word.raw_end, value.word.id)
+        items,
+        key=lambda value: (value.word.raw_start, value.word.raw_end, value.word.id),
     ):
         if not groups or _has_bin_hard_boundary(groups[-1][-1], item):
             groups.append([])
@@ -239,7 +242,11 @@ def _has_bin_hard_boundary(previous: WordAllocation, current: WordAllocation) ->
         return True
     previous_clips = {span.clip_id for span in previous.physical_spans}
     current_clips = {span.clip_id for span in current.physical_spans}
-    if previous_clips and current_clips and not previous_clips.intersection(current_clips):
+    if (
+        previous_clips
+        and current_clips
+        and not previous_clips.intersection(current_clips)
+    ):
         return True
     previous_end = max(span.end for span in previous.physical_spans)
     current_start = min(span.start for span in current.physical_spans)
@@ -317,9 +324,7 @@ def _make_event(
 ) -> GlobalSubtitleEvent:
     words = [item.word for item in items]
     allowed_evidence_ids = (
-        set(subtitle_bin.evidence_ids)
-        if subtitle_bin is not None
-        else None
+        set(subtitle_bin.evidence_ids) if subtitle_bin is not None else None
     )
     evidence_spans = [
         PhysicalSpan(
@@ -332,13 +337,11 @@ def _make_event(
         for span in item.evidence_spans
         if allowed_evidence_ids is None or span.id in allowed_evidence_ids
         if span.physical_clip_id
-        and max(item.word.raw_start, span.start)
-        < min(item.word.raw_end, span.end)
+        and max(item.word.raw_start, span.start) < min(item.word.raw_end, span.end)
         and item.physical_spans
     ]
     spans = _merge_spans(
-        evidence_spans
-        or [span for item in items for span in item.physical_spans]
+        evidence_spans or [span for item in items for span in item.physical_spans]
     )
     warnings = [warning for item in items for warning in item.warnings]
     decision_trace: list[dict[str, Any]] = []
@@ -349,15 +352,17 @@ def _make_event(
         if not decision_id or decision_id in seen_decisions:
             continue
         seen_decisions.add(decision_id)
-        decision_trace.append({
-            "stage": "evidence_decision",
-            "decision_id": decision_id,
-            "decision": metadata.get("decision"),
-            "candidate_ids": list(metadata.get("candidate_ids", ())),
-            "risk_level": metadata.get("risk_level"),
-            "risk_score": metadata.get("risk_score"),
-            "evidence_codes": list(metadata.get("evidence_codes", ())),
-        })
+        decision_trace.append(
+            {
+                "stage": "evidence_decision",
+                "decision_id": decision_id,
+                "decision": metadata.get("decision"),
+                "candidate_ids": list(metadata.get("candidate_ids", ())),
+                "risk_level": metadata.get("risk_level"),
+                "risk_score": metadata.get("risk_score"),
+                "evidence_codes": list(metadata.get("evidence_codes", ())),
+            }
+        )
         if metadata.get("timestamp_clamped"):
             warnings.append("timestamp_clamped")
         if metadata.get("time_source") == "segment_boundary":
@@ -375,7 +380,9 @@ def _make_event(
     )
     first = items[0]
     last = items[-1]
-    start = first.aligned_start if first.aligned_start is not None else words[0].raw_start
+    start = (
+        first.aligned_start if first.aligned_start is not None else words[0].raw_start
+    )
     end = last.aligned_end if last.aligned_end is not None else words[-1].raw_end
     decisions = [
         decision
@@ -407,8 +414,7 @@ def _make_event(
         speaker_source=items[0].speaker_source or "unknown",
         physical_spans=spans,
         source_word_ids=[
-            str(word.metadata.get("source_word_id", word.id))
-            for word in words
+            str(word.metadata.get("source_word_id", word.id)) for word in words
         ],
         logical_sentence_id=index,
         alignment_warning=";".join(dict.fromkeys(warnings)) or None,

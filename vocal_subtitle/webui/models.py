@@ -1,9 +1,8 @@
 """Pydantic 请求/响应数据模型"""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
-
 
 # ---------------------------------------------------------------------------
 # 请求模型
@@ -16,7 +15,7 @@ class RunRequest(BaseModel):
     profile: str = Field(default="default", description="场景模板名称")
     output_format: str = Field(default="srt", description="输出格式 (srt/vtt/ass)")
     skip_separation: bool = Field(default=False, description="跳过人声分离")
-    overrides: Dict[str, Any] = Field(
+    overrides: dict[str, Any] = Field(
         default_factory=dict,
         description="参数覆盖，如 {'asr_model': 'medium', 'language': 'zh'}",
     )
@@ -29,7 +28,7 @@ class BatchRunRequest(BaseModel):
     output_format: str = Field(default="srt")
     glob_pattern: str = Field(default="*.mp3", description="文件匹配模式")
     skip_separation: bool = Field(default=False)
-    overrides: Dict[str, Any] = Field(default_factory=dict)
+    overrides: dict[str, Any] = Field(default_factory=dict)
 
 
 class FunASRPrepareRequest(BaseModel):
@@ -48,7 +47,7 @@ class ProfileInfo(BaseModel):
 
     name: str
     description: str
-    config_summary: Dict[str, Any]
+    config_summary: dict[str, Any]
 
 
 class TaskStatus(BaseModel):
@@ -56,20 +55,20 @@ class TaskStatus(BaseModel):
 
     task_id: str
     status: str  # pending | running | completed | degraded | failed
-    run_id: Optional[str] = None
-    contract_version: Optional[str] = None
-    progress: Optional[Dict[str, Any]] = None
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    quality_status: Optional[str] = None
-    error_category: Optional[str] = None
-    diagnostics_complete: Optional[bool] = None
-    artifacts: Optional[Dict[str, Any]] = None
-    diagnostics: Optional[Dict[str, Any]] = None
+    run_id: str | None = None
+    contract_version: str | None = None
+    progress: dict[str, Any] | None = None
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    quality_status: str | None = None
+    error_category: str | None = None
+    diagnostics_complete: bool | None = None
+    artifacts: dict[str, Any] | None = None
+    diagnostics: dict[str, Any] | None = None
     # "学习"标记与场景标签（内部学习任务，D28/D27）；普通任务为 None
-    task_type: Optional[str] = None
-    scenario: Optional[str] = None
-    learn_report: Optional[Dict[str, Any]] = None
+    task_type: str | None = None
+    scenario: str | None = None
+    learn_report: dict[str, Any] | None = None
 
 
 class SubtitleEventResponse(BaseModel):
@@ -79,27 +78,27 @@ class SubtitleEventResponse(BaseModel):
     start: float
     end: float
     text: str
-    original_text: Optional[str] = None  # LLM 优化前的原始文本
-    speaker_id: Optional[int] = None  # 说话人编号
-    speaker_label: Optional[str] = None  # 说话人标签: "张三(嘉宾)"
+    original_text: str | None = None  # LLM 优化前的原始文本
+    speaker_id: int | None = None  # 说话人编号
+    speaker_label: str | None = None  # 说话人标签: "张三(嘉宾)"
     # 物理时间轴与溯源字段（前端可选渲染，保持旧响应兼容）
-    physical_start: Optional[float] = None
-    physical_end: Optional[float] = None
-    physical_spans: Optional[List[Dict[str, Any]]] = None
-    source_word_ids: Optional[List[str]] = None
-    speaker_status: Optional[str] = None
-    speaker_source: Optional[str] = None
-    speaker_confidence: Optional[float] = None
-    speaker_model: Optional[str] = None
-    speaker_repair_reason: Optional[str] = None
-    alignment_warning: Optional[str] = None
-    physical_bin_id: Optional[str] = None
-    physical_bin_start: Optional[float] = None
-    physical_bin_end: Optional[float] = None
-    time_source: Optional[str] = None
-    revision_trace: Optional[List[Dict[str, Any]]] = None
-    genuine_overlap: Optional[bool] = None
-    overlap_group_id: Optional[str] = None
+    physical_start: float | None = None
+    physical_end: float | None = None
+    physical_spans: list[dict[str, Any]] | None = None
+    source_word_ids: list[str] | None = None
+    speaker_status: str | None = None
+    speaker_source: str | None = None
+    speaker_confidence: float | None = None
+    speaker_model: str | None = None
+    speaker_repair_reason: str | None = None
+    alignment_warning: str | None = None
+    physical_bin_id: str | None = None
+    physical_bin_start: float | None = None
+    physical_bin_end: float | None = None
+    time_source: str | None = None
+    revision_trace: list[dict[str, Any]] | None = None
+    genuine_overlap: bool | None = None
+    overlap_group_id: str | None = None
 
 
 class DeviceInfoResponse(BaseModel):
@@ -107,10 +106,10 @@ class DeviceInfoResponse(BaseModel):
 
     device_type: str
     device_count: int
-    device_names: List[str]
-    memory_mb: List[int]
+    device_names: list[str]
+    memory_mb: list[int]
     recommended_compute_type: str
-    gpu_memory_used_mb: Optional[float] = None
+    gpu_memory_used_mb: float | None = None
     recommended_model: str
 
 
@@ -128,22 +127,22 @@ class TaskHistoryItem(BaseModel):
     input_file_size: int = 0
     profile: str = "default"
     status: str  # pending | running | completed | failed
-    error: Optional[str] = None
+    error: str | None = None
     total_duration_seconds: float = 0
     created_at: str = ""
-    completed_at: Optional[str] = None
-    result_summary: Optional[Dict[str, Any]] = None
+    completed_at: str | None = None
+    result_summary: dict[str, Any] | None = None
 
 
 class CacheInfoResponse(BaseModel):
     """缓存统计信息"""
 
-    stages: Dict[str, Any] = Field(default_factory=dict)
+    stages: dict[str, Any] = Field(default_factory=dict)
     total_mb: float = 0
     total_items: int = 0
     files_dir_mb: float = 0
     cache_dir: str = ""
-    ttl_map: Dict[str, int] = Field(default_factory=dict)
+    ttl_map: dict[str, int] = Field(default_factory=dict)
     task_history_count: int = 0
     task_history_db_mb: float = 0
 
@@ -151,11 +150,11 @@ class CacheInfoResponse(BaseModel):
 class CacheConfigUpdate(BaseModel):
     """缓存配置更新请求"""
 
-    ttl_separation: Optional[int] = None
-    ttl_transcription: Optional[int] = None
-    max_size_mb: Optional[int] = None
-    history_retention_days: Optional[int] = None
-    full_pipeline_cache: Optional[bool] = None
+    ttl_separation: int | None = None
+    ttl_transcription: int | None = None
+    max_size_mb: int | None = None
+    history_retention_days: int | None = None
+    full_pipeline_cache: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +185,9 @@ class FeedbackLearnRequest(BaseModel):
 
     profile: str = Field(default="default", description="场景模板名称")
     feedback_profile: str = Field(default="user_default", description="用户配置名称")
-    run_pipeline_first: bool = Field(default=True, description="是否先用当前参数生成自动版")
+    run_pipeline_first: bool = Field(
+        default=True, description="是否先用当前参数生成自动版"
+    )
     dry_run: bool = Field(default=False, description="仅预览差异，不更新配置")
 
 
@@ -199,7 +200,7 @@ class FeedbackLearnResponse(BaseModel):
     time_shifts_count: int = 0
     merge_actions_count: int = 0
     text_edits_count: int = 0
-    param_adjustments: Dict[str, Any] = Field(default_factory=dict)
+    param_adjustments: dict[str, Any] = Field(default_factory=dict)
     structural_revision: bool = False
     message: str = ""
 
@@ -213,7 +214,7 @@ class FeedbackPreviewResponse(BaseModel):
     time_shifts_count: int = 0
     merge_actions_count: int = 0
     text_edits_count: int = 0
-    param_adjustments: Dict[str, Any] = Field(default_factory=dict)
+    param_adjustments: dict[str, Any] = Field(default_factory=dict)
     structural_revision: bool = False
     message: str = ""
 
@@ -227,7 +228,7 @@ class UserProfileInfo(BaseModel):
     created_at: str = ""
     updated_at: str = ""
     is_active: bool = True
-    overrides: Dict[str, Any] = Field(default_factory=dict)
+    overrides: dict[str, Any] = Field(default_factory=dict)
     history_count: int = 0
 
 
@@ -250,7 +251,7 @@ class FingerprintInfo(BaseModel):
 class FingerprintListResponse(BaseModel):
     """指纹列表响应"""
 
-    fingerprints: List[FingerprintInfo] = Field(default_factory=list)
+    fingerprints: list[FingerprintInfo] = Field(default_factory=list)
     total: int = 0
     db_path: str = ""
 
@@ -259,9 +260,9 @@ class FingerprintMatchResponse(BaseModel):
     """指纹匹配响应"""
 
     matched: bool = False
-    profile_id: Optional[str] = None
-    confidence: Optional[float] = None
-    audio_signature: Optional[str] = None
+    profile_id: str | None = None
+    confidence: float | None = None
+    audio_signature: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +285,8 @@ class HealthTrendEntry(BaseModel):
     """健康度趋势数据点"""
 
     timestamp: str = ""
-    health_before: Optional[float] = None
-    health_after: Optional[float] = None
+    health_before: float | None = None
+    health_after: float | None = None
     shadow_mode: bool = False
     summary: str = ""
 
@@ -305,7 +306,7 @@ class ShadowModeStatus(BaseModel):
     health_delta: float = 0.0
     recommendation: str = "continue"
     reason: str = ""
-    runs: List[Dict[str, Any]] = Field(default_factory=list)
+    runs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ShadowModeToggleRequest(BaseModel):
@@ -333,9 +334,9 @@ class ConflictInfo(BaseModel):
     oscillation_count: int = 0
     severity: str = "low"  # low | medium | high
     recommended_action: str = ""
-    possible_causes: List[str] = Field(default_factory=list)
-    suggested_actions: List[Dict[str, str]] = Field(default_factory=list)
-    entries: List[Dict[str, Any]] = Field(default_factory=list)
+    possible_causes: list[str] = Field(default_factory=list)
+    suggested_actions: list[dict[str, str]] = Field(default_factory=list)
+    entries: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ConflictResolutionRequest(BaseModel):
@@ -359,11 +360,11 @@ class ImpactPredictionInfo(BaseModel):
     delta: float = 0.0
     delta_pct: float = 0.0
     summary: str = ""
-    avg_duration_change_pct: Optional[float] = None
-    merge_frequency_change_pct: Optional[float] = None
-    split_frequency_change_pct: Optional[float] = None
-    end_truncation_change_pct: Optional[float] = None
-    total_line_count_change_pct: Optional[float] = None
+    avg_duration_change_pct: float | None = None
+    merge_frequency_change_pct: float | None = None
+    split_frequency_change_pct: float | None = None
+    end_truncation_change_pct: float | None = None
+    total_line_count_change_pct: float | None = None
     confidence_low: float = 0.0
     confidence_high: float = 0.0
 
@@ -384,7 +385,7 @@ class ReviewQueueItem(BaseModel):
     """审核队列项目"""
 
     sample_id: str = ""
-    diff_summary: Dict[str, int] = Field(default_factory=dict)
+    diff_summary: dict[str, int] = Field(default_factory=dict)
     confidence: float = 0.0
     submitted_at: str = ""
     language: str = ""
@@ -394,7 +395,7 @@ class ReviewQueueItem(BaseModel):
 class ReviewQueueResponse(BaseModel):
     """审核队列响应"""
 
-    samples: List[ReviewQueueItem] = Field(default_factory=list)
+    samples: list[ReviewQueueItem] = Field(default_factory=list)
     total: int = 0
     status: str = "pending"
 

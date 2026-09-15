@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from vocal_subtitle.acoustic.skeleton import group_speech_intervals
 from vocal_subtitle.acoustic_validator import (
     AcousticValidationConfig,
     AcousticValidator,
@@ -12,7 +13,6 @@ from vocal_subtitle.acoustic_validator import (
     _is_time_in_speech,
     _rms_energy_check,
 )
-from vocal_subtitle.acoustic.skeleton import group_speech_intervals
 from vocal_subtitle.asr.base import WordTimestamp
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 
@@ -52,7 +52,9 @@ class TestHelperFunctions:
     def test_directional_boundary_uses_previous_end_for_end(self, skeleton):
         """end 在静音间隙中必须选择前一个语音终点"""
         is_in, candidate, containing = _find_directional_boundary(
-            4.0, skeleton, "end",
+            4.0,
+            skeleton,
+            "end",
         )
         assert is_in is False
         assert candidate == 3.0
@@ -61,7 +63,9 @@ class TestHelperFunctions:
     def test_directional_boundary_uses_next_start_for_start(self, skeleton):
         """start 在静音间隙中选择后一个语音起点"""
         is_in, candidate, containing = _find_directional_boundary(
-            4.0, skeleton, "start",
+            4.0,
+            skeleton,
+            "start",
         )
         assert is_in is False
         assert candidate == 5.0
@@ -115,16 +119,18 @@ class TestAcousticValidator:
 
     @pytest.fixture
     def validator(self):
-        return AcousticValidator(AcousticValidationConfig(
-            enabled=True,
-            skeleton_noise_db=-40.0,
-            skeleton_min_silence=0.1,
-            skeleton_min_speech=0.05,
-            max_snap_distance=0.15,
-            snap_start_margin=0.02,
-            snap_end_margin=0.01,
-            generate_report=True,
-        ))
+        return AcousticValidator(
+            AcousticValidationConfig(
+                enabled=True,
+                skeleton_noise_db=-40.0,
+                skeleton_min_silence=0.1,
+                skeleton_min_speech=0.05,
+                max_snap_distance=0.15,
+                snap_start_margin=0.02,
+                snap_end_margin=0.01,
+                generate_report=True,
+            )
+        )
 
     @pytest.fixture
     def loud_audio(self):
@@ -198,7 +204,10 @@ class TestAcousticValidator:
             SubtitleEvent(index=1, start=0.69, end=0.9, text="Snap me"),
         ]
         result, report = validator._physical_snap_validation(
-            events, skeleton, audio=None, sample_rate=16000,
+            events,
+            skeleton,
+            audio=None,
+            sample_rate=16000,
         )
         # start=0.69 离语音起点 0.7 只有 0.01s < 0.03 → 无条件吸附
         assert report["snapped_starts"] == 1
@@ -211,12 +220,20 @@ class TestAcousticValidator:
             start=1.15,
             end=1.25,
             text="Reliable",
-            words=[WordTimestamp(
-                word="Reliable", start=1.15, end=1.15, confidence=0.95,
-            )],
+            words=[
+                WordTimestamp(
+                    word="Reliable",
+                    start=1.15,
+                    end=1.15,
+                    confidence=0.95,
+                )
+            ],
         )
         result, report = validator._physical_snap_validation(
-            [event], skeleton, audio=None, sample_rate=16000,
+            [event],
+            skeleton,
+            audio=None,
+            sample_rate=16000,
         )
         # end: 高置信词尾仍然豁免回缩
         assert result[0].end == pytest.approx(1.25)
@@ -233,12 +250,15 @@ class TestAcousticValidator:
         audio = np.zeros(sample_rate * 2, dtype=np.float32)
         t = np.arange(sample_rate, dtype=np.float32) / sample_rate
         audio[:sample_rate] = np.sin(2 * np.pi * 440 * t) * 0.5
-        audio[int(1.3 * sample_rate):] = (
-            np.sin(2 * np.pi * 440 * t[:int(0.7 * sample_rate)]) * 0.5
+        audio[int(1.3 * sample_rate) :] = (
+            np.sin(2 * np.pi * 440 * t[: int(0.7 * sample_rate)]) * 0.5
         )
         event = SubtitleEvent(index=1, start=0.5, end=1.15, text="Shorten")
         result, report = validator._physical_snap_validation(
-            [event], [(0.0, 1.0), (1.3, 2.0)], audio, sample_rate,
+            [event],
+            [(0.0, 1.0), (1.3, 2.0)],
+            audio,
+            sample_rate,
         )
         assert result[0].end == pytest.approx(0.99, abs=0.01)
         assert report["snapped_ends"] == 1
@@ -247,7 +267,10 @@ class TestAcousticValidator:
         """连续语音内部的截尾延长到该骨架段语音终点（2026-09-13 契约）"""
         event = SubtitleEvent(index=1, start=0.2, end=0.9, text="Possible tail")
         result, report = validator._physical_snap_validation(
-            [event], [(0.0, 1.0)], audio=None, sample_rate=16000,
+            [event],
+            [(0.0, 1.0)],
+            audio=None,
+            sample_rate=16000,
         )
         assert result[0].end == pytest.approx(0.99)
         assert report["ends_extended"] == 1
@@ -255,20 +278,24 @@ class TestAcousticValidator:
 
     def test_end_inside_speech_extension_disabled(self):
         """allow_end_extend=false 时退回旧行为：只标记不延长"""
-        validator = AcousticValidator(AcousticValidationConfig(
-            enabled=True,
-            allow_end_extend=False,
-            max_snap_distance=0.15,
-        ))
+        validator = AcousticValidator(
+            AcousticValidationConfig(
+                enabled=True,
+                allow_end_extend=False,
+                max_snap_distance=0.15,
+            )
+        )
         event = SubtitleEvent(index=1, start=0.2, end=0.9, text="Possible tail")
         result, report = validator._physical_snap_validation(
-            [event], [(0.0, 1.0)], audio=None, sample_rate=16000,
+            [event],
+            [(0.0, 1.0)],
+            audio=None,
+            sample_rate=16000,
         )
         assert result[0].end == pytest.approx(0.9)
         assert report["ends_extended"] == 0
         assert any(
-            item["issue"] == "possible_truncation"
-            for item in report["events_flagged"]
+            item["issue"] == "possible_truncation" for item in report["events_flagged"]
         )
 
     def test_end_extension_clamped_by_next_event(self, validator):
@@ -276,7 +303,10 @@ class TestAcousticValidator:
         a = SubtitleEvent(index=1, start=0.2, end=0.9, text="A")
         b = SubtitleEvent(index=2, start=0.96, end=0.98, text="B")
         result, report = validator._physical_snap_validation(
-            [a, b], [(0.0, 1.0)], audio=None, sample_rate=16000,
+            [a, b],
+            [(0.0, 1.0)],
+            audio=None,
+            sample_rate=16000,
         )
         # a: candidate = min(1.0-0.01, 0.96-0.02) = 0.94 → 延长到 0.94
         assert result[0].end == pytest.approx(0.94)
@@ -290,12 +320,15 @@ class TestAcousticValidator:
         audio = np.zeros(sample_rate * 3, dtype=np.float32)
         t = np.arange(sample_rate, dtype=np.float32) / sample_rate
         audio[:sample_rate] = np.sin(2 * np.pi * 440 * t) * 0.5
-        audio[int(1.9 * sample_rate):int(2.5 * sample_rate)] = (
-            np.sin(2 * np.pi * 440 * t[:int(0.6 * sample_rate)]) * 0.5
+        audio[int(1.9 * sample_rate) : int(2.5 * sample_rate)] = (
+            np.sin(2 * np.pi * 440 * t[: int(0.6 * sample_rate)]) * 0.5
         )
         event = SubtitleEvent(index=1, start=1.7, end=2.3, text="Late")
         result, report = validator._physical_snap_validation(
-            [event], [(0.0, 1.0), (1.9, 2.5)], audio, sample_rate,
+            [event],
+            [(0.0, 1.0), (1.9, 2.5)],
+            audio,
+            sample_rate,
         )
         assert result[0].start == pytest.approx(1.92)
         assert report["snapped_starts"] == 1
@@ -306,14 +339,17 @@ class TestAcousticValidator:
         audio = np.zeros(sample_rate * 3, dtype=np.float32)
         t = np.arange(sample_rate, dtype=np.float32) / sample_rate
         audio[:sample_rate] = np.sin(2 * np.pi * 440 * t) * 0.5
-        audio[int(1.25 * sample_rate):int(2.0 * sample_rate)] = (
-            np.sin(2 * np.pi * 440 * t[:int(0.75 * sample_rate)]) * 0.5
+        audio[int(1.25 * sample_rate) : int(2.0 * sample_rate)] = (
+            np.sin(2 * np.pi * 440 * t[: int(0.75 * sample_rate)]) * 0.5
         )
         # start=0.99 骑在上一句语音尾巴上（帧级无缝衔接的产物），
         # 真实语音起点 1.25，吞并 260ms 静音
         event = SubtitleEvent(index=1, start=0.99, end=1.9, text="Next")
         result, report = validator._physical_snap_validation(
-            [event], [(0.0, 1.0), (1.25, 2.0)], audio, sample_rate,
+            [event],
+            [(0.0, 1.0), (1.25, 2.0)],
+            audio,
+            sample_rate,
         )
         assert result[0].start == pytest.approx(1.27)
         assert report["snapped_starts"] == 1
@@ -325,7 +361,10 @@ class TestAcousticValidator:
             SubtitleEvent(index=1, start=0.5, end=1.8, text="Cut tail"),
         ]
         result, report = validator._physical_snap_validation(
-            events, skeleton, audio=loud_audio, sample_rate=16000,
+            events,
+            skeleton,
+            audio=loud_audio,
+            sample_rate=16000,
         )
         # end=1.8 在语音段 (0.0-2.0) 内，所以不需要吸附
         # end=1.8 在语音区内，不是切尾场景
@@ -352,7 +391,10 @@ class TestAcousticValidator:
             SubtitleEvent(index=1, start=0.5, end=3.5, text="Far start"),
         ]
         result, report = validator._physical_snap_validation(
-            events, skeleton, audio=loud_audio, sample_rate=16000,
+            events,
+            skeleton,
+            audio=loud_audio,
+            sample_rate=16000,
         )
         # start=0.5, nearest=0.8, distance=0.3
         # > max_snap_distance(0.15) 且 <= 0.5 → 标记但不吸附
@@ -378,7 +420,10 @@ class TestAcousticEventClassification:
 
         audio = np.zeros(48000, dtype=np.float32)  # 3s
         classified = classify_acoustic_events(
-            skeleton, silero_segments, audio, 16000,
+            skeleton,
+            silero_segments,
+            audio,
+            16000,
         )
 
         assert len(classified) == 1
@@ -397,7 +442,10 @@ class TestAcousticEventClassification:
 
         audio = np.random.randn(48000).astype(np.float32) * 0.1  # 3s
         classified = classify_acoustic_events(
-            skeleton, silero_segments, audio, 16000,
+            skeleton,
+            silero_segments,
+            audio,
+            16000,
         )
 
         assert len(classified) == 1
@@ -414,7 +462,10 @@ class TestAcousticEventClassification:
 
         audio = np.zeros(48000, dtype=np.float32)
         classified = classify_acoustic_events(
-            skeleton, silero_segments, audio, 16000,
+            skeleton,
+            silero_segments,
+            audio,
+            16000,
         )
 
         assert classified[0]["type"] == "human_speech"
@@ -455,7 +506,8 @@ class TestComputeVADOverlap:
         from vocal_subtitle.vad.base import SpeechSegment
 
         overlap = _compute_vad_overlap(
-            1.0, 3.0,
+            1.0,
+            3.0,
             [SpeechSegment(start=1.0, end=3.0, confidence=0.9)],
         )
         assert overlap == pytest.approx(1.0, abs=0.01)
@@ -465,7 +517,8 @@ class TestComputeVADOverlap:
         from vocal_subtitle.vad.base import SpeechSegment
 
         overlap = _compute_vad_overlap(
-            1.0, 2.0,
+            1.0,
+            2.0,
             [SpeechSegment(start=3.0, end=4.0, confidence=0.9)],
         )
         assert overlap == 0.0
@@ -475,7 +528,8 @@ class TestComputeVADOverlap:
         from vocal_subtitle.vad.base import SpeechSegment
 
         overlap = _compute_vad_overlap(
-            1.0, 3.0,
+            1.0,
+            3.0,
             [SpeechSegment(start=1.5, end=2.5, confidence=0.9)],
         )
         assert overlap == pytest.approx(0.5, abs=0.05)

@@ -16,12 +16,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # 敏感字段列表（入库前移除）
 SENSITIVE_FIELDS = (
-    "audio_path", "task_id", "user_name", "email",
-    "reviewer", "uploader_ip", "machine_id", "original_filename",
-    "input_path", "output_path",
+    "audio_path",
+    "task_id",
+    "user_name",
+    "email",
+    "reviewer",
+    "uploader_ip",
+    "machine_id",
+    "original_filename",
+    "input_path",
+    "output_path",
 )
 
 
@@ -29,7 +35,7 @@ SENSITIVE_FIELDS = (
 class AnonymizationResult:
     """脱敏结果"""
 
-    sample: dict              # 脱敏后的样本
+    sample: dict  # 脱敏后的样本
     removed_fields: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -68,10 +74,10 @@ class FeedbackAnonymizer:
         removed: list[str] = []
 
         # 移除敏感字段
-        for field in SENSITIVE_FIELDS:
-            if field in sanitized:
-                sanitized.pop(field, None)
-                removed.append(field)
+        for field_name in SENSITIVE_FIELDS:
+            if field_name in sanitized:
+                sanitized.pop(field_name, None)
+                removed.append(field_name)
 
         # 按同意级别设置 anonymization 标记
         if consent_level == "local":
@@ -85,8 +91,8 @@ class FeedbackAnonymizer:
         original = sanitized.get("original", {})
         if isinstance(original, dict):
             cleaned_original = dict(original)
-            for field in SENSITIVE_FIELDS:
-                cleaned_original.pop(field, None)
+            for field_name in SENSITIVE_FIELDS:
+                cleaned_original.pop(field_name, None)
             sanitized["original"] = cleaned_original
 
         return AnonymizationResult(

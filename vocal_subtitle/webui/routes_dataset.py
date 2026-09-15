@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -34,11 +33,21 @@ DEFAULT_DATASET_NAME = "subtitle-feedback"
 class DatasetExportRequest(BaseModel):
     """数据集导出请求体（D33：许可强制显式选择，缺失由服务层门禁拒绝）"""
 
-    license: str = Field(default="", description="数据集许可（如 CC-BY-4.0 / CC0-1.0），必选")
-    scenarios: list[str] = Field(default_factory=list, description="场景过滤（D27 标签；空 = 全部场景）")
-    out_dir: Optional[str] = Field(default=None, description="输出目录覆盖；缺省放用户数据目录 datasets/<name>")
-    bundle_audio: bool = Field(default=False, description="把音频实体复制进 audio/（仅本地使用，不建议推 git）")
-    dataset_name: str = Field(default=DEFAULT_DATASET_NAME, description="数据集名称（写入 README 卡片）")
+    license: str = Field(
+        default="", description="数据集许可（如 CC-BY-4.0 / CC0-1.0），必选"
+    )
+    scenarios: list[str] = Field(
+        default_factory=list, description="场景过滤（D27 标签；空 = 全部场景）"
+    )
+    out_dir: str | None = Field(
+        default=None, description="输出目录覆盖；缺省放用户数据目录 datasets/<name>"
+    )
+    bundle_audio: bool = Field(
+        default=False, description="把音频实体复制进 audio/（仅本地使用，不建议推 git）"
+    )
+    dataset_name: str = Field(
+        default=DEFAULT_DATASET_NAME, description="数据集名称（写入 README 卡片）"
+    )
 
 
 def _default_dataset_dir(dataset_name: str) -> Path:
@@ -71,8 +80,12 @@ def _clean_scenarios(raw) -> list[str]:
 @router.get("/feedback/dataset/preview")
 async def dataset_preview(
     scenarios: str = Query(default="", description="场景过滤，逗号分隔；缺省全部场景"),
-    dataset_name: str = Query(default=DEFAULT_DATASET_NAME, description="数据集名称（决定默认输出目录）"),
-    out_dir: Optional[str] = Query(default=None, description="输出目录覆盖；缺省 datasets/<name>"),
+    dataset_name: str = Query(
+        default=DEFAULT_DATASET_NAME, description="数据集名称（决定默认输出目录）"
+    ),
+    out_dir: str | None = Query(
+        default=None, description="输出目录覆盖；缺省 datasets/<name>"
+    ),
 ):
     """导出前统计预览：可导样本总数、按场景/按语言分布（与导出同一过滤器）"""
     from ..feedback.dataset_export import summarize_export
@@ -97,7 +110,9 @@ async def dataset_export(body: DatasetExportRequest):
     from ..feedback.dataset_export import LicenseRequiredError, export_dataset
 
     wanted = _clean_scenarios(body.scenarios)
-    name = str(body.dataset_name or DEFAULT_DATASET_NAME).strip() or DEFAULT_DATASET_NAME
+    name = (
+        str(body.dataset_name or DEFAULT_DATASET_NAME).strip() or DEFAULT_DATASET_NAME
+    )
     directory = Path(body.out_dir) if body.out_dir else _default_dataset_dir(name)
     try:
         outcome = export_dataset(
@@ -116,7 +131,9 @@ async def dataset_export(body: DatasetExportRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OSError as exc:
         logger.exception("Dataset export failed")
-        raise HTTPException(status_code=500, detail=f"数据集目录写入失败: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"数据集目录写入失败: {exc}"
+        ) from exc
 
     total_samples = 0
     manifest_path = Path(outcome.out_dir) / "manifest.json"
@@ -145,4 +162,10 @@ async def dataset_export(body: DatasetExportRequest):
     }
 
 
-__all__ = ["DEFAULT_DATASET_NAME", "DatasetExportRequest", "dataset_export", "dataset_preview", "router"]
+__all__ = [
+    "DEFAULT_DATASET_NAME",
+    "DatasetExportRequest",
+    "dataset_export",
+    "dataset_preview",
+    "router",
+]

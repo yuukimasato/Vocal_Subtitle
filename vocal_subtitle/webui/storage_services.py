@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from ..config import ConfigLoader
 from ..utils.cache_manager import CacheManager

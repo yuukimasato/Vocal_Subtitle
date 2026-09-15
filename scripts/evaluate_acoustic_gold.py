@@ -7,14 +7,14 @@ import argparse
 import json
 import math
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from statistics import median
-from typing import Any, Mapping
-
+from typing import Any
 
 SCHEMA_VERSION = "acoustic-gold-v1"
-SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / (
-    "acoustic-gold-v1.schema.json"
+SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1] / "schemas" / ("acoustic-gold-v1.schema.json")
 )
 
 
@@ -30,7 +30,10 @@ def _finite_time(value: Any, field: str) -> float:
 def load_word_boundaries(path: Path) -> dict[str, dict[str, Any]]:
     """Load the shared gold/prediction schema and reject ambiguous data."""
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, Mapping) or payload.get("schema_version") != SCHEMA_VERSION:
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("schema_version") != SCHEMA_VERSION
+    ):
         raise ValueError(f"{path}: unsupported or missing schema_version")
     words = payload.get("words")
     if not isinstance(words, list) or not words:
@@ -162,10 +165,13 @@ def main(argv: list[str] | None = None) -> int:
         reasons.append("median_boundary_error")
     if report["boundary_p95_ms"] > args.max_p95_ms:
         reasons.append("p95_boundary_error")
-    if max(
-        report["cut_head_over_threshold_rate"],
-        report["cut_tail_over_threshold_rate"],
-    ) > args.max_cut_rate:
+    if (
+        max(
+            report["cut_head_over_threshold_rate"],
+            report["cut_tail_over_threshold_rate"],
+        )
+        > args.max_cut_rate
+    ):
         reasons.append("audible_cut_rate")
     report["publishable"] = not reasons
     report["reasons"] = reasons

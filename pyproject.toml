@@ -155,6 +155,19 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+# E501 交给 ruff format 处理：代码行宽由格式化器保证；豁免的剩余场景
+# 全是无法换行的长字符串（对齐表格输出、内嵌 JS、CLI help、用户可见文案）
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# 脚本需先做 sys.path / 环境处理再导入项目模块，E402 属预期
+"scripts/*.py" = ["E402"]
+# api.py 为显式 legacy 兼容出口：先建模块级状态再装配路由模块
+"vocal_subtitle/webui/api.py" = ["E402"]
+# 弃用 shim：先发 DeprecationWarning 再导入实现
+"vocal_subtitle/acoustic_validator.py" = ["E402"]
+# 测试需先构造场景数据再导入 ASR 基类
+"tests/test_language_policy.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

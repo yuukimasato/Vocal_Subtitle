@@ -17,7 +17,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -98,10 +97,11 @@ class FeedbackSampleManager:
         mgr.review("sample-id", "accepted", reviewer="admin")
     """
 
-    def __init__(self, storage_dir: Optional[Path] = None):
-        self._storage_dir = Path(storage_dir or (
-            Path(__file__).parent.parent.parent / "cache" / "feedback_samples"
-        ))
+    def __init__(self, storage_dir: Path | None = None):
+        self._storage_dir = Path(
+            storage_dir
+            or (Path(__file__).parent.parent.parent / "cache" / "feedback_samples")
+        )
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._index_path = self._storage_dir / "sample_index.json"
         self._index: dict[str, dict] = self._load_index()
@@ -113,7 +113,7 @@ class FeedbackSampleManager:
 
     # ---- 只读遍历（导出等治理操作使用，不改动样本库）----
 
-    def list_sample_ids(self, status: Optional[str] = None) -> list[str]:
+    def list_sample_ids(self, status: str | None = None) -> list[str]:
         """按审核状态列出样本 ID（只读；status 缺省返回全部）。"""
         return [
             sample_id
@@ -127,7 +127,7 @@ class FeedbackSampleManager:
         if self._index_path.exists():
             try:
                 return json.loads(self._index_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 pass
         return {}
 
@@ -173,7 +173,7 @@ class FeedbackSampleManager:
         task_id: str = "",
         audio_sha256: str = "",
         run_id: str = "",
-    ) -> Optional[FeedbackSample]:
+    ) -> FeedbackSample | None:
         """将反馈提交入库。
 
         质量门控：
@@ -193,7 +193,8 @@ class FeedbackSampleManager:
         if coverage < MIN_ALIGNMENT_COVERAGE:
             logger.warning(
                 "Feedback rejected: coverage %.2f < %.2f",
-                coverage, MIN_ALIGNMENT_COVERAGE,
+                coverage,
+                MIN_ALIGNMENT_COVERAGE,
             )
             return None
 
@@ -224,14 +225,18 @@ class FeedbackSampleManager:
             original=original_config or {},
             automatic_subtitle={
                 "version": "auto-v1",
-                "subtitle_hash": hashlib.sha256(auto_subtitle.encode()).hexdigest()[:16],
+                "subtitle_hash": hashlib.sha256(auto_subtitle.encode()).hexdigest()[
+                    :16
+                ],
                 "event_count": auto_subtitle.count("\n\n") + 1,
                 # 字幕全文：数据集导出（dataset-v1）与人工复核需要文本对
                 "text": auto_subtitle,
             },
             human_revision={
                 "version": "human-v1",
-                "subtitle_hash": hashlib.sha256(human_revision.encode()).hexdigest()[:16],
+                "subtitle_hash": hashlib.sha256(human_revision.encode()).hexdigest()[
+                    :16
+                ],
                 "event_count": human_revision.count("\n\n") + 1,
                 "edit_types": edit_types or {},
                 "text": human_revision,
@@ -272,15 +277,21 @@ class FeedbackSampleManager:
                 if sample_path.exists():
                     try:
                         data = json.loads(sample_path.read_text(encoding="utf-8"))
-                        pending.append({
-                            "sample_id": sample_id,
-                            "diff_summary": data.get("human_revision", {}).get("edit_types", {}),
-                            "confidence": data.get("alignment", {}).get("confidence", 0.0),
-                            "submitted_at": entry.get("created_at", ""),
-                            "language": entry.get("language", ""),
-                            "scene": entry.get("scene", ""),
-                        })
-                    except (json.JSONDecodeError, IOError):
+                        pending.append(
+                            {
+                                "sample_id": sample_id,
+                                "diff_summary": data.get("human_revision", {}).get(
+                                    "edit_types", {}
+                                ),
+                                "confidence": data.get("alignment", {}).get(
+                                    "confidence", 0.0
+                                ),
+                                "submitted_at": entry.get("created_at", ""),
+                                "language": entry.get("language", ""),
+                                "scene": entry.get("scene", ""),
+                            }
+                        )
+                    except (OSError, json.JSONDecodeError):
                         pass
         return sorted(pending, key=lambda x: x.get("submitted_at", ""), reverse=True)
 
@@ -304,7 +315,9 @@ class FeedbackSampleManager:
             是否成功
         """
         if result not in REVIEW_RESULTS:
-            raise ValueError(f"Invalid review result: {result!r}. Must be one of {REVIEW_RESULTS}")
+            raise ValueError(
+                f"Invalid review result: {result!r}. Must be one of {REVIEW_RESULTS}"
+            )
 
         if sample_id not in self._index:
             logger.warning("Sample not found: %s", sample_id)
@@ -327,7 +340,7 @@ class FeedbackSampleManager:
                     json.dumps(data, indent=2, ensure_ascii=False),
                     encoding="utf-8",
                 )
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 pass
 
         # 更新索引
@@ -338,7 +351,7 @@ class FeedbackSampleManager:
         logger.info("Feedback reviewed: %s → %s (by %s)", sample_id, result, reviewer)
         return True
 
-    def get(self, sample_id: str) -> Optional[dict]:
+    def get(self, sample_id: str) -> dict | None:
         """获取单个样本详情。"""
         if sample_id not in self._index:
             return None
@@ -346,7 +359,7 @@ class FeedbackSampleManager:
         if sample_path.exists():
             try:
                 return json.loads(sample_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 pass
         return None
 

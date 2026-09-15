@@ -23,7 +23,11 @@ def test_global_asr_service_uses_explicit_runner_port():
         get_language=lambda: None,
         set_language=lambda value: None,
         quality_gate_kwargs=lambda: {},
-        global_runner=lambda item: (["event"], {"source": "fake"}, SimpleNamespace(status="ok", words=["word"])),
+        global_runner=lambda item: (
+            ["event"],
+            {"source": "fake"},
+            SimpleNamespace(status="ok", words=["word"]),
+        ),
     )
     result = GlobalASRService().run(request, ports)
     assert isinstance(result, GlobalASRResult)
@@ -36,25 +40,29 @@ def test_global_asr_service_prefers_transcript_ir_for_evidence():
     transcript = SimpleNamespace(
         backend="global-test",
         status="degraded",
-        words=[SimpleNamespace(
-            id="w1",
-            text="hello",
-            raw_start=1.0,
-            raw_end=1.4,
-            confidence=None,
-            source_window_id="window-1",
-            metadata={"time_source": "segment_boundary"},
-        )],
-        segments=[SimpleNamespace(
-            id="s1",
-            text="hello",
-            raw_start=1.0,
-            raw_end=1.4,
-            word_ids=["w1"],
-            avg_logprob=None,
-            language="en",
-            metadata={},
-        )],
+        words=[
+            SimpleNamespace(
+                id="w1",
+                text="hello",
+                raw_start=1.0,
+                raw_end=1.4,
+                confidence=None,
+                source_window_id="window-1",
+                metadata={"time_source": "segment_boundary"},
+            )
+        ],
+        segments=[
+            SimpleNamespace(
+                id="s1",
+                text="hello",
+                raw_start=1.0,
+                raw_end=1.4,
+                word_ids=["w1"],
+                avg_logprob=None,
+                language="en",
+                metadata={},
+            )
+        ],
     )
     request = GlobalASRRequest(audio=[], sample_rate=16000, shadow=None, stats=None)
     ports = ASRRuntimePorts(
@@ -78,9 +86,12 @@ def test_asr_review_service_is_independent_of_pipeline():
     ASRReviewService.validate(
         ASRReviewRequest(events=["event"], transcript=transcript, diagnostics={})
     )
-    assert ASRReviewService.classify_failure(
-        ASRFailureRequest(RuntimeError("quality gate failed"))
-    ) == "quality_gate_failed"
+    assert (
+        ASRReviewService.classify_failure(
+            ASRFailureRequest(RuntimeError("quality gate failed"))
+        )
+        == "quality_gate_failed"
+    )
 
 
 def test_local_merge_decider_handles_deterministic_rule_without_model():

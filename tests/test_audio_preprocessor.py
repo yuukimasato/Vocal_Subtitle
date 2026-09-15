@@ -11,13 +11,15 @@ class TestBurstNoiseSuppression:
 
     @pytest.fixture
     def preprocessor(self):
-        return AudioPreprocessor(DenoiseConfig(
-            enabled=True,
-            engine="spectral_gate",
-            burst_noise_protection=True,
-            burst_noise_threshold_db=10.0,  # 低阈值，便于测试
-            burst_noise_max_duration_ms=150,
-        ))
+        return AudioPreprocessor(
+            DenoiseConfig(
+                enabled=True,
+                engine="spectral_gate",
+                burst_noise_protection=True,
+                burst_noise_threshold_db=10.0,  # 低阈值，便于测试
+                burst_noise_max_duration_ms=150,
+            )
+        )
 
     def test_single_burst_detected_and_suppressed(self, preprocessor):
         """单次突发噪音应被检测并抑制"""
@@ -35,7 +37,7 @@ class TestBurstNoiseSuppression:
         assert report["burst_events_detected"] >= 1
         # 突发区域应被降噪处理
         burst_region_after = cleaned[burst_start:burst_end]
-        burst_rms_after = float(np.sqrt(np.mean(burst_region_after ** 2)))
+        burst_rms_after = float(np.sqrt(np.mean(burst_region_after**2)))
         assert burst_rms_after < 0.3  # 能量大幅降低
 
     def test_multiple_bursts(self, preprocessor):
@@ -74,13 +76,15 @@ class TestSpectralGate:
 
     @pytest.fixture
     def preprocessor(self):
-        return AudioPreprocessor(DenoiseConfig(
-            enabled=True,
-            engine="spectral_gate",
-            spectral_noise_reduction_db=12.0,
-            spectral_noise_estimation_frames=5,
-            burst_noise_protection=False,
-        ))
+        return AudioPreprocessor(
+            DenoiseConfig(
+                enabled=True,
+                engine="spectral_gate",
+                spectral_noise_reduction_db=12.0,
+                spectral_noise_estimation_frames=5,
+                burst_noise_protection=False,
+            )
+        )
 
     def test_reduces_noise_floor(self, preprocessor):
         """谱减法应降低底噪水平"""
@@ -117,9 +121,12 @@ class TestSpectralGate:
 
     def test_unknown_engine_fallback(self):
         """未知引擎应安全降级"""
-        preprocessor = AudioPreprocessor(DenoiseConfig(
-            enabled=True, engine="unknown_xyz",
-        ))
+        preprocessor = AudioPreprocessor(
+            DenoiseConfig(
+                enabled=True,
+                engine="unknown_xyz",
+            )
+        )
         audio = np.random.randn(16000).astype(np.float32) * 0.1
         cleaned, report = preprocessor.process(audio.copy(), 16000)
         assert not report["denoise_applied"]

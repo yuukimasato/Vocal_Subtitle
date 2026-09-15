@@ -2,33 +2,20 @@ from types import SimpleNamespace
 
 import pytest
 
+from vocal_subtitle.asr.contracts import EvidenceReviewRequest
 from vocal_subtitle.asr.evidence import (
     CandidateEvidence,
-    EvidenceBundle,
     EvidenceDecision,
     EvidenceWord,
-    candidate_from_subtitle_event,
-    candidates_from_global_transcript,
-    candidates_from_segments,
-    evidence_word_from_asr,
 )
-from vocal_subtitle.asr.evidence_decision import EvidenceDecisionEngine
-from vocal_subtitle.asr.evidence_review import EvidenceReviewRuntimePorts, EvidenceReviewService
 from vocal_subtitle.asr.evidence_cache import EvidenceCacheKeyContext
-from vocal_subtitle.asr.contracts import EvidenceReviewRequest
+from vocal_subtitle.asr.evidence_decision import EvidenceDecisionEngine
+from vocal_subtitle.asr.evidence_review import (
+    EvidenceReviewRuntimePorts,
+    EvidenceReviewService,
+)
 from vocal_subtitle.asr.review_scheduler import ReviewScheduler, ReviewSchedulerConfig
 from vocal_subtitle.asr.risk_scoring import EvidenceRiskScorer, RiskScoringConfig
-
-
-def candidate(identifier="seg-1", text="hello", start=1.0, end=2.0, **kwargs):
-    return CandidateEvidence(
-        id=identifier,
-        source=kwargs.pop("source", "segmented"),
-        text=text,
-        start=start,
-        end=end,
-        **kwargs,
-    )
 
 
 def candidate(identifier="seg-1", text="hello", start=1.0, end=2.0, **kwargs):
@@ -154,7 +141,9 @@ def test_risk_scoring_marks_short_low_evidence_candidate_for_review():
 def test_risk_scoring_can_use_custom_thresholds():
     item = candidate(text="stable", start=1.0, end=2.0, confidence=0.95)
     assessment = EvidenceRiskScorer(
-        RiskScoringConfig(medium_threshold=0.9, high_threshold=0.95, critical_threshold=0.99)
+        RiskScoringConfig(
+            medium_threshold=0.9, high_threshold=0.95, critical_threshold=0.99
+        )
     ).score(item)
 
     assert assessment.level == "low"
@@ -215,9 +204,9 @@ def test_scheduler_does_not_cross_long_speech_gap():
 
 
 def test_decision_engine_keeps_low_risk_candidate():
-    item = candidate(confidence=0.95, words=(
-        EvidenceWord("w1", "hello", 1.1, 1.5, 0.95),
-    ))
+    item = candidate(
+        confidence=0.95, words=(EvidenceWord("w1", "hello", 1.1, 1.5, 0.95),)
+    )
     assessment = EvidenceRiskScorer().score(item)
     decision = EvidenceDecisionEngine().decide(item, assessment=assessment)
 
@@ -252,9 +241,9 @@ def test_decision_engine_replaces_with_timed_context_candidate():
 
 def test_decision_engine_marks_high_risk_without_review_unresolved():
     item = candidate(text="training phrase", start=1.0, end=1.2)
-    assessment = EvidenceRiskScorer(
-        RiskScoringConfig(critical_threshold=0.2)
-    ).score(item)
+    assessment = EvidenceRiskScorer(RiskScoringConfig(critical_threshold=0.2)).score(
+        item
+    )
     decision = EvidenceDecisionEngine().decide(item, assessment=assessment)
 
     assert decision.decision == "unresolved"
@@ -266,7 +255,9 @@ def test_decision_engine_requires_high_risk_for_explicit_drop():
     item = candidate(confidence=0.1)
     low = EvidenceRiskScorer(RiskScoringConfig(medium_threshold=0.99)).score(item)
     with pytest.raises(ValueError, match="high or critical"):
-        EvidenceDecisionEngine().drop(item, assessment=low, evidence_codes=("sed_non_speech",))
+        EvidenceDecisionEngine().drop(
+            item, assessment=low, evidence_codes=("sed_non_speech",)
+        )
 
 
 def test_decision_engine_can_emit_multiple_split_decisions():
@@ -354,4 +345,3 @@ def test_physical_validation_rejects_word_outside_candidate_and_audio_evidence()
 
     assert decision.decision == "unresolved"
     assert decision.physical_validation["word_validation"]["invalid_word_ids"] == ["w1"]
-

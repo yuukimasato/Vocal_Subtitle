@@ -7,11 +7,12 @@ import os
 import subprocess
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    *args: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
         cwd=ROOT,
@@ -60,8 +61,8 @@ def test_default_install_includes_uvr_runtime() -> None:
 
     assert 'local extras="faster-whisper,funasr,uvr"' in script
     assert 'EXTRAS="faster-whisper,funasr,uvr"' in script
-    assert 'import audio_separator' in script
-    assert '缺少默认 UVR 分离引擎' in script
+    assert "import audio_separator" in script
+    assert "缺少默认 UVR 分离引擎" in script
 
 
 def test_requirements_include_default_uvr_runtime() -> None:

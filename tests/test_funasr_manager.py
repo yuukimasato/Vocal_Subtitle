@@ -10,10 +10,13 @@ def test_find_local_model_detects_modelscope_double_dash_layout(tmp_path):
     model.mkdir(parents=True)
     (model / "model.pt").write_bytes(b"weights")
 
-    assert find_local_model(
-        "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-        tmp_path,
-    ) == model
+    assert (
+        find_local_model(
+            "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+            tmp_path,
+        )
+        == model
+    )
 
 
 def test_find_local_model_returns_modelscope_snapshot(tmp_path):
@@ -27,7 +30,10 @@ def test_find_local_model_returns_modelscope_snapshot(tmp_path):
     (snapshot / "configuration.json").write_text("{}", encoding="utf-8")
     (snapshot / "model.pt").write_bytes(b"weights")
 
-    assert find_local_model(
-        "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-        tmp_path,
-    ) == snapshot
+    assert (
+        find_local_model(
+            "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+            tmp_path,
+        )
+        == snapshot
+    )

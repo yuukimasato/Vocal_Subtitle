@@ -102,7 +102,10 @@ def test_repair_preserves_revision_trace():
 
 def test_timeline_issue_is_frozen_value():
     issue = TimelineIssue(
-        kind="overlap", first_index=0, second_index=1, overlap_seconds=0.5,
+        kind="overlap",
+        first_index=0,
+        second_index=1,
+        overlap_seconds=0.5,
     )
 
     assert issue.overlap_seconds == 0.5

@@ -6,9 +6,6 @@ import logging
 import tempfile
 import time
 from pathlib import Path
-from typing import List, Optional
-
-import numpy as np
 
 from ..application.pipeline_result import PipelineStats
 from ..mapping.time_mapper import SubtitleEvent
@@ -27,7 +24,7 @@ class PipelineStreamingMixin:
         output_format: str = "srt",
         glob_pattern: str = "*.mp3",
         **overrides,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """批量处理音频文件
 
         Args:
@@ -63,9 +60,7 @@ class PipelineStreamingMixin:
                 results.append({"input_path": file_path, "error": str(e)})
 
         success = sum(1 for r in results if "error" not in r)
-        logger.info(
-            "Batch complete: %d/%d succeeded", success, len(results)
-        )
+        logger.info("Batch complete: %d/%d succeeded", success, len(results))
         return results
 
     def run_streaming(
@@ -73,9 +68,9 @@ class PipelineStreamingMixin:
         input_path: Path,
         output_path: Path,
         output_format: str = "srt",
-        progress_callback: Optional[callable] = None,
+        progress_callback: callable | None = None,
         skip_separation: bool = False,
-        task_id: Optional[str] = None,
+        task_id: str | None = None,
         **overrides,
     ) -> dict:
         """流式模式入口（文档 5.12.5）
@@ -104,7 +99,6 @@ class PipelineStreamingMixin:
             PipelineMode,
             StreamingBuffer,
             StreamingMergeEngine,
-            resolve_streaming_modules,
         )
 
         streaming_cfg = self.config.streaming
@@ -129,7 +123,8 @@ class PipelineStreamingMixin:
         separation_result = None
         if not skip_separation:
             self._progress = ProgressManager(
-                total_stages=1, callback=progress_callback,
+                total_stages=1,
+                callback=progress_callback,
             )
             self._progress.start_stage("separation", description="人声分离")
             separation_result = self._run_separation(input_path)
@@ -171,17 +166,13 @@ class PipelineStreamingMixin:
         # 将整段音频拆分为滑动窗口
         # 注意：当前实现将完整文件加载后模拟流式处理，
         # 真实流式场景中 audio_stream 来自麦克风或网络
-        all_events: List[SubtitleEvent] = []
+        all_events: list[SubtitleEvent] = []
         total_segments = 0
         window_index = 0
 
         total_samples = len(audio)
-        hop_samples = int(
-            pipeline_mode.streaming_chunk_duration * sample_rate
-        )
-        overlap_samples = int(
-            pipeline_mode.streaming_overlap_duration * sample_rate
-        )
+        hop_samples = int(pipeline_mode.streaming_chunk_duration * sample_rate)
+        overlap_samples = int(pipeline_mode.streaming_overlap_duration * sample_rate)
         stride = hop_samples - overlap_samples
         if stride <= 0:
             stride = hop_samples // 2
@@ -206,9 +197,7 @@ class PipelineStreamingMixin:
                 buffer.advance()
                 continue
 
-            window_start_time = (
-                (window_index - 1) * stride / sample_rate
-            )
+            window_start_time = (window_index - 1) * stride / sample_rate
 
             logger.debug(
                 "Streaming window %d: %.1fs → %.1fs (size=%d samples)",
@@ -219,9 +208,9 @@ class PipelineStreamingMixin:
             )
 
             # 为窗口创建临时 WAV
-            import tempfile
             with tempfile.NamedTemporaryFile(
-                suffix=".wav", delete=False,
+                suffix=".wav",
+                delete=False,
             ) as tmp_f:
                 tmp_path = Path(tmp_f.name)
             try:
@@ -266,7 +255,7 @@ class PipelineStreamingMixin:
                         if should_merge:
                             prev.end = curr.end
                             prev.text = f"{prev.text} {curr.text}".strip()
-                            chunk_events = chunk_events[i+1:]
+                            chunk_events = chunk_events[i + 1 :]
                         break
 
             total_segments += chunk_seg_count
@@ -277,7 +266,7 @@ class PipelineStreamingMixin:
         # ---- 后处理 ----
         # 去重（重叠窗口可能产生重复事件）
         if len(all_events) > 1:
-            deduped: List[SubtitleEvent] = [all_events[0]]
+            deduped: list[SubtitleEvent] = [all_events[0]]
             for evt in all_events[1:]:
                 if abs(evt.start - deduped[-1].start) < 0.05:
                     # 保留文本更长的
@@ -295,16 +284,16 @@ class PipelineStreamingMixin:
         if active.get("frame_seamless", True):
             try:
                 from ..merging.llm_merge_engine import apply_frame_seamless_stitching
+
                 stitch_gap = self.config.subtitle.max_stitch_gap
                 all_events = apply_frame_seamless_stitching(
-                    all_events, max_stitch_gap=stitch_gap,
+                    all_events,
+                    max_stitch_gap=stitch_gap,
                 )
             except Exception as e:
                 logger.warning("Frame seamless stitching failed: %s", e)
 
-        all_events = self._finalize_events(
-            all_events, stats, stats.duration_seconds
-        )
+        all_events = self._finalize_events(all_events, stats, stats.duration_seconds)
         stats.segment_count = total_segments
         stats.total_time = time.time() - start_time
 
@@ -314,7 +303,9 @@ class PipelineStreamingMixin:
 
         logger.info(
             "Streaming pipeline complete: %.1fs total, %d windows, %d events",
-            stats.total_time, window_index, stats.subtitle_count,
+            stats.total_time,
+            window_index,
+            stats.subtitle_count,
         )
 
         return {
@@ -322,11 +313,14 @@ class PipelineStreamingMixin:
             "stats": stats,
             "events": all_events,
             "from_cache": False,
-            "vocals_path": str(separation_result.vocals_path) if separation_result else None,
-            "accompaniment_path": str(separation_result.accompaniment_path) if separation_result else None,
+            "vocals_path": str(separation_result.vocals_path)
+            if separation_result
+            else None,
+            "accompaniment_path": str(separation_result.accompaniment_path)
+            if separation_result
+            else None,
         }
 
     # ------------------------------------------------------------------
     # Stage 实现方法
     # ------------------------------------------------------------------
-

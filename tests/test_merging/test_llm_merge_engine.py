@@ -1,14 +1,13 @@
 """测试 LLM 语义合并引擎 (方案五) 和帧级无缝衔接 (3.7)"""
 
-import numpy as np
 import pytest
 
+from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 from vocal_subtitle.merging.llm_merge_engine import (
     LLMMergeEngine,
     MergeDecisionConfig,
     apply_frame_seamless_stitching,
 )
-from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 
 
 class TestLLMMergeEngineFastPath:
@@ -16,22 +15,38 @@ class TestLLMMergeEngineFastPath:
 
     @pytest.fixture
     def engine(self):
-        return LLMMergeEngine(MergeDecisionConfig(
-            fast_merge_max_gap=0.20,
-            llm_decision_min_gap=0.20,
-            llm_decision_max_gap=1.20,
-            hard_split_min_gap=1.20,
-            max_combined_duration=5.0,
-            llm_tier="rule_only",  # 纯规则，不调 LLM
-        ))
+        return LLMMergeEngine(
+            MergeDecisionConfig(
+                fast_merge_max_gap=0.20,
+                llm_decision_min_gap=0.20,
+                llm_decision_max_gap=1.20,
+                hard_split_min_gap=1.20,
+                max_combined_duration=5.0,
+                llm_tier="rule_only",  # 纯规则，不调 LLM
+            )
+        )
 
     def test_fast_merge_short_gap_same_speaker(self, engine):
         """间隔 < 200ms 且同一说话人 → 应合并"""
         fragments = [
-            {"id": 1, "start": 0.0, "end": 1.0, "text": "Hello,", "speaker": "A",
-             "gap_to_next_sec": 0.15, "gap_is_silent": True},
-            {"id": 2, "start": 1.15, "end": 2.0, "text": "world", "speaker": "A",
-             "gap_to_next_sec": None, "gap_is_silent": None},
+            {
+                "id": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "Hello,",
+                "speaker": "A",
+                "gap_to_next_sec": 0.15,
+                "gap_is_silent": True,
+            },
+            {
+                "id": 2,
+                "start": 1.15,
+                "end": 2.0,
+                "text": "world",
+                "speaker": "A",
+                "gap_to_next_sec": None,
+                "gap_is_silent": None,
+            },
         ]
         # 补齐间隙信息
         fragments = engine._ensure_gap_info(fragments)
@@ -43,10 +58,24 @@ class TestLLMMergeEngineFastPath:
     def test_no_merge_large_gap(self, engine):
         """间隔 > 200ms → 不在快路径处理范围"""
         fragments = [
-            {"id": 1, "start": 0.0, "end": 1.0, "text": "Hello.", "speaker": "A",
-             "gap_to_next_sec": 0.50, "gap_is_silent": True},
-            {"id": 2, "start": 1.50, "end": 2.5, "text": "World.", "speaker": "A",
-             "gap_to_next_sec": None, "gap_is_silent": None},
+            {
+                "id": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "Hello.",
+                "speaker": "A",
+                "gap_to_next_sec": 0.50,
+                "gap_is_silent": True,
+            },
+            {
+                "id": 2,
+                "start": 1.50,
+                "end": 2.5,
+                "text": "World.",
+                "speaker": "A",
+                "gap_to_next_sec": None,
+                "gap_is_silent": None,
+            },
         ]
         fragments = engine._ensure_gap_info(fragments)
         result = engine._apply_fast_merges(fragments)
@@ -56,10 +85,24 @@ class TestLLMMergeEngineFastPath:
     def test_no_merge_different_speaker(self, engine):
         """不同说话人不合并（即使间隔小）"""
         fragments = [
-            {"id": 1, "start": 0.0, "end": 1.0, "text": "Hello?", "speaker": "A",
-             "gap_to_next_sec": 0.10, "gap_is_silent": True},
-            {"id": 2, "start": 1.10, "end": 2.0, "text": "Yes.", "speaker": "B",
-             "gap_to_next_sec": None, "gap_is_silent": None},
+            {
+                "id": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "Hello?",
+                "speaker": "A",
+                "gap_to_next_sec": 0.10,
+                "gap_is_silent": True,
+            },
+            {
+                "id": 2,
+                "start": 1.10,
+                "end": 2.0,
+                "text": "Yes.",
+                "speaker": "B",
+                "gap_to_next_sec": None,
+                "gap_is_silent": None,
+            },
         ]
         fragments = engine._ensure_gap_info(fragments)
         result = engine._apply_fast_merges(fragments)
@@ -69,10 +112,24 @@ class TestLLMMergeEngineFastPath:
     def test_no_merge_sentence_ending(self, engine):
         """以句尾标点结束的片段不触发快路径合并"""
         fragments = [
-            {"id": 1, "start": 0.0, "end": 1.0, "text": "Done.", "speaker": "A",
-             "gap_to_next_sec": 0.10, "gap_is_silent": True},
-            {"id": 2, "start": 1.10, "end": 2.0, "text": "Next.", "speaker": "A",
-             "gap_to_next_sec": None, "gap_is_silent": None},
+            {
+                "id": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "Done.",
+                "speaker": "A",
+                "gap_to_next_sec": 0.10,
+                "gap_is_silent": True,
+            },
+            {
+                "id": 2,
+                "start": 1.10,
+                "end": 2.0,
+                "text": "Next.",
+                "speaker": "A",
+                "gap_to_next_sec": None,
+                "gap_is_silent": None,
+            },
         ]
         fragments = engine._ensure_gap_info(fragments)
         result = engine._apply_fast_merges(fragments)
@@ -82,10 +139,24 @@ class TestLLMMergeEngineFastPath:
     def test_fast_merge_preserves_start_end(self, engine):
         """快路径合并后 start 取第一个片段，end 取最后一个"""
         fragments = [
-            {"id": 1, "start": 10.0, "end": 12.0, "text": "Part one,", "speaker": "A",
-             "gap_to_next_sec": 0.10, "gap_is_silent": True},
-            {"id": 2, "start": 12.10, "end": 14.0, "text": "part two", "speaker": "A",
-             "gap_to_next_sec": None, "gap_is_silent": None},
+            {
+                "id": 1,
+                "start": 10.0,
+                "end": 12.0,
+                "text": "Part one,",
+                "speaker": "A",
+                "gap_to_next_sec": 0.10,
+                "gap_is_silent": True,
+            },
+            {
+                "id": 2,
+                "start": 12.10,
+                "end": 14.0,
+                "text": "part two",
+                "speaker": "A",
+                "gap_to_next_sec": None,
+                "gap_is_silent": None,
+            },
         ]
         fragments = engine._ensure_gap_info(fragments)
         result = engine._apply_fast_merges(fragments)
@@ -112,8 +183,14 @@ class TestFallbackRuleDecisions:
     def test_comma_ending_merge(self, engine):
         """逗号结尾 + 中短间隙 → 应合并"""
         candidates = [
-            {"id": 1, "start": 0.0, "end": 1.0, "text": "Before ending,",
-             "gap_to_next_sec": 0.30, "gap_is_silent": True},
+            {
+                "id": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "Before ending,",
+                "gap_to_next_sec": 0.30,
+                "gap_is_silent": True,
+            },
         ]
         groups = engine._fallback_rule_decisions(candidates)
         assert len(groups) >= 1
@@ -122,8 +199,14 @@ class TestFallbackRuleDecisions:
     def test_sentence_ending_no_merge(self, engine):
         """句尾标点 + 长间隙 → 不应产生合并组"""
         candidates = [
-            {"id": 1, "start": 0.0, "end": 1.0, "text": "Done.",
-             "gap_to_next_sec": 0.80, "gap_is_silent": True},
+            {
+                "id": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "Done.",
+                "gap_to_next_sec": 0.80,
+                "gap_is_silent": True,
+            },
         ]
         groups = engine._fallback_rule_decisions(candidates)
         # 句尾标点 + gap > 0.4 → 不合并
@@ -132,8 +215,14 @@ class TestFallbackRuleDecisions:
     def test_short_gap_merge(self, engine):
         """短间隙 (<400ms) → 倾向合并"""
         candidates = [
-            {"id": 1, "start": 0.0, "end": 0.8, "text": "Quick",
-             "gap_to_next_sec": 0.25, "gap_is_silent": True},
+            {
+                "id": 1,
+                "start": 0.0,
+                "end": 0.8,
+                "text": "Quick",
+                "gap_to_next_sec": 0.25,
+                "gap_is_silent": True,
+            },
         ]
         groups = engine._fallback_rule_decisions(candidates)
         assert len(groups) >= 1
@@ -141,15 +230,27 @@ class TestFallbackRuleDecisions:
     def test_chinese_punctuation(self, engine):
         """中文标点也正确识别"""
         candidates = [
-            {"id": 1, "start": 0.0, "end": 1.0, "text": "你好，",
-             "gap_to_next_sec": 0.30, "gap_is_silent": True},
+            {
+                "id": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "你好，",
+                "gap_to_next_sec": 0.30,
+                "gap_is_silent": True,
+            },
         ]
         groups = engine._fallback_rule_decisions(candidates)
         assert len(groups) >= 1  # 逗号结尾 → 合并
 
         candidates2 = [
-            {"id": 1, "start": 0.0, "end": 1.0, "text": "你好。",
-             "gap_to_next_sec": 0.80, "gap_is_silent": True},
+            {
+                "id": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "你好。",
+                "gap_to_next_sec": 0.80,
+                "gap_is_silent": True,
+            },
         ]
         groups2 = engine._fallback_rule_decisions(candidates2)
         assert len(groups2) == 0  # 句号结尾 + 长间隙 → 不合并
@@ -179,7 +280,9 @@ class TestBuildMergeInput:
             {"start": 0.7, "end": 1.0, "text": "Second", "speaker": "A"},
         ]
         result = engine.build_merge_input(
-            fragments, audio=sample_audio_speech_silence_mix, sample_rate=16000,
+            fragments,
+            audio=sample_audio_speech_silence_mix,
+            sample_rate=16000,
         )
         assert len(result) == 2
         assert "gap_is_silent" in result[0]
@@ -197,11 +300,13 @@ class TestBuildMergeInput:
 
 
 def test_fast_merge_respects_max_combined_duration():
-    engine = LLMMergeEngine(MergeDecisionConfig(
-        fast_merge_max_gap=0.2,
-        max_combined_duration=5.0,
-        llm_tier="rule_only",
-    ))
+    engine = LLMMergeEngine(
+        MergeDecisionConfig(
+            fast_merge_max_gap=0.2,
+            max_combined_duration=5.0,
+            llm_tier="rule_only",
+        )
+    )
     fragments = [
         {"id": 1, "start": 0.0, "end": 2.0, "text": "one,", "speaker": "A"},
         {"id": 2, "start": 2.1, "end": 4.0, "text": "two,", "speaker": "A"},
@@ -325,7 +430,9 @@ class TestAutoLineBreak:
         """无逗号时应在连词处断行"""
         from vocal_subtitle.merging.llm_merge_engine import auto_line_break_fallback
 
-        text = "Please confirm your reservation and we will send you a confirmation email"
+        text = (
+            "Please confirm your reservation and we will send you a confirmation email"
+        )
         result = auto_line_break_fallback(text, max_chars_per_line=20)
         assert "\\N" in result
 
@@ -354,10 +461,15 @@ class TestAutoLayoutEvents:
         from vocal_subtitle.merging.llm_merge_engine import auto_layout_events
 
         events = [
-            type("FakeEvent", (), {
-                "start": 0.0, "end": 2.0,
-                "text": "Please confirm your reservation details and check the special requests before proceeding",
-            })(),
+            type(
+                "FakeEvent",
+                (),
+                {
+                    "start": 0.0,
+                    "end": 2.0,
+                    "text": "Please confirm your reservation details and check the special requests before proceeding",
+                },
+            )(),
         ]
 
         result = auto_layout_events(events, max_chars_cjk=20, max_chars_latin=40)
@@ -369,9 +481,15 @@ class TestAutoLayoutEvents:
 
         long_cjk = "一二三四五六七八九十一二三四五六七八九十一二三四五"
         events = [
-            type("FakeEvent", (), {
-                "start": 0.0, "end": 2.0, "text": long_cjk,
-            })(),
+            type(
+                "FakeEvent",
+                (),
+                {
+                    "start": 0.0,
+                    "end": 2.0,
+                    "text": long_cjk,
+                },
+            )(),
         ]
 
         result = auto_layout_events(events, max_chars_cjk=20, max_chars_latin=40)
@@ -382,9 +500,15 @@ class TestAutoLayoutEvents:
         from vocal_subtitle.merging.llm_merge_engine import auto_layout_events
 
         events = [
-            type("FakeEvent", (), {
-                "start": 0.0, "end": 1.0, "text": "Hello",
-            })(),
+            type(
+                "FakeEvent",
+                (),
+                {
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "Hello",
+                },
+            )(),
         ]
 
         result = auto_layout_events(events)
@@ -399,21 +523,33 @@ class TestLayoutSuggestions:
         from vocal_subtitle.merging.llm_merge_engine import apply_layout_suggestions
 
         events = [
-            type("FakeEvent", (), {
-                "start": 0.0, "end": 2.0,
-                "text": "Original long text here",
-            })(),
-            type("FakeEvent", (), {
-                "start": 2.5, "end": 4.0,
-                "text": "Another text",
-            })(),
+            type(
+                "FakeEvent",
+                (),
+                {
+                    "start": 0.0,
+                    "end": 2.0,
+                    "text": "Original long text here",
+                },
+            )(),
+            type(
+                "FakeEvent",
+                (),
+                {
+                    "start": 2.5,
+                    "end": 4.0,
+                    "text": "Another text",
+                },
+            )(),
         ]
 
-        suggestions = [{
-            "group_id": 0,
-            "line1": "Original long",
-            "line2": "text here",
-        }]
+        suggestions = [
+            {
+                "group_id": 0,
+                "line1": "Original long",
+                "line2": "text here",
+            }
+        ]
 
         result = apply_layout_suggestions(events, suggestions)
         assert "\\N" in result[0].text
@@ -425,9 +561,15 @@ class TestLayoutSuggestions:
         from vocal_subtitle.merging.llm_merge_engine import apply_layout_suggestions
 
         events = [
-            type("FakeEvent", (), {
-                "start": 0.0, "end": 2.0, "text": "Test text",
-            })(),
+            type(
+                "FakeEvent",
+                (),
+                {
+                    "start": 0.0,
+                    "end": 2.0,
+                    "text": "Test text",
+                },
+            )(),
         ]
 
         suggestions = [{"group_id": 99, "line1": "X", "line2": "Y"}]
@@ -440,22 +582,38 @@ class TestSameSpeakerShortGapMerge:
 
     @pytest.fixture
     def engine(self):
-        return LLMMergeEngine(MergeDecisionConfig(
-            fast_merge_max_gap=0.30,
-            llm_decision_min_gap=0.30,
-            llm_decision_max_gap=1.20,
-            hard_split_min_gap=1.20,
-            max_combined_duration=5.0,
-            llm_tier="rule_only",
-        ))
+        return LLMMergeEngine(
+            MergeDecisionConfig(
+                fast_merge_max_gap=0.30,
+                llm_decision_min_gap=0.30,
+                llm_decision_max_gap=1.20,
+                hard_split_min_gap=1.20,
+                max_combined_duration=5.0,
+                llm_tier="rule_only",
+            )
+        )
 
     def test_chinese_fragments_merge_without_space(self, engine):
         """同说话人 + 210ms 间隔 → 合并且 CJK 直接相连不加空格（用户实测案例）"""
         fragments = [
-            {"id": 1, "start": 12.516, "end": 12.716, "text": "得", "speaker": "说话人A",
-             "gap_to_next_sec": 0.21, "gap_is_silent": True},
-            {"id": 2, "start": 12.926, "end": 13.126, "text": "了吧。", "speaker": "说话人A",
-             "gap_to_next_sec": None, "gap_is_silent": None},
+            {
+                "id": 1,
+                "start": 12.516,
+                "end": 12.716,
+                "text": "得",
+                "speaker": "说话人A",
+                "gap_to_next_sec": 0.21,
+                "gap_is_silent": True,
+            },
+            {
+                "id": 2,
+                "start": 12.926,
+                "end": 13.126,
+                "text": "了吧。",
+                "speaker": "说话人A",
+                "gap_to_next_sec": None,
+                "gap_is_silent": None,
+            },
         ]
         result = engine.merge(fragments)
 
@@ -467,10 +625,24 @@ class TestSameSpeakerShortGapMerge:
     def test_latin_fragments_keep_space(self, engine):
         """拉丁文本同说话人合并保持空格分隔"""
         fragments = [
-            {"id": 1, "start": 0.0, "end": 1.0, "text": "hello", "speaker": "A",
-             "gap_to_next_sec": 0.25, "gap_is_silent": True},
-            {"id": 2, "start": 1.25, "end": 2.0, "text": "world", "speaker": "A",
-             "gap_to_next_sec": None, "gap_is_silent": None},
+            {
+                "id": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "hello",
+                "speaker": "A",
+                "gap_to_next_sec": 0.25,
+                "gap_is_silent": True,
+            },
+            {
+                "id": 2,
+                "start": 1.25,
+                "end": 2.0,
+                "text": "world",
+                "speaker": "A",
+                "gap_to_next_sec": None,
+                "gap_is_silent": None,
+            },
         ]
         result = engine.merge(fragments)
 
@@ -480,10 +652,24 @@ class TestSameSpeakerShortGapMerge:
     def test_different_speaker_same_short_gap_not_merged(self, engine):
         """同为 210ms 短间隔但说话人不同 → 不合并（防跨说话人粘连）"""
         fragments = [
-            {"id": 1, "start": 12.516, "end": 12.716, "text": "得", "speaker": "说话人A",
-             "gap_to_next_sec": 0.21, "gap_is_silent": True},
-            {"id": 2, "start": 12.926, "end": 13.126, "text": "了吧。", "speaker": "说话人B",
-             "gap_to_next_sec": None, "gap_is_silent": None},
+            {
+                "id": 1,
+                "start": 12.516,
+                "end": 12.716,
+                "text": "得",
+                "speaker": "说话人A",
+                "gap_to_next_sec": 0.21,
+                "gap_is_silent": True,
+            },
+            {
+                "id": 2,
+                "start": 12.926,
+                "end": 13.126,
+                "text": "了吧。",
+                "speaker": "说话人B",
+                "gap_to_next_sec": None,
+                "gap_is_silent": None,
+            },
         ]
         result = engine.merge(fragments)
 

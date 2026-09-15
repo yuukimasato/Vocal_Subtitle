@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -57,11 +57,13 @@ class SpeakerChangeSignal:
     signal_type: str
     confidence: float
     source: str = "acoustic"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.start < 0 or self.end < self.start:
-            raise ValueError(f"signal must have 0 <= start <= end: {self.start=}, {self.end=}")
+            raise ValueError(
+                f"signal must have 0 <= start <= end: {self.start=}, {self.end=}"
+            )
         if not self.signal_type or self.signal_type not in _VALID_SIGNAL_TYPES:
             raise ValueError(
                 f"signal_type must be one of {sorted(_VALID_SIGNAL_TYPES)}, got {self.signal_type!r}"
@@ -85,7 +87,7 @@ class SpeakerChangeSignal:
         """是否为强信号（可直接参与硬边界判定）。"""
         return self.signal_type in ("embedding_distance", "feature_divergence")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "start": self.start,
             "end": self.end,
@@ -100,13 +102,13 @@ class SpeakerChangeSignal:
 class SpeakerChangeResult:
     """多特征融合后的说话人变更判断。"""
 
-    signals: Tuple[SpeakerChangeSignal, ...] = ()
+    signals: tuple[SpeakerChangeSignal, ...] = ()
     is_hard_boundary: bool = False
     confidence: float = 0.0
     signal_type: str = "insufficient_data"
-    evidence_ids: Tuple[str, ...] = ()
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
-    _change_time: Optional[float] = None
+    evidence_ids: tuple[str, ...] = ()
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+    _change_time: float | None = None
 
     @property
     def before_start(self) -> float | None:
@@ -127,7 +129,7 @@ class SpeakerChangeResult:
         """The time of the speaker change (transition between before and after)."""
         return self._change_time
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "signals": [s.to_dict() for s in self.signals],
             "is_hard_boundary": self.is_hard_boundary,
@@ -163,7 +165,9 @@ class SpeakerChangeConfig:
         if self.hard_boundary_threshold < 0.5 or self.hard_boundary_threshold > 1.0:
             raise ValueError("hard_boundary_threshold must be in [0.5, 1]")
         if self.candidate_threshold >= self.hard_boundary_threshold:
-            raise ValueError("candidate_threshold must be less than hard_boundary_threshold")
+            raise ValueError(
+                "candidate_threshold must be less than hard_boundary_threshold"
+            )
         if self.min_signal_duration <= 0:
             raise ValueError("min_signal_duration must be > 0")
         if self.min_samples_for_mahalanobis < 5:
@@ -171,7 +175,6 @@ class SpeakerChangeConfig:
 
 
 # ── 音量突变检测 ──────────────────────────────────────────────────────
-
 
 
 def detect_volume_surge(
@@ -204,15 +207,21 @@ def detect_volume_surge(
         if rms_after > 1e-8:
             # 从静音到有声的"突变"不视为 speaker 变更信号
             return SpeakerChangeSignal(
-                start=0.0, end=0.0,
+                start=0.0,
+                end=0.0,
                 signal_type="rms_surge",
                 confidence=0.15,
                 source="rms",
-                metadata={"rms_before": rms_before, "rms_after": rms_after,
-                          "ratio": float("inf"), "note": "silence_to_speech"},
+                metadata={
+                    "rms_before": rms_before,
+                    "rms_after": rms_after,
+                    "ratio": float("inf"),
+                    "note": "silence_to_speech",
+                },
             )
         return SpeakerChangeSignal(
-            start=0.0, end=0.0,
+            start=0.0,
+            end=0.0,
             signal_type="rms_stable",
             confidence=0.0,
             source="rms",
@@ -223,7 +232,8 @@ def detect_volume_surge(
     if ratio >= surge_ratio:
         confidence = min(0.4, (ratio - surge_ratio) / (surge_ratio * 3))
         return SpeakerChangeSignal(
-            start=0.0, end=0.0,
+            start=0.0,
+            end=0.0,
             signal_type="rms_surge",
             confidence=round(confidence, 3),
             source="rms",
@@ -231,7 +241,8 @@ def detect_volume_surge(
         )
 
     return SpeakerChangeSignal(
-        start=0.0, end=0.0,
+        start=0.0,
+        end=0.0,
         signal_type="rms_stable",
         confidence=0.0,
         source="rms",
@@ -246,9 +257,9 @@ def detect_speaker_change_from_features(
     features_before: np.ndarray,
     features_after: np.ndarray,
     *,
-    time1: Tuple[float, float] = (0.0, 0.0),
-    time2: Tuple[float, float] = (0.0, 0.0),
-    config: Optional[SpeakerChangeConfig] = None,
+    time1: tuple[float, float] = (0.0, 0.0),
+    time2: tuple[float, float] = (0.0, 0.0),
+    config: SpeakerChangeConfig | None = None,
 ) -> SpeakerChangeResult:
     """基于声学特征向量检测说话人变更。
 
@@ -317,10 +328,14 @@ def detect_speaker_change_from_features(
     cosine_distance = max(0.0, 1.0 - cosine_sim)
     cosine_confidence = min(1.0, cosine_distance / 0.3)  # 0.3 余弦距离 → 1.0 置信度
 
-    signals: List[SpeakerChangeSignal] = []
+    signals: list[SpeakerChangeSignal] = []
 
     if cosine_confidence >= cfg.candidate_threshold:
-        signal_type = "embedding_distance" if features_before.shape[1] >= 50 else "feature_divergence"
+        signal_type = (
+            "embedding_distance"
+            if features_before.shape[1] >= 50
+            else "feature_divergence"
+        )
         signals.append(
             SpeakerChangeSignal(
                 start=time1[0],
@@ -349,7 +364,9 @@ def detect_speaker_change_from_features(
         )
 
     # 融合判定
-    has_strong = any(s.is_strong and s.confidence >= cfg.hard_boundary_threshold for s in signals)
+    has_strong = any(
+        s.is_strong and s.confidence >= cfg.hard_boundary_threshold for s in signals
+    )
     has_candidate = any(s.confidence >= cfg.candidate_threshold for s in signals)
 
     if has_strong:
@@ -394,7 +411,7 @@ def compute_mahalanobis_distance(
     *,
     min_samples: int = 20,
     regularization: float = 1e-4,
-) -> Optional[float]:
+) -> float | None:
     """计算两组特征的马氏距离（当样本充足时）。
 
     仅在每个集合的帧数 >= min_samples 时计算，

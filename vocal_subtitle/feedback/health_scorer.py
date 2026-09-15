@@ -6,7 +6,6 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -25,7 +24,7 @@ class HealthScoreResult:
     time_iou: float  # 时间 IoU 均值得分
     structure_consistency: float  # 结构一致性得分（1:1 占比）
     total_pairs: int = 0
-    detail_breakdown: Dict[str, float] = field(default_factory=dict)
+    detail_breakdown: dict[str, float] = field(default_factory=dict)
 
     @property
     def is_healthy(self) -> bool:
@@ -51,10 +50,10 @@ WEIGHT_STRUCTURE = 0.10
 
 
 def compute_health_score(
-    auto_events: List,
-    manual_events: List,
-    aligner: Optional[SubtitleAligner] = None,
-) -> Tuple[float, Dict[str, float]]:
+    auto_events: list,
+    manual_events: list,
+    aligner: SubtitleAligner | None = None,
+) -> tuple[float, dict[str, float]]:
     """计算字幕质量的综合健康度评分
 
     基于自动版和修订版字幕之间的对齐结果，
@@ -83,10 +82,10 @@ def compute_health_score(
 
 
 def compute_health_score_from_pairs(
-    pairs: List[AlignmentPair],
-    n_auto: Optional[int] = None,
-    n_manual: Optional[int] = None,
-) -> Tuple[float, Dict[str, float]]:
+    pairs: list[AlignmentPair],
+    n_auto: int | None = None,
+    n_manual: int | None = None,
+) -> tuple[float, dict[str, float]]:
     """直接从已对齐的 pairs 计算健康度评分
 
     Args:
@@ -112,10 +111,10 @@ def compute_health_score_from_pairs(
 
 
 def _compute_from_pairs(
-    pairs: List[AlignmentPair],
+    pairs: list[AlignmentPair],
     n_auto: int,
     n_manual: int,
-) -> Tuple[float, Dict[str, float]]:
+) -> tuple[float, dict[str, float]]:
     """核心计算逻辑"""
     if not pairs:
         return 0.0, {
@@ -139,11 +138,7 @@ def _compute_from_pairs(
     score_semantic = (float(np.mean(semantic_sims)) * 100) if semantic_sims else 0.0
 
     # 子项 3: 时间 IoU 均值 (权重 20%)
-    time_ious = [
-        p.time_iou
-        for p in pairs
-        if p.is_matched and p.time_iou > 0
-    ]
+    time_ious = [p.time_iou for p in pairs if p.is_matched and p.time_iou > 0]
     score_time = (float(np.mean(time_ious)) * 100) if time_ious else 0.0
 
     # 子项 4: 结构一致性 (权重 10%)
@@ -173,7 +168,7 @@ def should_auto_rollback(
     health_before: float,
     health_after: float,
     drop_threshold: float = 0.3,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """判断是否应自动触发回滚
 
     条件: health_after < health_before * (1 - drop_threshold)
@@ -193,21 +188,21 @@ def should_auto_rollback(
 
     if relative_change <= -drop_threshold:
         return True, (
-            f"Health score dropped {abs(relative_change)*100:.0f}% "
+            f"Health score dropped {abs(relative_change) * 100:.0f}% "
             f"({health_before:.1f} → {health_after:.1f}), "
-            f"exceeding threshold of {drop_threshold*100:.0f}%"
+            f"exceeding threshold of {drop_threshold * 100:.0f}%"
         )
 
     return False, (
-        f"Health change: {relative_change*100:+.1f}% "
+        f"Health change: {relative_change * 100:+.1f}% "
         f"({health_before:.1f} → {health_after:.1f}) — within acceptable range"
     )
 
 
 def health_score_result(
-    auto_events: List,
-    manual_events: List,
-    aligner: Optional[SubtitleAligner] = None,
+    auto_events: list,
+    manual_events: list,
+    aligner: SubtitleAligner | None = None,
 ) -> HealthScoreResult:
     """计算并返回结构化的健康度结果"""
     overall, detail = compute_health_score(auto_events, manual_events, aligner)

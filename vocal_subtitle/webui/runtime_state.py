@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from ..utils.task_history import TaskHistoryManager
 from .websocket import ws_manager
 
-_DEFAULT_TASK_STORE: Dict[str, Dict[str, Any]] = {}
-_DEFAULT_SHADOW_EVALUATORS: Dict[str, Any] = {}
+_DEFAULT_TASK_STORE: dict[str, dict[str, Any]] = {}
+_DEFAULT_SHADOW_EVALUATORS: dict[str, Any] = {}
 _DEFAULT_TASK_HISTORY = TaskHistoryManager()
 _DEFAULT_UPLOAD_DIR = Path(__file__).parent.parent.parent / "cache" / "uploads"
 _DEFAULT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -30,12 +30,12 @@ class WebUIRuntimeState:
     """Compatibility-aware access to process-local WebUI state."""
 
     @property
-    def task_store(self) -> Dict[str, Dict[str, Any]]:
+    def task_store(self) -> dict[str, dict[str, Any]]:
         api = _legacy_api()
         return getattr(api, "_task_store", _DEFAULT_TASK_STORE)
 
     @property
-    def shadow_evaluators(self) -> Dict[str, Any]:
+    def shadow_evaluators(self) -> dict[str, Any]:
         api = _legacy_api()
         return getattr(api, "_shadow_evaluators", _DEFAULT_SHADOW_EVALUATORS)
 

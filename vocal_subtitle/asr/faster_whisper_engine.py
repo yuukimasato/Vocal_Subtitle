@@ -7,8 +7,6 @@
 """
 
 import logging
-import os
-from typing import List, Optional
 
 import numpy as np
 
@@ -116,8 +114,7 @@ class FasterWhisperEngine(ASREngine):
                 )
         except ImportError:
             raise ImportError(
-                "faster-whisper is required. "
-                "Install with: pip install faster-whisper"
+                "faster-whisper is required. Install with: pip install faster-whisper"
             )
         except Exception as e:
             logger.error("Failed to load faster-whisper model: %s", e)
@@ -127,7 +124,7 @@ class FasterWhisperEngine(ASREngine):
         self,
         audio: np.ndarray,
         sample_rate: int = 16000,
-    ) -> Optional[str]:
+    ) -> str | None:
         """检测音频语言（利用 Whisper 编码器做全局语言检测）
 
         对前 30 秒音频运行一次轻量识别，从中提取检测到的语言代码。
@@ -160,16 +157,17 @@ class FasterWhisperEngine(ASREngine):
         try:
             _, info = self._model.transcribe(
                 sample,
-                language=None,           # 触发自动检测
-                beam_size=1,             # 最小 beam，只关心语言检测
-                word_timestamps=False,   # 不需要词级时间戳
+                language=None,  # 触发自动检测
+                beam_size=1,  # 最小 beam，只关心语言检测
+                word_timestamps=False,  # 不需要词级时间戳
                 condition_on_previous_text=False,
                 vad_filter=False,
             )
             detected = info.language
             logger.info(
                 "Language detected: %s (probability=%.2f)",
-                detected, info.language_probability,
+                detected,
+                info.language_probability,
             )
             return detected
         except Exception as e:
@@ -208,9 +206,9 @@ class FasterWhisperEngine(ASREngine):
         self,
         audio: np.ndarray,
         sample_rate: int = 16000,
-        language: Optional[str] = None,
+        language: str | None = None,
         **kwargs,
-    ) -> List[TranscriptionSegment]:
+    ) -> list[TranscriptionSegment]:
         """识别音频
 
         Args:
@@ -267,7 +265,9 @@ class FasterWhisperEngine(ASREngine):
                         words=words,
                         avg_logprob=seg.avg_logprob,
                         language=getattr(info, "language", None),
-                        language_probability=getattr(info, "language_probability", None),
+                        language_probability=getattr(
+                            info, "language_probability", None
+                        ),
                         no_speech_prob=getattr(seg, "no_speech_prob", None),
                         compression_ratio=getattr(seg, "compression_ratio", None),
                     )

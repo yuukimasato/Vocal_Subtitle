@@ -7,11 +7,9 @@
 """
 
 import inspect
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 
 from vocal_subtitle.config import ConfigLoader
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
@@ -56,13 +54,11 @@ def test_run_signature_keeps_current_parameters():
         name
         for name, param in signature.parameters.items()
         if name != "self"
-        and param.kind
-        in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD)
+        and param.kind in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD)
     ]
     assert tuple(positional) == RUN_PARAMS
     assert any(
-        param.kind is param.VAR_KEYWORD
-        for param in signature.parameters.values()
+        param.kind is param.VAR_KEYWORD for param in signature.parameters.values()
     ), "run() 必须保留 **overrides 兼容入口"
 
 
@@ -115,8 +111,9 @@ def _prepare_run(monkeypatch, tmp_path):
     pipeline._finalize_events = lambda events, stats, duration: events
     pipeline._get_subtitle_builder = lambda: object()
     pipeline._export_subtitles_multi_format = (
-        lambda builder, events, output_path, output_format, session_dir, label:
-        {output_format: str(output_path)}
+        lambda builder, events, output_path, output_format, session_dir, label: {
+            output_format: str(output_path)
+        }
     )
     return pipeline, input_path
 
@@ -138,12 +135,12 @@ def test_run_returns_established_result_contract(monkeypatch, tmp_path):
         quality_gate_version="asr-quality-v1",
         to_dict=lambda: {},
     )
-    pipeline._run_offline_production_review = (
-        lambda events, **kwargs: events
-    )
+    pipeline._run_offline_production_review = lambda events, **kwargs: events
 
     result = pipeline.run(
-        input_path, output_path=tmp_path / "out.srt", skip_separation=True,
+        input_path,
+        output_path=tmp_path / "out.srt",
+        skip_separation=True,
     )
 
     assert RUN_RESULT_KEYS.issubset(result.keys())
@@ -167,7 +164,7 @@ def test_final_events_have_no_adjacent_overlap():
 
     events = [
         _event("one", 0.0, 1.0),
-        _event("two", 0.8, 1.5),   # 与前一条重叠 → 必须被修复
+        _event("two", 0.8, 1.5),  # 与前一条重叠 → 必须被修复
         _event("three", 1.5, 2.0),
     ]
 
@@ -177,4 +174,6 @@ def test_final_events_have_no_adjacent_overlap():
     ordered = sorted(repaired, key=lambda item: (item.start, item.end))
     for previous, current in zip(ordered, ordered[1:]):
         assert current.start >= previous.start
-        assert current.end <= current.start + 1e-9 or current.start >= previous.end - 1e-9
+        assert (
+            current.end <= current.start + 1e-9 or current.start >= previous.end - 1e-9
+        )

@@ -12,21 +12,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 
 @dataclass
 class DisplayTimelineConfig:
     """显示时间轴映射配置。"""
 
-    max_lead_ms: float = 150.0          # 最大前导静音窗口（ms）
-    max_trail_ms: float = 150.0         # 最大尾随静音窗口（ms）
+    max_lead_ms: float = 150.0  # 最大前导静音窗口（ms）
+    max_trail_ms: float = 150.0  # 最大尾随静音窗口（ms）
     min_reading_duration_ms: float = 600.0  # 最短阅读时间（ms）
     max_reading_duration_ms: float = 6000.0  # 最长阅读时间（ms）
-    silence_snap_threshold_ms: float = 50.0   # 静音吸附阈值（ms）
-    cps_cjk: float = 5.0                # 中文字速（字符/秒）
-    cps_latin: float = 12.0             # 拉丁字速（字符/秒）
+    silence_snap_threshold_ms: float = 50.0  # 静音吸附阈值（ms）
+    cps_cjk: float = 5.0  # 中文字速（字符/秒）
+    cps_latin: float = 12.0  # 拉丁字速（字符/秒）
 
     def __post_init__(self) -> None:
         if self.max_lead_ms < 0:
@@ -36,7 +37,9 @@ class DisplayTimelineConfig:
         if self.min_reading_duration_ms <= 0:
             raise ValueError("min_reading_duration_ms must be > 0")
         if self.max_reading_duration_ms < self.min_reading_duration_ms:
-            raise ValueError("max_reading_duration_ms must be >= min_reading_duration_ms")
+            raise ValueError(
+                "max_reading_duration_ms must be >= min_reading_duration_ms"
+            )
 
 
 @dataclass
@@ -49,14 +52,14 @@ class DisplayCue:
     display_start: float
     display_end: float
     text: str
-    speaker_id: Optional[int] = None
-    speaker_label: Optional[str] = None
+    speaker_id: int | None = None
+    speaker_label: str | None = None
     timing_degraded: bool = False
-    source_word_ids: List[str] = field(default_factory=list)
-    physical_spans: List[Dict[str, Any]] = field(default_factory=list)
-    overlap_group_id: Optional[str] = None
-    warnings: List[str] = field(default_factory=list)
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    source_word_ids: list[str] = field(default_factory=list)
+    physical_spans: list[dict[str, Any]] = field(default_factory=list)
+    overlap_group_id: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.physical_start < 0 or self.physical_end <= self.physical_start:
@@ -73,7 +76,7 @@ class DisplayCue:
     def duration_ms(self) -> float:
         return (self.display_end - self.display_start) * 1000.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "index": self.index,
             "physical_start": self.physical_start,
@@ -93,11 +96,11 @@ class DisplayCue:
 
 
 def map_to_display_timeline(
-    semantic_groups: Sequence[Dict[str, Any]],
+    semantic_groups: Sequence[dict[str, Any]],
     *,
-    config: Optional[DisplayTimelineConfig] = None,
-    audio_duration: Optional[float] = None,
-) -> List[DisplayCue]:
+    config: DisplayTimelineConfig | None = None,
+    audio_duration: float | None = None,
+) -> list[DisplayCue]:
     """将语义分组映射为显示时间轴的 DisplayCue 列表。
 
     Args:
@@ -117,7 +120,7 @@ def map_to_display_timeline(
     max_trail = cfg.max_trail_ms / 1000.0
     min_reading = cfg.min_reading_duration_ms / 1000.0
 
-    cues: List[DisplayCue] = []
+    cues: list[DisplayCue] = []
 
     for group in semantic_groups:
         physical_start = float(group["physical_start"])
@@ -148,7 +151,9 @@ def map_to_display_timeline(
             extension_needed = min_reading - (display_end - display_start)
             display_end = min(
                 display_end + extension_needed,
-                audio_duration if audio_duration is not None else display_end + extension_needed,
+                audio_duration
+                if audio_duration is not None
+                else display_end + extension_needed,
             )
 
         # 夹持到音频范围
@@ -159,18 +164,28 @@ def map_to_display_timeline(
         if display_end <= display_start:
             display_end = display_start + min_reading
 
-        # 检查跨 speaker 约束
+        # 检查跨 cue 重叠：同人 cue 同样受检（此前仅不同 speaker 检查，
+        # 同人物理区间重叠时无任何标记）。display 时间对非降级 cue 恒
+        # 等于物理时间，物理区间重叠时无法在不破坏 cover 规则的前提
+        # 下让界，此处只收敛前导并标注告警，真正的裁剪由事件层的
+        # final_validator / enforce_non_overlap 完成。
         warnings = list(group.get("warnings", []))
         if cues:
             prev = cues[-1]
             prev_speaker = prev.speaker_id
             this_speaker = group.get("speaker_id")
-            if (prev_speaker is not None and this_speaker is not None
-                    and prev_speaker != this_speaker
-                    and display_start < prev.display_end):
+            different_speaker = (
+                prev_speaker is not None
+                and this_speaker is not None
+                and prev_speaker != this_speaker
+            )
+            if display_start < prev.display_end:
                 # 不同 speaker 时优先人声边界
                 display_start = min(display_start, physical_start)
-                warnings.append("speaker_boundary_display_conflict")
+                if different_speaker:
+                    warnings.append("speaker_boundary_display_conflict")
+                else:
+                    warnings.append("same_speaker_display_overlap")
 
         cue = DisplayCue(
             index=index,

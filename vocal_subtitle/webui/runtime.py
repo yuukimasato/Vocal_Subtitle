@@ -12,8 +12,9 @@ import signal
 import sys
 import threading
 import traceback
+from collections.abc import Callable
 from types import FrameType
-from typing import Any, Callable
+from typing import Any
 
 import uvicorn
 

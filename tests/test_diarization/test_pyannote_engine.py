@@ -1,7 +1,5 @@
 """pyannote backend contract tests without loading the optional model."""
 
-from pathlib import Path
-
 import pytest
 
 from vocal_subtitle.diarization.pyannote_engine import PyannoteDiarizationEngine
@@ -40,11 +38,7 @@ def test_overlap_duration_only_counts_different_speakers():
 
 
 def test_local_model_config_prefers_huggingface_snapshot(tmp_path, monkeypatch):
-    model_dir = (
-        tmp_path
-        / "hub"
-        / "models--pyannote--speaker-diarization-community-1"
-    )
+    model_dir = tmp_path / "hub" / "models--pyannote--speaker-diarization-community-1"
     revision = "local-revision"
     snapshot = model_dir / "snapshots" / revision
     snapshot.mkdir(parents=True)
@@ -59,11 +53,7 @@ def test_local_model_config_prefers_huggingface_snapshot(tmp_path, monkeypatch):
 
 
 def test_load_model_uses_local_snapshot_before_huggingface(monkeypatch, tmp_path):
-    model_dir = (
-        tmp_path
-        / "hub"
-        / "models--pyannote--speaker-diarization-community-1"
-    )
+    model_dir = tmp_path / "hub" / "models--pyannote--speaker-diarization-community-1"
     revision = "local-revision"
     snapshot = model_dir / "snapshots" / revision
     snapshot.mkdir(parents=True)

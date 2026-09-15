@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
 
 import numpy as np
 
@@ -34,7 +33,7 @@ class AudioBuffer:
         view.setflags(write=False)
         return view
 
-    def with_sample_rate(self, sample_rate: int, data: np.ndarray) -> "AudioBuffer":
+    def with_sample_rate(self, sample_rate: int, data: np.ndarray) -> AudioBuffer:
         """重采样结果的派生缓冲(显式传入新数据,不隐式转换)。"""
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")

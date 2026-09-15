@@ -7,23 +7,27 @@ from vocal_subtitle.quality.golden_gate import (
 
 def test_golden_gate_reports_production_metrics_and_required_categories():
     report = evaluate_golden_set(
-        [{
-            "id": "zh-dialogue",
-            "categories": ["chinese", "multi_speaker"],
-            "expected_events": [
-                {"start": 0.0, "end": 1.0, "text": "你好", "kind": "speech"},
-                {"start": 2.0, "end": 2.5, "text": "music", "kind": "non_speech"},
-            ],
-            "predicted_events": [
-                {"start": 0.0, "end": 1.0, "text": "你好"},
-            ],
-            "decisions": [{"decision": "keep", "revision_trace": [{"stage": "test"}]}],
-            "diagnostics": {
-                "physical_violation_count": 0,
-                "cross_silence_count": 0,
-                "raw_event_bypass_count": 0,
-            },
-        }],
+        [
+            {
+                "id": "zh-dialogue",
+                "categories": ["chinese", "multi_speaker"],
+                "expected_events": [
+                    {"start": 0.0, "end": 1.0, "text": "你好", "kind": "speech"},
+                    {"start": 2.0, "end": 2.5, "text": "music", "kind": "non_speech"},
+                ],
+                "predicted_events": [
+                    {"start": 0.0, "end": 1.0, "text": "你好"},
+                ],
+                "decisions": [
+                    {"decision": "keep", "revision_trace": [{"stage": "test"}]}
+                ],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            }
+        ],
         required_categories=["chinese", "multi_speaker"],
     )
 
@@ -33,17 +37,24 @@ def test_golden_gate_reports_production_metrics_and_required_categories():
 
 
 def test_golden_gate_blocks_hallucination_retention_and_raw_bypass():
-    report = evaluate_golden_set([{
-        "categories": ["non_speech"],
-        "expected_events": [{"start": 0.0, "end": 1.0, "text": "music", "kind": "non_speech"}],
-        "predicted_events": [{"start": 0.0, "end": 1.0, "text": "music"}],
-        "decisions": [{"decision": "drop"}],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 1,
-        },
-    }], required_categories=["english"])
+    report = evaluate_golden_set(
+        [
+            {
+                "categories": ["non_speech"],
+                "expected_events": [
+                    {"start": 0.0, "end": 1.0, "text": "music", "kind": "non_speech"}
+                ],
+                "predicted_events": [{"start": 0.0, "end": 1.0, "text": "music"}],
+                "decisions": [{"decision": "drop"}],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 1,
+                },
+            }
+        ],
+        required_categories=["english"],
+    )
 
     assert report["publishable"] is False
     assert report["checks"]["hallucination_retention"] is False
@@ -52,13 +63,18 @@ def test_golden_gate_blocks_hallucination_retention_and_raw_bypass():
 
 
 def test_golden_gate_blocks_missing_runtime_diagnostics():
-    report = evaluate_golden_set([{
-        "categories": ["chinese"],
-        "expected_events": [],
-        "predicted_events": [],
-        "decisions": [],
-        "diagnostics": {},
-    }], required_categories=["chinese"])
+    report = evaluate_golden_set(
+        [
+            {
+                "categories": ["chinese"],
+                "expected_events": [],
+                "predicted_events": [],
+                "decisions": [],
+                "diagnostics": {},
+            }
+        ],
+        required_categories=["chinese"],
+    )
 
     assert report["publishable"] is False
     assert report["checks"]["diagnostics_complete"] is False
@@ -70,21 +86,25 @@ def test_golden_gate_blocks_missing_runtime_diagnostics():
 
 
 def test_golden_gate_action_rates_include_keep_and_replace():
-    report = evaluate_golden_set([{
-        "categories": ["chinese"],
-        "expected_events": [],
-        "predicted_events": [],
-        "decisions": [
-            {"decision": "keep", "revision_trace": [{"stage": "test"}]},
-            {"decision": "replace", "revision_trace": [{"stage": "test"}]},
-            {"decision": "unresolved", "revision_trace": [{"stage": "test"}]},
-        ],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-        },
-    }])
+    report = evaluate_golden_set(
+        [
+            {
+                "categories": ["chinese"],
+                "expected_events": [],
+                "predicted_events": [],
+                "decisions": [
+                    {"decision": "keep", "revision_trace": [{"stage": "test"}]},
+                    {"decision": "replace", "revision_trace": [{"stage": "test"}]},
+                    {"decision": "unresolved", "revision_trace": [{"stage": "test"}]},
+                ],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            }
+        ]
+    )
 
     assert report["metrics"]["action_counts"] == {
         "keep": 1,
@@ -113,24 +133,28 @@ def test_golden_gate_preserves_production_pair_metadata():
 
 
 def test_golden_gate_reports_event_level_miss_attribution():
-    report = evaluate_golden_set([{
-        "id": "debug-case",
-        "categories": ["english_or_mixed"],
-        "expected_events": [
-            {"start": 1.0, "end": 2.0, "text": "hello world", "kind": "speech"},
-            {"start": 3.0, "end": 4.0, "text": "goodbye", "kind": "speech"},
-        ],
-        "predicted_events": [
-            {"start": 1.1, "end": 1.8, "text": "zzzzzz"},
-            {"start": 4.1, "end": 4.7, "text": "goodbye"},
-        ],
-        "decisions": [],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-        },
-    }])
+    report = evaluate_golden_set(
+        [
+            {
+                "id": "debug-case",
+                "categories": ["english_or_mixed"],
+                "expected_events": [
+                    {"start": 1.0, "end": 2.0, "text": "hello world", "kind": "speech"},
+                    {"start": 3.0, "end": 4.0, "text": "goodbye", "kind": "speech"},
+                ],
+                "predicted_events": [
+                    {"start": 1.1, "end": 1.8, "text": "zzzzzz"},
+                    {"start": 4.1, "end": 4.7, "text": "goodbye"},
+                ],
+                "decisions": [],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            }
+        ]
+    )
 
     assert report["metrics"]["miss_attribution_counts"] == {
         "asr_text_mismatch": 1,
@@ -154,24 +178,30 @@ def test_classify_expected_match_keeps_gate_strict_but_explains_nearby_text():
 
 
 def test_advisory_reference_miss_does_not_block_default_safety_gate():
-    report = evaluate_golden_set([{
-        "id": "advisory-miss",
-        "reference_role": "advisory",
-        "reference_status": "manual_reference",
-        "expected_events": [{
-            "start": 0.0,
-            "end": 1.0,
-            "text": "人工参考内容",
-            "kind": "speech",
-        }],
-        "predicted_events": [],
-        "decisions": [],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-        },
-    }])
+    report = evaluate_golden_set(
+        [
+            {
+                "id": "advisory-miss",
+                "reference_role": "advisory",
+                "reference_status": "manual_reference",
+                "expected_events": [
+                    {
+                        "start": 0.0,
+                        "end": 1.0,
+                        "text": "人工参考内容",
+                        "kind": "speech",
+                    }
+                ],
+                "predicted_events": [],
+                "decisions": [],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            }
+        ]
+    )
 
     assert report["gate_mode"] == "safety"
     assert report["publishable"] is True
@@ -182,16 +212,21 @@ def test_advisory_reference_miss_does_not_block_default_safety_gate():
 
 
 def test_strict_reference_blocks_advisory_quality_miss():
-    report = evaluate_golden_set([{
-        "reference_role": "advisory",
-        "expected_events": [{"start": 0.0, "end": 1.0, "text": "参考"}],
-        "predicted_events": [],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-        },
-    }], gate_mode="strict-reference")
+    report = evaluate_golden_set(
+        [
+            {
+                "reference_role": "advisory",
+                "expected_events": [{"start": 0.0, "end": 1.0, "text": "参考"}],
+                "predicted_events": [],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            }
+        ],
+        gate_mode="strict-reference",
+    )
 
     assert report["publishable"] is False
     assert report["status"] == "fail"
@@ -200,17 +235,21 @@ def test_strict_reference_blocks_advisory_quality_miss():
 
 
 def test_no_reference_speech_events_are_not_counted_as_reference_quality():
-    report = evaluate_golden_set([{
-        "reference_role": "none",
-        "reference_status": "no_manual_reference",
-        "expected_events": [{"start": 0.0, "end": 1.0, "text": "not used"}],
-        "predicted_events": [],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-        },
-    }])
+    report = evaluate_golden_set(
+        [
+            {
+                "reference_role": "none",
+                "reference_status": "no_manual_reference",
+                "expected_events": [{"start": 0.0, "end": 1.0, "text": "not used"}],
+                "predicted_events": [],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            }
+        ]
+    )
 
     assert report["metrics"]["expected_speech_count"] == 0
     assert report["reference_quality"]["status"] == "not_applicable"
@@ -221,17 +260,21 @@ def test_strict_match_is_reported_alongside_legacy_match():
     predicted = [{"start": 1.999, "end": 2.5, "text": "same phrase"}]
 
     legacy = classify_expected_match(expected, predicted)
-    report = evaluate_golden_set([{
-        "reference_role": "strict",
-        "reference_status": "manual_reference",
-        "expected_events": [expected],
-        "predicted_events": predicted,
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-        },
-    }])
+    report = evaluate_golden_set(
+        [
+            {
+                "reference_role": "strict",
+                "reference_status": "manual_reference",
+                "expected_events": [expected],
+                "predicted_events": predicted,
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            }
+        ]
+    )
 
     assert legacy["matched"] is True
     assert report["metrics"]["real_speech_drop_rate"] == 0.0
@@ -249,17 +292,21 @@ def test_physical_coverage_reports_blank_and_trailing_silence_independently():
     assert coverage["audible_blank_rate"] == 0.0
     assert coverage["trailing_silence_ms"] == 500.0
 
-    report = evaluate_golden_set([{
-        "expected_events": [],
-        "predicted_events": [],
-        "physical_speech_spans": [{"start": 1.0, "end": 2.0}],
-        "final_cues": [],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-        },
-    }])
+    report = evaluate_golden_set(
+        [
+            {
+                "expected_events": [],
+                "predicted_events": [],
+                "physical_speech_spans": [{"start": 1.0, "end": 2.0}],
+                "final_cues": [],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            }
+        ]
+    )
     assert report["coverage_quality"]["audible_blank_rate"] == 1.0
     assert report["coverage_quality"]["case_counts"]["fail"] == 1
     assert report["publishable"] is True
@@ -274,32 +321,37 @@ def test_physical_coverage_is_not_evaluable_without_speech_spans():
 
 
 def test_engine_status_is_aggregated_and_missing_cases_are_explicit():
-    report = evaluate_golden_set([{
-        "engine_status": {
-            "faster-whisper": {
-                "selected": True,
-                "enabled": True,
-                "available": True,
-                "windows_processed": 2,
-                "windows_failed": 0,
+    report = evaluate_golden_set(
+        [
+            {
+                "engine_status": {
+                    "faster-whisper": {
+                        "selected": True,
+                        "enabled": True,
+                        "available": True,
+                        "windows_processed": 2,
+                        "windows_failed": 0,
+                    },
+                },
+                "expected_events": [],
+                "predicted_events": [],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
             },
-        },
-        "expected_events": [],
-        "predicted_events": [],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-        },
-    }, {
-        "expected_events": [],
-        "predicted_events": [],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-        },
-    }])
+            {
+                "expected_events": [],
+                "predicted_events": [],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                },
+            },
+        ]
+    )
 
     assert report["engine_status"]["faster-whisper"]["selected_count"] == 1
     assert report["metrics"]["engine_status_missing_case_count"] == 1

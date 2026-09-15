@@ -19,7 +19,6 @@ import copy
 import difflib
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 import numpy as np
 
@@ -108,45 +107,45 @@ class SubtitleEvent:
     start: float  # 显示时间（秒）
     end: float  # 显示时间（秒）
     text: str
-    words: List = field(default_factory=list)
-    original_text: Optional[str] = None
-    speaker_id: Optional[int] = None
-    speaker_label: Optional[str] = None
+    words: list = field(default_factory=list)
+    original_text: str | None = None
+    speaker_id: int | None = None
+    speaker_label: str | None = None
 
     # 双时间轴
-    physical_start: Optional[float] = None
-    physical_end: Optional[float] = None
-    physical_spans: List = field(default_factory=list)
-    source_word_ids: List[str] = field(default_factory=list)
-    logical_sentence_id: Optional[str] = None
-    alignment_warning: Optional[str] = None
+    physical_start: float | None = None
+    physical_end: float | None = None
+    physical_spans: list = field(default_factory=list)
+    source_word_ids: list[str] = field(default_factory=list)
+    logical_sentence_id: str | None = None
+    alignment_warning: str | None = None
 
     # 物理归属
-    physical_region_id: Optional[str] = None
-    physical_bin_id: Optional[str] = None
-    physical_bin_start: Optional[float] = None
-    physical_bin_end: Optional[float] = None
+    physical_region_id: str | None = None
+    physical_bin_id: str | None = None
+    physical_bin_start: float | None = None
+    physical_bin_end: float | None = None
     time_source: str = ""
     hard_split_before: bool = False
 
     # 说话人溯源
     speaker_status: str = ""
     speaker_source: str = ""
-    speaker_confidence: Optional[float] = None
-    speaker_model: Optional[str] = None
+    speaker_confidence: float | None = None
+    speaker_model: str | None = None
     speaker_repair_reason: str = ""
-    asr_text: Optional[str] = None
+    asr_text: str | None = None
 
     # 重叠对白
     genuine_overlap: bool = False
-    overlap_group_id: Optional[str] = None
-    overlap_tracks: List = field(default_factory=list)
+    overlap_group_id: str | None = None
+    overlap_tracks: list = field(default_factory=list)
 
     # 修订追溯
-    revision_trace: List = field(default_factory=list)
+    revision_trace: list = field(default_factory=list)
 
     # 全局坐标契约：宏观块/骨架局部事件的偏移只允许记录一次
-    time_offset_trace: List = field(default_factory=list)
+    time_offset_trace: list = field(default_factory=list)
 
     # Stable evidence contract shared by chunk, skeleton, and review paths.
     trace_context: dict = field(default_factory=dict)
@@ -163,6 +162,7 @@ class SubtitleEvent:
     def to_dict(self) -> dict:
         """序列化为字典，复制可变集合字段避免共享引用。"""
         import copy
+
         return {
             "index": self.index,
             "start": self.start,
@@ -296,20 +296,26 @@ def offset_subtitle_event(
             else:
                 shifted_spans.append(span)
         event.physical_spans = shifted_spans
-    event.time_offset_trace.append({
-        "stage": "time_offset",
-        "source": source,
-        "offset": value,
-    })
-    event.revision_trace.append({
-        "stage": "time_offset",
-        "source": source,
-        "offset": value,
-    })
+    event.time_offset_trace.append(
+        {
+            "stage": "time_offset",
+            "source": source,
+            "offset": value,
+        }
+    )
+    event.revision_trace.append(
+        {
+            "stage": "time_offset",
+            "source": source,
+            "offset": value,
+        }
+    )
     return event
 
 
-def _relative_event_words(words: list, source_offset: float, event_start: float) -> list:
+def _relative_event_words(
+    words: list, source_offset: float, event_start: float
+) -> list:
     """Copy segment-local word times into the SubtitleEvent contract."""
     relative = []
     for word in words or []:
@@ -351,12 +357,12 @@ class TimeMapper:
 
     def map(
         self,
-        asr_segments_list: List[List[TranscriptionSegment]],
-        speech_segments: List[SpeechSegment],
-        speaker_ids: Optional[List[int]] = None,
-        audio: Optional[np.ndarray] = None,
+        asr_segments_list: list[list[TranscriptionSegment]],
+        speech_segments: list[SpeechSegment],
+        speaker_ids: list[int] | None = None,
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> List[SubtitleEvent]:
+    ) -> list[SubtitleEvent]:
         """将分段 ASR 结果映射到全局时间轴
 
         Args:
@@ -378,7 +384,7 @@ class TimeMapper:
                 f"vs {len(speech_segments)} speech segments"
             )
 
-        all_events: List[SubtitleEvent] = []
+        all_events: list[SubtitleEvent] = []
         event_index = 0
 
         for seg_idx, (asr_segments, speech_seg) in enumerate(
@@ -408,9 +414,9 @@ class TimeMapper:
                     global_end = speech_seg.end
 
                 # 边界检查：不超出语音段范围（含小容差）
-                _clamp_ceiling = max(
-                    speech_seg.end, global_end - 0.05
-                ) + self.seamless_threshold
+                _clamp_ceiling = (
+                    max(speech_seg.end, global_end - 0.05) + self.seamless_threshold
+                )
                 global_end = min(global_end, _clamp_ceiling)
 
                 if global_end <= global_start:
@@ -447,10 +453,10 @@ class TimeMapper:
 
     def _merge_gaps(
         self,
-        events: List[SubtitleEvent],
-        audio: Optional[np.ndarray] = None,
+        events: list[SubtitleEvent],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> List[SubtitleEvent]:
+    ) -> list[SubtitleEvent]:
         """处理段间间隙 — 利用精确的 start 时间反向确定 end 时间
 
         核心原理:
@@ -475,6 +481,7 @@ class TimeMapper:
         silence_rms = None
         if audio is not None:
             from ..utils.audio_utils import AudioUtils
+
             silence_rms = AudioUtils.estimate_silence_rms(audio, sample_rate)
 
         result = [events[0]]
@@ -498,9 +505,9 @@ class TimeMapper:
             # ★ 不同说话人：间隙是说话人切换的自然停顿，不扩展 prev.end
             prev_spk = getattr(prev, "speaker_id", None)
             curr_spk = getattr(curr, "speaker_id", None)
-            if (prev_spk is not None and curr_spk is not None and prev_spk != curr_spk) or (
-                (prev_spk is None) != (curr_spk is None)
-            ):
+            if (
+                prev_spk is not None and curr_spk is not None and prev_spk != curr_spk
+            ) or ((prev_spk is None) != (curr_spk is None)):
                 result.append(curr)
                 continue
 
@@ -517,7 +524,8 @@ class TimeMapper:
             from ..utils.audio_utils import AudioUtils
 
             speech_end = self._find_speech_end_backward(
-                audio, sample_rate,
+                audio,
+                sample_rate,
                 search_start=prev.end,
                 search_end=curr.start,
                 silence_rms=silence_rms,
@@ -545,9 +553,9 @@ class TimeMapper:
 
         if refined_count > 0:
             logger.info(
-                "Gap refine: adjusted %d/%d event end times "
-                "via backward energy scan",
-                refined_count, len(events),
+                "Gap refine: adjusted %d/%d event end times via backward energy scan",
+                refined_count,
+                len(events),
             )
 
         return result
@@ -561,7 +569,7 @@ class TimeMapper:
         silence_rms: float,
         frame_ms: int = 5,
         energy_threshold_ratio: float = 2.0,
-    ) -> Optional[float]:
+    ) -> float | None:
         """从 search_end 向 search_start 反向扫描，找语音→静音的转折点。
 
         原理：
@@ -602,7 +610,7 @@ class TimeMapper:
                 continue
 
             frame = audio[frame_start:frame_end]
-            rms = float(np.sqrt(np.mean(frame ** 2)))
+            rms = float(np.sqrt(np.mean(frame**2)))
 
             if rms > energy_threshold:
                 # 找到语音能量 — 这是语音结束的位置
@@ -612,8 +620,8 @@ class TimeMapper:
 
     @staticmethod
     def _deduplicate_overlapping(
-        events: List[SubtitleEvent],
-    ) -> List[SubtitleEvent]:
+        events: list[SubtitleEvent],
+    ) -> list[SubtitleEvent]:
         """检测并移除时间上重叠且文本高度相似的重复事件。
 
         相邻 VAD 段的重叠区域可能导致 ASR 对同一语音做重复识别，
@@ -680,14 +688,14 @@ class TimeMapper:
 
                 # 文本相似度检查
                 text_sim = difflib.SequenceMatcher(
-                    None, texts[i], texts[j],
+                    None,
+                    texts[i],
+                    texts[j],
                 ).ratio()
 
                 # ★ 子串包含检查：如果一条文本完全包含在另一条中，
                 #    即使整体相似度 < 0.8 也应视为重复（防止长文本吞短文本的漏检）
-                text_contained = (
-                    texts[i] in texts[j] or texts[j] in texts[i]
-                )
+                text_contained = texts[i] in texts[j] or texts[j] in texts[i]
 
                 if text_sim < 0.8 and not text_contained:
                     # ★ 文本不相似但时间包含 + 同说话人：
@@ -695,28 +703,48 @@ class TimeMapper:
                     #   应将文本合并到时间覆盖更大的事件中，而非保留两个。
                     a_text_len = len(texts[i])
                     b_text_len = len(texts[j])
-                    if (a.start <= b.start and a.end >= b.end
-                            and a_text_len > 0 and b_text_len > 0):
+                    if (
+                        a.start <= b.start
+                        and a.end >= b.end
+                        and a_text_len > 0
+                        and b_text_len > 0
+                    ):
                         merged = _merge_distinct_texts(texts[i], texts[j])
                         events[i].text = merged
                         to_remove.add(j)
                         logger.info(
                             "Merged overlapping events: #%d (%.1f-%.1f, '%s') "
                             "+ #%d (%.1f-%.1f, '%s') → '%s'",
-                            a.index, a.start, a.end, texts[i],
-                            b.index, b.start, b.end, texts[j],
+                            a.index,
+                            a.start,
+                            a.end,
+                            texts[i],
+                            b.index,
+                            b.start,
+                            b.end,
+                            texts[j],
                             merged,
                         )
-                    elif (b.start <= a.start and b.end >= a.end
-                            and a_text_len > 0 and b_text_len > 0):
+                    elif (
+                        b.start <= a.start
+                        and b.end >= a.end
+                        and a_text_len > 0
+                        and b_text_len > 0
+                    ):
                         merged = _merge_distinct_texts(texts[j], texts[i])
                         events[j].text = merged
                         to_remove.add(i)
                         logger.info(
                             "Merged overlapping events: #%d (%.1f-%.1f, '%s') "
                             "+ #%d (%.1f-%.1f, '%s') → '%s'",
-                            b.index, b.start, b.end, texts[j],
-                            a.index, a.start, a.end, texts[i],
+                            b.index,
+                            b.start,
+                            b.end,
+                            texts[j],
+                            a.index,
+                            a.start,
+                            a.end,
+                            texts[i],
                             merged,
                         )
                         break
@@ -725,8 +753,6 @@ class TimeMapper:
                 # 确认重复：保留覆盖更完整的事件
                 # 优先看时间覆盖（更早 start + 更晚 end），
                 # 其次看文本长度（更长的文本通常包含更多上下文）
-                a_span = a.end - a.start
-                b_span = b.end - b.start
                 a_text_len = len(texts[i])
                 b_text_len = len(texts[j])
 
@@ -736,8 +762,12 @@ class TimeMapper:
                     logger.info(
                         "Deduplicated overlapping events: #%d (%.1f-%.1f) "
                         "subsumes #%d (%.1f-%.1f), similarity=%.0f%%",
-                        a.index, a.start, a.end,
-                        b.index, b.start, b.end,
+                        a.index,
+                        a.start,
+                        a.end,
+                        b.index,
+                        b.start,
+                        b.end,
                         text_sim * 100,
                     )
                 elif b.start <= a.start and b.end >= a.end and b_text_len >= a_text_len:
@@ -745,8 +775,12 @@ class TimeMapper:
                     logger.info(
                         "Deduplicated overlapping events: #%d (%.1f-%.1f) "
                         "subsumes #%d (%.1f-%.1f), similarity=%.0f%%",
-                        b.index, b.start, b.end,
-                        a.index, a.start, a.end,
+                        b.index,
+                        b.start,
+                        b.end,
+                        a.index,
+                        a.start,
+                        a.end,
                         text_sim * 100,
                     )
                     break  # a 已移除，不再与后续比较
@@ -757,7 +791,9 @@ class TimeMapper:
                         logger.info(
                             "Deduplicated overlapping events: #%d dropped in "
                             "favor of #%d (longer text), similarity=%.0f%%",
-                            a.index, b.index, text_sim * 100,
+                            a.index,
+                            b.index,
+                            text_sim * 100,
                         )
                         break
                     else:
@@ -765,7 +801,9 @@ class TimeMapper:
                         logger.info(
                             "Deduplicated overlapping events: #%d dropped in "
                             "favor of #%d (longer text), similarity=%.0f%%",
-                            b.index, a.index, text_sim * 100,
+                            b.index,
+                            a.index,
+                            text_sim * 100,
                         )
 
         if not to_remove:
@@ -778,15 +816,17 @@ class TimeMapper:
 
         logger.info(
             "Overlap dedup: %d → %d events (%d duplicates removed)",
-            len(events), len(kept), len(to_remove),
+            len(events),
+            len(kept),
+            len(to_remove),
         )
         return kept
 
     @staticmethod
     def map_single_segment(
-        asr_results: List[TranscriptionSegment],
+        asr_results: list[TranscriptionSegment],
         segment_offset: float,
-    ) -> List[SubtitleEvent]:
+    ) -> list[SubtitleEvent]:
         """映射单个语音片段的 ASR 结果
 
         Args:

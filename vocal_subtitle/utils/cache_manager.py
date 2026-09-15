@@ -11,7 +11,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class CacheManager:
         self,
         cache_dir: str = "./cache",
         ttl_separation: int = 86400 * 7,  # 默认 7 天
-        ttl_transcription: int = 604800,   # 7 天
+        ttl_transcription: int = 604800,  # 7 天
     ):
         self._cache_dir = Path(cache_dir)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
@@ -64,9 +64,7 @@ class CacheManager:
                 stage_dir.mkdir(parents=True, exist_ok=True)
                 self._caches[stage] = diskcache.Cache(str(stage_dir))
             except ImportError:
-                logger.warning(
-                    "diskcache not available, using in-memory cache"
-                )
+                logger.warning("diskcache not available, using in-memory cache")
                 self._caches[stage] = {}
         return self._caches[stage]
 
@@ -94,10 +92,10 @@ class CacheManager:
         *,
         stage: str,
         stage_version: str,
-        engine: Optional[str] = None,
-        model: Optional[str] = None,
-        config: Optional[dict] = None,
-        params: Optional[dict] = None,
+        engine: str | None = None,
+        model: str | None = None,
+        config: dict | None = None,
+        params: dict | None = None,
     ) -> str:
         """内容 + 版本身份键(重构计划 Task 7)。
 
@@ -105,6 +103,7 @@ class CacheManager:
         同内容不同路径可命中,模型/阶段版本变化自动失效。
         """
         from .cache_key import build_cache_key
+
         return build_cache_key(
             content_hash=content_hash,
             stage=stage,
@@ -115,7 +114,7 @@ class CacheManager:
             params=params,
         )
 
-    def get(self, stage: str, key: str) -> Optional[Any]:
+    def get(self, stage: str, key: str) -> Any | None:
         """获取缓存值
 
         Args:
@@ -147,7 +146,7 @@ class CacheManager:
         stage: str,
         key: str,
         value: Any,
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ) -> None:
         """设置缓存值
 
@@ -266,7 +265,7 @@ class CacheManager:
 
         return dest_path
 
-    def get_file(self, key: str) -> Optional[Path]:
+    def get_file(self, key: str) -> Path | None:
         """获取缓存的持久化文件
 
         Args:
@@ -285,7 +284,7 @@ class CacheManager:
     # 统计与信息
     # ------------------------------------------------------------------
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取缓存统计信息
 
         Returns:

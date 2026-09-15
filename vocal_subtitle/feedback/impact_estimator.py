@@ -12,10 +12,8 @@
 """
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-
-import numpy as np
+from dataclasses import dataclass
+from typing import Any
 
 from .diff_analyzer import ParamAdjustment
 from .param_learner import PARAM_BOUNDS
@@ -34,11 +32,11 @@ class ImpactPrediction:
     delta_pct: float  # 百分比变化
 
     # 预估影响（每项含方向 + 幅度 + 置信区间）
-    avg_duration_change_pct: Optional[float] = None   # 单行字幕平均时长变化
-    merge_frequency_change_pct: Optional[float] = None  # 合并频次变化
-    split_frequency_change_pct: Optional[float] = None  # 拆分频次变化
-    end_truncation_change_pct: Optional[float] = None   # 句尾截断概率变化
-    total_line_count_change_pct: Optional[float] = None  # 字幕总行数变化
+    avg_duration_change_pct: float | None = None  # 单行字幕平均时长变化
+    merge_frequency_change_pct: float | None = None  # 合并频次变化
+    split_frequency_change_pct: float | None = None  # 拆分频次变化
+    end_truncation_change_pct: float | None = None  # 句尾截断概率变化
+    total_line_count_change_pct: float | None = None  # 字幕总行数变化
 
     confidence_low: float = 0.0
     confidence_high: float = 0.0
@@ -47,20 +45,20 @@ class ImpactPrediction:
 
 # 参数-影响映射系数（基于经验数据）
 # 单位：参数值每变化 1%，对应指标变化 X%
-_PARAM_IMPACT_COEFFICIENTS: Dict[str, Dict[str, float]] = {
+_PARAM_IMPACT_COEFFICIENTS: dict[str, dict[str, float]] = {
     "merging.padding": {
-        "avg_duration": 0.8,       # padding +1% → 时长 +0.8%
-        "end_truncation": -1.2,    # padding +1% → 截断 -1.2%
-        "total_lines": -0.3,       # padding +1% → 行数 -0.3%
+        "avg_duration": 0.8,  # padding +1% → 时长 +0.8%
+        "end_truncation": -1.2,  # padding +1% → 截断 -1.2%
+        "total_lines": -0.3,  # padding +1% → 行数 -0.3%
     },
     "merging.padding_max": {
         "avg_duration": 0.4,
         "end_truncation": -0.6,
     },
     "merge_decision.fast_merge_max_gap": {
-        "merge_frequency": 1.5,    # gap +1% → 合并 +1.5%
-        "avg_duration": 0.6,       # 合并更多 → 行更长
-        "total_lines": -0.5,       # 合并更多 → 行数减少
+        "merge_frequency": 1.5,  # gap +1% → 合并 +1.5%
+        "avg_duration": 0.6,  # 合并更多 → 行更长
+        "total_lines": -0.5,  # 合并更多 → 行数减少
     },
     "merge_decision.llm_decision_max_gap": {
         "merge_frequency": 0.8,
@@ -96,9 +94,9 @@ class ImpactEstimator:
 
     def estimate(
         self,
-        adjustments: Dict[str, ParamAdjustment],
-        current_overrides: Dict[str, Any],
-    ) -> List[ImpactPrediction]:
+        adjustments: dict[str, ParamAdjustment],
+        current_overrides: dict[str, Any],
+    ) -> list[ImpactPrediction]:
         """对每个参数变更生成影响预估
 
         Args:
@@ -142,15 +140,25 @@ class ImpactEstimator:
             # 应用映射系数
             coeffs = _PARAM_IMPACT_COEFFICIENTS.get(param_path, {})
             if "avg_duration" in coeffs:
-                pred.avg_duration_change_pct = round(delta_pct * coeffs["avg_duration"], 1)
+                pred.avg_duration_change_pct = round(
+                    delta_pct * coeffs["avg_duration"], 1
+                )
             if "merge_frequency" in coeffs:
-                pred.merge_frequency_change_pct = round(delta_pct * coeffs["merge_frequency"], 1)
+                pred.merge_frequency_change_pct = round(
+                    delta_pct * coeffs["merge_frequency"], 1
+                )
             if "split_frequency" in coeffs:
-                pred.split_frequency_change_pct = round(delta_pct * coeffs["split_frequency"], 1)
+                pred.split_frequency_change_pct = round(
+                    delta_pct * coeffs["split_frequency"], 1
+                )
             if "end_truncation" in coeffs:
-                pred.end_truncation_change_pct = round(delta_pct * coeffs["end_truncation"], 1)
+                pred.end_truncation_change_pct = round(
+                    delta_pct * coeffs["end_truncation"], 1
+                )
             if "total_lines" in coeffs:
-                pred.total_line_count_change_pct = round(delta_pct * coeffs["total_lines"], 1)
+                pred.total_line_count_change_pct = round(
+                    delta_pct * coeffs["total_lines"], 1
+                )
 
             # 生成人类可读摘要
             pred.summary = self._make_summary(pred)
@@ -176,31 +184,44 @@ class ImpactEstimator:
 
         if pred.avg_duration_change_pct is not None:
             direction = "增加" if pred.avg_duration_change_pct > 0 else "减少"
-            parts.append(f"单行字幕平均时长{direction}{abs(pred.avg_duration_change_pct):.0f}%")
+            parts.append(
+                f"单行字幕平均时长{direction}{abs(pred.avg_duration_change_pct):.0f}%"
+            )
 
         if pred.merge_frequency_change_pct is not None:
             direction = "增加" if pred.merge_frequency_change_pct > 0 else "减少"
-            parts.append(f"合并频次{direction}{abs(pred.merge_frequency_change_pct):.0f}%")
+            parts.append(
+                f"合并频次{direction}{abs(pred.merge_frequency_change_pct):.0f}%"
+            )
 
         if pred.split_frequency_change_pct is not None:
             direction = "增加" if pred.split_frequency_change_pct > 0 else "减少"
-            parts.append(f"拆分频次{direction}{abs(pred.split_frequency_change_pct):.0f}%")
+            parts.append(
+                f"拆分频次{direction}{abs(pred.split_frequency_change_pct):.0f}%"
+            )
 
         if pred.end_truncation_change_pct is not None:
             direction = "降低" if pred.end_truncation_change_pct < 0 else "增加"
-            parts.append(f"句尾截断概率{direction}{abs(pred.end_truncation_change_pct):.0f}%")
+            parts.append(
+                f"句尾截断概率{direction}{abs(pred.end_truncation_change_pct):.0f}%"
+            )
 
         if pred.total_line_count_change_pct is not None:
             direction = "减少" if pred.total_line_count_change_pct < 0 else "增加"
-            parts.append(f"字幕总行数{direction}{abs(pred.total_line_count_change_pct):.0f}%")
+            parts.append(
+                f"字幕总行数{direction}{abs(pred.total_line_count_change_pct):.0f}%"
+            )
 
         if not parts:
             return f"变更 {param_name}: {pred.current_value} → {pred.new_value}"
 
-        return f"变更 {param_name} ({pred.current_value} → {pred.new_value}): " + "，".join(parts)
+        return (
+            f"变更 {param_name} ({pred.current_value} → {pred.new_value}): "
+            + "，".join(parts)
+        )
 
     @staticmethod
-    def _get_nested(overrides: Dict[str, Any], param_path: str) -> Optional[float]:
+    def _get_nested(overrides: dict[str, Any], param_path: str) -> float | None:
         """从 overrides 字典中获取嵌套参数值"""
         parts = param_path.split(".")
         current = overrides
@@ -216,11 +237,11 @@ class ImpactEstimator:
         """获取参数默认值"""
         # 复用 ParamLearner 的默认值获取逻辑
         from ..config import (
-            MergingConfig,
             MergeDecisionConfig,
+            MergingConfig,
+            NoiseReductionConfig,
             SubtitleBuildConfig,
             VADConfig,
-            NoiseReductionConfig,
         )
 
         defaults = {

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import numpy as np
 
-from ..asr.base import TranscriptionSegment
 from ..application.pipeline_result import PipelineStats
+from ..asr.base import TranscriptionSegment
 from ..mapping.time_mapper import SubtitleEvent, TimeMapper
 from ..vad.base import SpeechSegment
 
@@ -20,12 +19,12 @@ class PipelineMappingMixin:
     def _export_subtitles_multi_format(
         self,
         builder,
-        events: List[SubtitleEvent],
+        events: list[SubtitleEvent],
         default_output_path: Path,
         output_format: str,
-        session_dir: Optional[Path] = None,
+        session_dir: Path | None = None,
         label: str = "asr",
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """导出字幕为多格式（SRT / VTT / ASS）
 
         当 session_dir 提供时，使用标准化文件名输出所有三种格式；
@@ -42,10 +41,14 @@ class PipelineMappingMixin:
         Returns:
             {format: path} 字典，如 {"srt": "/path/to/ASR-generated.srt", ...}
         """
-        from ..utils.session_manager import ASR_FORMAT_KEYS, LLM_FORMAT_KEYS, OUTPUT_NAMES
+        from ..utils.session_manager import (
+            ASR_FORMAT_KEYS,
+            LLM_FORMAT_KEYS,
+            OUTPUT_NAMES,
+        )
 
         fmt_keys = ASR_FORMAT_KEYS if label == "asr" else LLM_FORMAT_KEYS
-        result: Dict[str, str] = {}
+        result: dict[str, str] = {}
 
         if session_dir:
             # 输出所有三种格式到会话目录
@@ -56,7 +59,10 @@ class PipelineMappingMixin:
                 result[fmt] = str(out_path)
                 logger.debug(
                     "Exported %s/%s: %s (%d events)",
-                    label, fmt, out_path, len(events),
+                    label,
+                    fmt,
+                    out_path,
+                    len(events),
                 )
         else:
             # 仅输出请求的格式到默认路径
@@ -67,13 +73,13 @@ class PipelineMappingMixin:
 
     def _finalize_events(
         self,
-        events: List[SubtitleEvent],
+        events: list[SubtitleEvent],
         stats: PipelineStats,
-        audio_duration: Optional[float],
-    ) -> List[SubtitleEvent]:
+        audio_duration: float | None,
+    ) -> list[SubtitleEvent]:
         """Finalize once before stats, API responses, cache, and export."""
-        from ..mapping.finalize import finalize_subtitle_events
-        from ..mapping.finalize import FinalizeConfig
+        from ..mapping.finalize import FinalizeConfig, finalize_subtitle_events
+
         sub_cfg = getattr(self.config, "subtitle", None)
 
         # 合并塌缩补偿：word_split_on_turn 关闭时，横跨多个说话人 turn 的
@@ -91,11 +97,15 @@ class PipelineMappingMixin:
                 max_chars_latin=getattr(sub_cfg, "max_chars_latin", 42),
                 max_lines=getattr(sub_cfg, "max_lines", 2),
             ),
-            audio_duration=audio_duration if audio_duration and audio_duration > 0 else None,
+            audio_duration=audio_duration
+            if audio_duration and audio_duration > 0
+            else None,
         )
         if multi_spans:
             relabeled_count, distinct_speakers = self._relabel_multi_speaker_cues(
-                result.events, multi_spans, early_turns,
+                result.events,
+                multi_spans,
+                early_turns,
             )
             if relabeled_count and distinct_speakers > stats.speaker_count:
                 stats.speaker_count = distinct_speakers
@@ -118,7 +128,8 @@ class PipelineMappingMixin:
         spans = []
         for event in events:
             relevant = [
-                turn for turn in state.turns
+                turn
+                for turn in state.turns
                 if turn.end > event.start and turn.start < event.end
             ]
             if len({turn.speaker_id for turn in relevant}) > 1:
@@ -150,7 +161,9 @@ class PipelineMappingMixin:
             if not inside:
                 continue
             speaker_id = dominant_speaker_at(
-                state.turns, float(cue.start), float(cue.end),
+                state.turns,
+                float(cue.start),
+                float(cue.end),
             )
             if speaker_id is None or speaker_id == cue.speaker_id:
                 continue
@@ -159,9 +172,9 @@ class PipelineMappingMixin:
             cue.speaker_source = "global"
             relabeled += 1
         if relabeled:
-            distinct = len({
-                cue.speaker_id for cue in cues if cue.speaker_id is not None
-            })
+            distinct = len(
+                {cue.speaker_id for cue in cues if cue.speaker_id is not None}
+            )
             logger.info(
                 "Merged-event speaker compensation: %d cues relabeled",
                 relabeled,
@@ -171,13 +184,13 @@ class PipelineMappingMixin:
 
     def _run_mapping(
         self,
-        asr_results: List[List[TranscriptionSegment]],
-        segments: List[SpeechSegment],
-        audio: Optional[np.ndarray] = None,
+        asr_results: list[list[TranscriptionSegment]],
+        segments: list[SpeechSegment],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-        speaker_ids: Optional[List[int]] = None,
-        role_names: Optional[Dict[int, str]] = None,
-    ) -> List[SubtitleEvent]:
+        speaker_ids: list[int] | None = None,
+        role_names: dict[int, str] | None = None,
+    ) -> list[SubtitleEvent]:
         """Stage 5: 时间轴映射"""
         sub_cfg = self.config.subtitle
 
@@ -187,9 +200,11 @@ class PipelineMappingMixin:
         )
 
         events = mapper.map(
-            asr_results, segments,
+            asr_results,
+            segments,
             speaker_ids=speaker_ids,
-            audio=audio, sample_rate=sample_rate,
+            audio=audio,
+            sample_rate=sample_rate,
         )
 
         # 应用 LLM 角色名称到事件
@@ -210,14 +225,13 @@ class PipelineMappingMixin:
 
         return events
 
-    def _run_llm_optimize(
-        self, events: List[SubtitleEvent]
-    ) -> List[SubtitleEvent]:
+    def _run_llm_optimize(self, events: list[SubtitleEvent]) -> list[SubtitleEvent]:
         """可选的 LLM 后处理（无 API 配置时自动跳过）"""
         llm_cfg = self.config.llm_optimize
 
         # 无 API 配置时优雅跳过（避免无意义的网络错误）
         import os
+
         has_api_config = bool(
             llm_cfg.base_url
             or llm_cfg.api_key
@@ -235,7 +249,8 @@ class PipelineMappingMixin:
             return events
 
         try:
-            from llm_subtitle_optimizer import SubtitleOptimizer
+            # 可用性探测：导入失败走本地降级路径
+            from llm_subtitle_optimizer import SubtitleOptimizer  # noqa: F401
 
             # 构建字幕字典 {index: text} 和元数据 {index: metadata}
             subtitle_dict = {}
@@ -277,9 +292,7 @@ class PipelineMappingMixin:
             import threading
 
             progress = getattr(self, "_progress", None)
-            total_chunks = max(
-                1, -(-len(subtitle_dict) // max(1, llm_cfg.batch_num))
-            )
+            total_chunks = max(1, -(-len(subtitle_dict) // max(1, llm_cfg.batch_num)))
             lock = threading.Lock()
             done = {"chunks": 0}
 
@@ -291,14 +304,16 @@ class PipelineMappingMixin:
                     current = done["chunks"]
                 try:
                     progress.report_progress(
-                        current, total_chunks,
+                        current,
+                        total_chunks,
                         {"detail": f"LLM 优化批次 {current}/{total_chunks}"},
                     )
                 except Exception:
                     logger.debug("LLM progress report failed", exc_info=True)
 
             optimizer = self._build_safe_optimizer(
-                llm_cfg, update_callback=_on_chunk_optimized,
+                llm_cfg,
+                update_callback=_on_chunk_optimized,
             )
 
             optimized = optimizer.optimize(subtitle_dict, event_metadata)
@@ -308,7 +323,7 @@ class PipelineMappingMixin:
                 idx_str = str(event.index)
                 if idx_str in optimized:
                     event.original_text = event.text  # 保存 LLM 优化前的原始 ASR 文本
-                    event.text = optimized[idx_str]   # 应用 LLM 优化后的文本
+                    event.text = optimized[idx_str]  # 应用 LLM 优化后的文本
 
             # ★ ASR 锚定去重（方案五+）：用 ASR 原文作为 ground truth，
             # 检测 LLM 是否将其他条目的内容追加到了当前条目。
@@ -319,6 +334,7 @@ class PipelineMappingMixin:
             # 相邻条目 j 的 ASR 文本（≥4字）。如果 i 的 ASR 原文中不包含
             # 该短语，说明是 LLM 添加的 → 从 i 中移除。
             import re as _re
+
             # 保存 LLM 原始输出用于比对（避免循环中修改干扰检测）
             _llm_texts = {e.index: e.text for e in events}
             for i, cur in enumerate(events):
@@ -342,18 +358,21 @@ class PipelineMappingMixin:
                         logger.warning(
                             "ASR-anchored dedup: entry %d absorbed text from "
                             "entry %d — removing %r",
-                            cur.index, other.index, other_asr,
+                            cur.index,
+                            other.index,
+                            other_asr,
                         )
-                        events[i].text = events[i].text.replace(
-                            other_asr, ""
-                        )
+                        events[i].text = events[i].text.replace(other_asr, "")
                         # 清理替换产生的残留（多余标点、空格）
                         events[i].text = _re.sub(
-                            r'([.。！!？?，,；;、])\s*\1+', r'\1',
+                            r"([.。！!？?，,；;、])\s*\1+",
+                            r"\1",
                             events[i].text,
                         )
-                        events[i].text = _re.sub(r'\s{2,}', ' ', events[i].text)
-                        events[i].text = events[i].text.strip().rstrip(".,，。;；").strip()
+                        events[i].text = _re.sub(r"\s{2,}", " ", events[i].text)
+                        events[i].text = (
+                            events[i].text.strip().rstrip(".,，。;；").strip()
+                        )
 
             # 过滤掉被上一句吸收后清空的冗余事件
             # （LLM 将下一句内容追加到当前句末尾时，下一句会被清空）
@@ -372,12 +391,15 @@ class PipelineMappingMixin:
             # 此处对 LLM 优化后的文本做时间重叠 + 子串检测，移除冗余事件。
             try:
                 from ..mapping.time_mapper import TimeMapper
+
                 before = len(events)
                 events = TimeMapper._deduplicate_overlapping(events)
                 if len(events) < before:
                     logger.info(
                         "LLM optimize post-dedup: %d → %d events (%d removed)",
-                        before, len(events), before - len(events),
+                        before,
+                        len(events),
+                        before - len(events),
                     )
             except Exception as e:
                 logger.warning("LLM optimize post-dedup failed: %s", e)
@@ -385,12 +407,20 @@ class PipelineMappingMixin:
             logger.info("LLM optimization complete: %d events", len(events))
 
         except ImportError:
-            logger.info("LLM optimizer not available (dependencies not installed), skipping")
+            logger.info(
+                "LLM optimizer not available (dependencies not installed), skipping"
+            )
         except Exception as e:
             error_msg = str(e)
-            if any(kw in error_msg.lower() for kw in (
-                "api_key", "401", "authentication", "unauthorized",
-            )):
+            if any(
+                kw in error_msg.lower()
+                for kw in (
+                    "api_key",
+                    "401",
+                    "authentication",
+                    "unauthorized",
+                )
+            ):
                 logger.info(
                     "LLM optimization skipped: API authentication failed. "
                     "Check your llm_optimize.api_key config."

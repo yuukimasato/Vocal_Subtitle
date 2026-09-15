@@ -1,16 +1,13 @@
 """Tests for adaptive pause classification and PhysicalFragment segmentation."""
 
-import pytest
-
-from vocal_subtitle.physical.allocator import PhysicalSpan, WordAllocation
-from vocal_subtitle.physical.ir import GlobalWord
 from vocal_subtitle.mapping.semantic_fragments import (
-    AdaptivePauseThresholds,
     PhysicalFragment,
     _estimate_gap_distribution,
     build_physical_fragments,
     calibrate_speaker_thresholds,
 )
+from vocal_subtitle.physical.allocator import PhysicalSpan, WordAllocation
+from vocal_subtitle.physical.ir import GlobalWord
 
 
 def _make_word(
@@ -63,6 +60,7 @@ def _make_alloc(
 class TestGapDistribution:
     def test_estimates_from_typical_gaps(self):
         import numpy as np
+
         gaps = np.array([0.05, 0.08, 0.12, 0.15, 0.18, 0.25, 0.35, 0.45, 0.55, 0.70])
         micro, sentence, long_ = _estimate_gap_distribution(gaps)
 
@@ -73,6 +71,7 @@ class TestGapDistribution:
 
     def test_few_gaps_returns_defaults(self):
         import numpy as np
+
         micro, sentence, long_ = _estimate_gap_distribution(np.array([0.1]))
 
         assert micro == 0.150

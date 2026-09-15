@@ -3,22 +3,20 @@
 from __future__ import annotations
 
 import re
-from typing import List
 
-
-SECTION_START_PATTERNS: List[re.Pattern] = [
-    re.compile(r'^\d+[\.\)]\s'),
-    re.compile(r'^(One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)[,.\s]'),
-    re.compile(r'^[一二三四五六七八九十][、，.]'),
-    re.compile(r'^(Summary\s+(and|&)\s+review)', re.IGNORECASE),
-    re.compile(r'^(Example[:]?)', re.IGNORECASE),
-    re.compile(r'^(Effective\s+Communication)', re.IGNORECASE),
-    re.compile(r'^(Phone\s+Etiquette|Rapid\s+Response)', re.IGNORECASE),
-    re.compile(r'^(Answer|Listen|Hang\s+up|Identify)', re.IGNORECASE),
-    re.compile(r'^(End\s+with\s+courtesy)', re.IGNORECASE),
+SECTION_START_PATTERNS: list[re.Pattern] = [
+    re.compile(r"^\d+[\.\)]\s"),
+    re.compile(r"^(One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)[,.\s]"),
+    re.compile(r"^[一二三四五六七八九十][、，.]"),
+    re.compile(r"^(Summary\s+(and|&)\s+review)", re.IGNORECASE),
+    re.compile(r"^(Example[:]?)", re.IGNORECASE),
+    re.compile(r"^(Effective\s+Communication)", re.IGNORECASE),
+    re.compile(r"^(Phone\s+Etiquette|Rapid\s+Response)", re.IGNORECASE),
+    re.compile(r"^(Answer|Listen|Hang\s+up|Identify)", re.IGNORECASE),
+    re.compile(r"^(End\s+with\s+courtesy)", re.IGNORECASE),
 ]
-SECTION_END_MARKERS: List[re.Pattern] = [
-    re.compile(r'(^|\s)(and|with)\s+courtesy[.]?\s*$', re.IGNORECASE),
+SECTION_END_MARKERS: list[re.Pattern] = [
+    re.compile(r"(^|\s)(and|with)\s+courtesy[.]?\s*$", re.IGNORECASE),
 ]
 
 

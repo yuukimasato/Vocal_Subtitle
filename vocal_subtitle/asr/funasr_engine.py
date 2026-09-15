@@ -10,7 +10,6 @@ Fun-ASR-Nano 是阿里达摩院推出的轻量级中文语音识别模型，
 """
 
 import logging
-from typing import List, Optional
 
 import numpy as np
 
@@ -58,13 +57,15 @@ class FunASREngine(ASREngine):
 
     @property
     def model_name(self) -> str:
-        return self._model_id.split("/")[-1] if "/" in self._model_id else self._model_id
+        return (
+            self._model_id.split("/")[-1] if "/" in self._model_id else self._model_id
+        )
 
     def detect_language(
         self,
         audio: np.ndarray,
         sample_rate: int = 16000,
-    ) -> Optional[str]:
+    ) -> str | None:
         """FunASR 仅支持中文识别，始终返回 "zh"。
 
         与 Faster-Whisper 不同，FunASR-Nano 是中文专属模型，
@@ -105,9 +106,7 @@ class FunASREngine(ASREngine):
                 disable_log=False,
             )
         except ImportError:
-            raise ImportError(
-                "funasr is required. Install with: pip install funasr"
-            )
+            raise ImportError("funasr is required. Install with: pip install funasr")
         except Exception as e:
             logger.error("Failed to load FunASR model: %s", e)
             raise
@@ -116,9 +115,9 @@ class FunASREngine(ASREngine):
         self,
         audio: np.ndarray,
         sample_rate: int = 16000,
-        language: Optional[str] = None,
+        language: str | None = None,
         **kwargs,
-    ) -> List[TranscriptionSegment]:
+    ) -> list[TranscriptionSegment]:
         """识别音频
 
         Args:
@@ -143,7 +142,12 @@ class FunASREngine(ASREngine):
             # float32、[-1, 1]，因此在这里保持浮点格式并做边界清理。
             audio_array = np.asarray(audio)
             if np.issubdtype(audio_array.dtype, np.integer):
-                scale = float(max(abs(np.iinfo(audio_array.dtype).min), np.iinfo(audio_array.dtype).max))
+                scale = float(
+                    max(
+                        abs(np.iinfo(audio_array.dtype).min),
+                        np.iinfo(audio_array.dtype).max,
+                    )
+                )
                 audio_float32 = audio_array.astype(np.float32) / scale
             else:
                 audio_float32 = audio_array.astype(np.float32, copy=False)

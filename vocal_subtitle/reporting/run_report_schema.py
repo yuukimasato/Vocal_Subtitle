@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 
 @dataclass
@@ -49,14 +48,16 @@ class EngineStatusEntry:
 
     def to_dict(self) -> dict:
         result: dict = {"engine": self.engine, "status": self.status}
-        result.update({
-            "lifecycle": self.lifecycle,
-            "enabled": self.enabled,
-            "selected": self.selected,
-            "available": self.available,
-            "windows_processed": self.windows_processed,
-            "windows_failed": self.windows_failed,
-        })
+        result.update(
+            {
+                "lifecycle": self.lifecycle,
+                "enabled": self.enabled,
+                "selected": self.selected,
+                "available": self.available,
+                "windows_processed": self.windows_processed,
+                "windows_failed": self.windows_failed,
+            }
+        )
         if self.model:
             result["model"] = self.model
         if self.device:

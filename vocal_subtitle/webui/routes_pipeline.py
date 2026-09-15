@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
+
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from .models import TaskStatus
@@ -26,8 +27,8 @@ def _run_pipeline_in_thread(
     profile: str,
     output_format: str,
     skip_separation: bool,
-    overrides: Dict[str, Any],
-    session_dir: Optional[Path] = None,
+    overrides: dict[str, Any],
+    session_dir: Path | None = None,
 ) -> None:
     """Compatibility wrapper for the historical background-task entrypoint."""
     return run_pipeline_in_thread(
@@ -72,7 +73,9 @@ async def run_pipeline(
     try:
         contents = await file.read()
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read file: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Failed to read file: {exc}"
+        ) from exc
     try:
         return await _service.submit(
             contents,
@@ -119,7 +122,10 @@ async def get_task_status(task_id: str):
 @router.get("/tasks/{task_id}/manifest")
 async def get_task_manifest(task_id: str):
     """获取任务的 review-manifest-v1 审核清单（按任务结果即时构建）"""
-    from ..contracts.review_manifest import REVIEW_MANIFEST_SCHEMA, build_review_manifest
+    from ..contracts.review_manifest import (
+        REVIEW_MANIFEST_SCHEMA,
+        build_review_manifest,
+    )
     from .routes_subtitles import _load_completed_subtitle_task
 
     task, result = _load_completed_subtitle_task(task_id)

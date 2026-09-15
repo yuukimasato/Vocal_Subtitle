@@ -1,6 +1,11 @@
 """Feedback tests: test_integration."""
 
-from .common import *
+from pathlib import Path
+
+import pytest
+
+from .common import _make_events
+
 
 class TestFeedbackIntegration:
     """反馈学习全链路集成测试"""
@@ -15,20 +20,24 @@ class TestFeedbackIntegration:
         )
 
         # 1. 合成数据 — 足够多的 1:1 事件以确保 coverage > 70%
-        auto = _make_events([
-            (0.0, 2.0, "今天天气不错"),
-            (2.5, 5.0, "我们去看电影"),
-            (5.5, 8.0, "你觉得怎么样"),
-            (8.5, 10.5, "我觉得很不错"),
-            (11.0, 13.0, "那就这样决定了"),
-        ])
+        auto = _make_events(
+            [
+                (0.0, 2.0, "今天天气不错"),
+                (2.5, 5.0, "我们去看电影"),
+                (5.5, 8.0, "你觉得怎么样"),
+                (8.5, 10.5, "我觉得很不错"),
+                (11.0, 13.0, "那就这样决定了"),
+            ]
+        )
         # 修订版：结束时间后移 + 最后两句合并
-        manual = _make_events([
-            (0.0, 2.15, "今天天气不错"),
-            (2.5, 5.15, "我们去看电影"),
-            (5.5, 8.15, "你觉得怎么样"),
-            (8.5, 13.0, "我觉得很不错那就这样决定了"),
-        ])
+        manual = _make_events(
+            [
+                (0.0, 2.15, "今天天气不错"),
+                (2.5, 5.15, "我们去看电影"),
+                (5.5, 8.15, "你觉得怎么样"),
+                (8.5, 13.0, "我觉得很不错那就这样决定了"),
+            ]
+        )
 
         # 2. 对齐
         aligner = SubtitleAligner(semantic_enabled=False)
@@ -49,14 +58,24 @@ class TestFeedbackIntegration:
         profile = mgr.load("__test_integration__")
         profile["feedback_count"] = 2
         profile["history"] = [
-            {"timestamp": "2026-07-01T10:00:00", "diff_report_summary": "增大padding",
-             "alignment_coverage": 0.9, "median_semantic_similarity": 0.8, "adjustments": {}},
-            {"timestamp": "2026-07-02T10:00:00", "diff_report_summary": "减小合并",
-             "alignment_coverage": 0.92, "median_semantic_similarity": 0.85, "adjustments": {}},
+            {
+                "timestamp": "2026-07-01T10:00:00",
+                "diff_report_summary": "增大padding",
+                "alignment_coverage": 0.9,
+                "median_semantic_similarity": 0.8,
+                "adjustments": {},
+            },
+            {
+                "timestamp": "2026-07-02T10:00:00",
+                "diff_report_summary": "减小合并",
+                "alignment_coverage": 0.92,
+                "median_semantic_similarity": 0.85,
+                "adjustments": {},
+            },
         ]
         mgr.save(profile)
 
-        updated = learner.learn_from_diff(
+        learner.learn_from_diff(
             diff_report=report,
             current_config_overrides={},
             profile_name="__test_integration__",
@@ -84,19 +103,23 @@ class TestFeedbackIntegration:
             UserProfileManager,
         )
 
-        auto = _make_events([
-            (0.0, 2.0, "今天天气不错"),
-            (2.5, 5.0, "我们去看电影"),
-            (5.5, 8.0, "你觉得怎么样"),
-            (8.5, 10.5, "我觉得很不错"),
-            (11.0, 13.0, "那就这样决定了"),
-        ])
-        manual = _make_events([
-            (0.0, 2.15, "今天天气不错"),
-            (2.5, 5.15, "我们去看电影"),
-            (5.5, 8.15, "你觉得怎么样"),
-            (8.5, 13.0, "我觉得很不错那就这样决定了"),
-        ])
+        auto = _make_events(
+            [
+                (0.0, 2.0, "今天天气不错"),
+                (2.5, 5.0, "我们去看电影"),
+                (5.5, 8.0, "你觉得怎么样"),
+                (8.5, 10.5, "我觉得很不错"),
+                (11.0, 13.0, "那就这样决定了"),
+            ]
+        )
+        manual = _make_events(
+            [
+                (0.0, 2.15, "今天天气不错"),
+                (2.5, 5.15, "我们去看电影"),
+                (5.5, 8.15, "你觉得怎么样"),
+                (8.5, 13.0, "我觉得很不错那就这样决定了"),
+            ]
+        )
 
         aligner = SubtitleAligner(semantic_enabled=False)
         pairs = aligner.align(auto, manual)
@@ -155,7 +178,10 @@ class TestFeedbackIntegration:
 """
 
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".srt", delete=False, encoding="utf-8",
+            mode="w",
+            suffix=".srt",
+            delete=False,
+            encoding="utf-8",
         ) as f:
             f.write(srt_content)
             srt_path = Path(f.name)
@@ -187,7 +213,10 @@ Dialogue: 0,0:00:02.50,0:00:05.00,Default,说话人B,0,0,0,,我们去看电影�
 """
 
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".ass", delete=False, encoding="utf-8",
+            mode="w",
+            suffix=".ass",
+            delete=False,
+            encoding="utf-8",
         ) as f:
             f.write(ass_content)
             ass_path = Path(f.name)
@@ -207,5 +236,3 @@ Dialogue: 0,0:00:02.50,0:00:05.00,Default,说话人B,0,0,0,,我们去看电影�
 
         with pytest.raises(ValueError, match="Unsupported"):
             parse_subtitle_file(Path("/tmp/test.txt"))
-
-

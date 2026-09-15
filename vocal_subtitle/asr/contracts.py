@@ -7,8 +7,9 @@ tested independently.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -28,12 +29,12 @@ class ASRRuntimePorts:
     config: Any
     get_engine: Callable[[], ASREngine]
     get_engine_for: Callable[..., ASREngine]
-    get_language: Callable[[], Optional[str]]
-    set_language: Callable[[Optional[str]], None]
-    quality_gate_kwargs: Callable[[], Dict[str, Any]]
-    global_runner: Optional[Callable[["GlobalASRRequest"], Any]] = None
-    segmented_runner: Optional[Callable[["SegmentedASRRequest"], Any]] = None
-    progress: Optional[ProgressPort] = None
+    get_language: Callable[[], str | None]
+    set_language: Callable[[str | None], None]
+    quality_gate_kwargs: Callable[[], dict[str, Any]]
+    global_runner: Callable[[GlobalASRRequest], Any] | None = None
+    segmented_runner: Callable[[SegmentedASRRequest], Any] | None = None
+    progress: ProgressPort | None = None
 
 
 @dataclass(frozen=True)
@@ -44,8 +45,8 @@ class GlobalASRRequest:
     sample_rate: int
     shadow: Any
     stats: Any
-    vad_segments: Optional[Sequence[Any]] = None
-    ffmpeg_result: Optional[Dict[str, Any]] = None
+    vad_segments: Sequence[Any] | None = None
+    ffmpeg_result: dict[str, Any] | None = None
     noise_profile: Any = None
 
 
@@ -53,13 +54,13 @@ class GlobalASRRequest:
 class GlobalASRResult:
     """Result of a global transcription attempt."""
 
-    events: List[Any] = field(default_factory=list)
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    events: list[Any] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
     transcript: Any = None
     # New evidence is appended after the legacy positional fields so callers
     # constructing GlobalASRResult(events, diagnostics, transcript) remain
     # compatible during the migration.
-    evidence: List[Any] = field(default_factory=list)
+    evidence: list[Any] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -79,10 +80,10 @@ class SegmentedASRRequest:
 class SegmentedASRResult:
     """Result of segmented ASR and its diagnostics."""
 
-    events: List[Any] = field(default_factory=list)
+    events: list[Any] = field(default_factory=list)
     segment_count: int = 0
     context: Any = None
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -114,9 +115,9 @@ class EvidenceReviewRequest:
 class EvidenceReviewResult:
     """Output of evidence scoring, review and final decision stages."""
 
-    events: List[Any] = field(default_factory=list)
-    decisions: List[EvidenceDecision] = field(default_factory=list)
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    events: list[Any] = field(default_factory=list)
+    decisions: list[EvidenceDecision] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -125,7 +126,7 @@ class ASRReviewRequest:
 
     events: Sequence[Any]
     transcript: Any
-    diagnostics: Dict[str, Any]
+    diagnostics: dict[str, Any]
 
 
 @dataclass(frozen=True)

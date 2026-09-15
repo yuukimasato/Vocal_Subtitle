@@ -5,7 +5,6 @@
 
 import logging
 from enum import Enum
-from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,7 @@ class GPUDetector:
     """
 
     @staticmethod
-    def detect_cuda() -> Tuple[bool, Optional[str]]:
+    def detect_cuda() -> tuple[bool, str | None]:
         """检测 CUDA GPU 可用性
 
         Returns:
@@ -47,7 +46,7 @@ class GPUDetector:
             return False, "PyTorch not installed"
 
     @staticmethod
-    def detect_mps() -> Tuple[bool, Optional[str]]:
+    def detect_mps() -> tuple[bool, str | None]:
         """检测 Apple Silicon (MPS) 可用性
 
         Returns:
@@ -134,7 +133,7 @@ class GPUDetector:
         return info
 
     @classmethod
-    def get_gpu_memory_used_mb(cls) -> Optional[float]:
+    def get_gpu_memory_used_mb(cls) -> float | None:
         """获取当前 GPU 显存使用量 (MB)
 
         Returns:

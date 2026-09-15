@@ -9,12 +9,12 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..utils.file_hasher import compute_file_hash
 from ..utils.session_manager import create_config_snapshot
 from .degradation_log import DegradationLogger
-from .engine_availability import EngineAvailabilityChecker, EngineAvailabilitySnapshot
+from .engine_availability import EngineAvailabilitySnapshot
 from .run_report_schema import (
     DegradationInfo,
     InputInfo,
@@ -49,7 +49,7 @@ class RunReportBuilder:
         run_id: str,
         task_id: str,
         *,
-        reports_root: Optional[Path] = None,
+        reports_root: Path | None = None,
     ):
         self.run_id = run_id
         self.task_id = task_id
@@ -83,7 +83,9 @@ class RunReportBuilder:
 
     # ---- 便捷设置 ----
 
-    def set_input(self, path: Path, duration: float, sample_rate: int = 0, channels: int = 0) -> None:
+    def set_input(
+        self, path: Path, duration: float, sample_rate: int = 0, channels: int = 0
+    ) -> None:
         suffix = path.suffix.lower().lstrip(".")
         try:
             file_size = path.stat().st_size
@@ -101,8 +103,7 @@ class RunReportBuilder:
 
     def set_engine_snapshot(self, snapshot: EngineAvailabilitySnapshot) -> None:
         self.engine_availability = {
-            engine: entry.to_dict()
-            for engine, entry in snapshot.entries.items()
+            engine: entry.to_dict() for engine, entry in snapshot.entries.items()
         }
         self.engine_status = {
             engine: {
@@ -151,12 +152,20 @@ class RunReportBuilder:
                 setattr(self.pipeline_path, k, v)
 
     def set_stage(
-        self, name: str, status: str = "completed", duration: float = 0.0,
-        engine: str = "", model: str = "", **extra,
+        self,
+        name: str,
+        status: str = "completed",
+        duration: float = 0.0,
+        engine: str = "",
+        model: str = "",
+        **extra,
     ) -> None:
         self.stages[name] = StageInfo(
-            status=status, duration_seconds=duration,
-            engine=engine, model=model, extra=extra,
+            status=status,
+            duration_seconds=duration,
+            engine=engine,
+            model=model,
+            extra=extra,
         )
 
     def add_warning(self, stage: str, message: str) -> None:
@@ -169,14 +178,21 @@ class RunReportBuilder:
         self, stage: str, from_path: str, to_path: str, reason: str, category: str = ""
     ) -> None:
         self._degradation_logger.record(
-            stage=stage, from_path=from_path, to_path=to_path,
-            reason=reason, category=category,
+            stage=stage,
+            from_path=from_path,
+            to_path=to_path,
+            reason=reason,
+            category=category,
         )
 
     # ---- 配置快照 ----
 
-    def build_config_snapshot(self, config, profile: str = "default", overrides: dict | None = None) -> dict:
-        return create_config_snapshot(config, profile=profile, overrides=overrides).to_dict()
+    def build_config_snapshot(
+        self, config, profile: str = "default", overrides: dict | None = None
+    ) -> dict:
+        return create_config_snapshot(
+            config, profile=profile, overrides=overrides
+        ).to_dict()
 
     # ---- 构建 ----
 
@@ -225,6 +241,7 @@ class RunReportBuilder:
 
             try:
                 from dataclasses import asdict
+
                 config_dict = asdict(config)
             except Exception:
                 config_dict = {}
@@ -257,7 +274,9 @@ class RunReportBuilder:
         if self.quality_info.coverage_audit:
             cov_path = self._report_dir / "coverage_audit.json"
             cov_path.write_text(
-                json.dumps(self.quality_info.coverage_audit, indent=2, ensure_ascii=False),
+                json.dumps(
+                    self.quality_info.coverage_audit, indent=2, ensure_ascii=False
+                ),
                 encoding="utf-8",
             )
 

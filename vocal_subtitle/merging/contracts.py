@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
-
-Fragment = Dict[str, Any]
-DecisionGroup = Dict[str, Any]
+Fragment = dict[str, Any]
+DecisionGroup = dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -16,8 +16,8 @@ class MergeDecisionPorts:
 
     load_local_model: Callable[[], Any]
     compute_similarity: Callable[[str, str], float]
-    request_cloud_decision: Callable[[Sequence[Fragment]], List[DecisionGroup]]
-    fallback_rule_decisions: Callable[[Sequence[Fragment]], List[DecisionGroup]]
+    request_cloud_decision: Callable[[Sequence[Fragment]], list[DecisionGroup]]
+    fallback_rule_decisions: Callable[[Sequence[Fragment]], list[DecisionGroup]]
     semantic_boundary: Callable[[str, str], bool]
     physical_owner_compatible: Callable[[Fragment, Fragment], bool]
 
@@ -35,5 +35,5 @@ class MergeRequest:
 class MergeResult:
     """Output contract for the merge service."""
 
-    fragments: List[Fragment] = field(default_factory=list)
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    fragments: list[Fragment] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)

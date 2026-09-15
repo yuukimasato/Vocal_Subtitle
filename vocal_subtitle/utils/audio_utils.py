@@ -8,7 +8,6 @@ import logging
 import struct
 import wave
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -36,12 +35,35 @@ class AudioUtils:
     def _get_pydub():
         """延迟导入 pydub"""
         import pydub
+
         return pydub
+
+    @classmethod
+    def _decode_audio(cls, audio_path: Path):
+        """用 pydub 解码任意容器格式的音频。
+
+        pydub 对无音频流的文件（如误传的字幕/文本文件）抛出晦涩的
+        IndexError，解码失败抛 CouldntDecodeError；统一翻译为可读的
+        ValueError，避免任务日志里出现 `audio_streams[0]` 裸栈。
+        """
+        pydub = cls._get_pydub()
+        from pydub.exceptions import CouldntDecodeError
+
+        try:
+            return pydub.AudioSegment.from_file(str(audio_path))
+        except CouldntDecodeError as exc:
+            raise ValueError(
+                f"无法解码音频文件（格式不支持或文件已损坏）: {audio_path}"
+            ) from exc
+        except IndexError as exc:
+            raise ValueError(
+                f"文件中没有可用的音频流，不是有效的音频/视频文件: {audio_path}"
+            ) from exc
 
     @classmethod
     def load_audio(
         cls, audio_path: Path, target_sr: int = DEFAULT_SAMPLE_RATE
-    ) -> Tuple[np.ndarray, int]:
+    ) -> tuple[np.ndarray, int]:
         """加载音频文件并返回 numpy 数组
 
         Args:
@@ -58,8 +80,7 @@ class AudioUtils:
             return cls._load_wav(audio_path, target_sr)
 
         # 其他格式使用 pydub
-        pydub = cls._get_pydub()
-        audio = pydub.AudioSegment.from_file(str(audio_path))
+        audio = cls._decode_audio(audio_path)
         audio = audio.set_channels(cls.DEFAULT_CHANNELS)
         audio = audio.set_frame_rate(target_sr)
         audio = audio.set_sample_width(cls.DEFAULT_SAMPLE_WIDTH)
@@ -70,9 +91,7 @@ class AudioUtils:
         return samples, target_sr
 
     @classmethod
-    def _load_wav(
-        cls, wav_path: Path, target_sr: int
-    ) -> Tuple[np.ndarray, int]:
+    def _load_wav(cls, wav_path: Path, target_sr: int) -> tuple[np.ndarray, int]:
         """使用标准库加载 WAV 文件（无需 pydub）
 
         如果 wave.open 失败（例如扩展名为 .wav 但实际是其他格式，
@@ -119,10 +138,9 @@ class AudioUtils:
     @classmethod
     def _load_with_pydub(
         cls, audio_path: Path, target_sr: int
-    ) -> Tuple[np.ndarray, int]:
+    ) -> tuple[np.ndarray, int]:
         """使用 pydub 加载（回退方案）"""
-        pydub = cls._get_pydub()
-        audio = pydub.AudioSegment.from_file(str(audio_path))
+        audio = cls._decode_audio(audio_path)
         audio = audio.set_channels(cls.DEFAULT_CHANNELS)
         audio = audio.set_frame_rate(target_sr)
         audio = audio.set_sample_width(cls.DEFAULT_SAMPLE_WIDTH)
@@ -131,9 +149,7 @@ class AudioUtils:
         return samples, target_sr
 
     @staticmethod
-    def _resample(
-        audio: np.ndarray, orig_sr: int, target_sr: int
-    ) -> np.ndarray:
+    def _resample(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
         """高质量重采样（优先 scipy，回退线性插值）。
 
         使用 scipy.signal.resample_poly 进行多相滤波重采样，
@@ -144,10 +160,10 @@ class AudioUtils:
 
         # 优先使用 scipy 高质量重采样
         try:
-            from scipy.signal import resample_poly
-
             # 计算互质的重采样因子
             from math import gcd
+
+            from scipy.signal import resample_poly
 
             g = gcd(orig_sr, target_sr)
             up = target_sr // g
@@ -158,12 +174,15 @@ class AudioUtils:
             if up > max_factor or down > max_factor:
                 # 分两步重采样：先到公约数倍数，再到目标
                 result = audio.astype(np.float64)
-                result = resample_poly(result, up=target_sr, down=orig_sr,
-                                       window=("kaiser", 5.0))
+                result = resample_poly(
+                    result, up=target_sr, down=orig_sr, window=("kaiser", 5.0)
+                )
                 return result.astype(np.float32)
 
             result = resample_poly(
-                audio.astype(np.float64), up=up, down=down,
+                audio.astype(np.float64),
+                up=up,
+                down=down,
                 window=("kaiser", 5.0),
             )
             return result.astype(np.float32)
@@ -263,8 +282,7 @@ class AudioUtils:
                     "falling back to pydub.",
                     audio_path,
                 )
-        pydub = cls._get_pydub()
-        audio = pydub.AudioSegment.from_file(str(audio_path))
+        audio = cls._decode_audio(audio_path)
         return len(audio) / 1000.0
 
     @classmethod
@@ -291,8 +309,7 @@ class AudioUtils:
                     "falling back to pydub.",
                     audio_path,
                 )
-        pydub = cls._get_pydub()
-        audio = pydub.AudioSegment.from_file(str(audio_path))
+        audio = cls._decode_audio(audio_path)
         return {
             "channels": audio.channels,
             "sample_rate": audio.frame_rate,
@@ -382,7 +399,7 @@ class AudioUtils:
         global_rms_samples = []
         for i in range(0, total_samples - frame_size, int(0.1 * sample_rate)):
             frame = audio[i : i + frame_size]
-            global_rms_samples.append(float(np.sqrt(np.mean(frame ** 2))))
+            global_rms_samples.append(float(np.sqrt(np.mean(frame**2))))
         if not global_rms_samples:
             return segments
         global_rms_samples.sort()
@@ -399,8 +416,14 @@ class AudioUtils:
             search_end = min(total_samples, center_sample + window_samples)
 
             refined_onset = cls._find_energy_transition(
-                audio, search_start, search_end, frame_size, hop,
-                speech_threshold, sample_rate, direction="onset",
+                audio,
+                search_start,
+                search_end,
+                frame_size,
+                hop,
+                speech_threshold,
+                sample_rate,
+                direction="onset",
             )
             if refined_onset is not None:
                 if abs(refined_onset - seg.start) <= half_window:
@@ -412,8 +435,14 @@ class AudioUtils:
             search_end = min(total_samples, center_sample + window_samples)
 
             refined_offset = cls._find_energy_transition(
-                audio, search_start, search_end, frame_size, hop,
-                speech_threshold, sample_rate, direction="offset",
+                audio,
+                search_start,
+                search_end,
+                frame_size,
+                hop,
+                speech_threshold,
+                sample_rate,
+                direction="offset",
             )
             if refined_offset is not None:
                 if abs(refined_offset - seg.end) <= half_window:
@@ -421,7 +450,8 @@ class AudioUtils:
 
         logger.info(
             "Boundary refinement: %d segments processed (threshold=%.6f)",
-            len(segments), speech_threshold,
+            len(segments),
+            speech_threshold,
         )
         return segments
 
@@ -435,7 +465,7 @@ class AudioUtils:
         threshold: float,
         sample_rate: int,
         direction: str,
-    ) -> Optional[float]:
+    ) -> float | None:
         """在搜索范围内找到语音能量跃迁点。
 
         Args:
@@ -451,7 +481,7 @@ class AudioUtils:
         frames = []  # (sample_index, rms)
         for i in range(search_start, search_end - frame_size + 1, hop):
             frame = audio[i : i + frame_size]
-            rms = float(np.sqrt(np.mean(frame ** 2)))
+            rms = float(np.sqrt(np.mean(frame**2)))
             frames.append((i, rms))
 
         if not frames:
@@ -495,7 +525,7 @@ class AudioUtils:
         if end_sample <= start_sample:
             return 0.0
         segment = audio[start_sample:end_sample]
-        return float(np.sqrt(np.mean(segment ** 2)))
+        return float(np.sqrt(np.mean(segment**2)))
 
     @classmethod
     def estimate_silence_rms(
@@ -524,7 +554,7 @@ class AudioUtils:
         rms_samples = []
         for i in range(0, total_samples - frame_size, int(0.1 * sample_rate)):
             frame = audio[i : i + frame_size]
-            rms_samples.append(float(np.sqrt(np.mean(frame ** 2))))
+            rms_samples.append(float(np.sqrt(np.mean(frame**2))))
 
         if not rms_samples:
             return 0.001
@@ -543,7 +573,7 @@ class AudioUtils:
         cls,
         audio: np.ndarray,
         sample_rate: int,
-        chunk_duration: Optional[float] = None,
+        chunk_duration: float | None = None,
     ) -> dict:
         """每个处理单元独立采样环境底噪。
 
@@ -585,12 +615,12 @@ class AudioUtils:
                 "is_noisy_environment": False,
             }
 
-        def robust_noise_rms(segment: np.ndarray) -> Optional[float]:
+        def robust_noise_rms(segment: np.ndarray) -> float | None:
             """鲁棒底噪估计。
 
             返回 None 表示该段为纯静音，无法用于估计。
             """
-            total_rms = float(np.sqrt(np.mean(segment ** 2)))
+            total_rms = float(np.sqrt(np.mean(segment**2)))
             # 纯静音检测：总体 RMS 极低 → 跳过
             if total_rms < min_noise:
                 return None
@@ -600,7 +630,7 @@ class AudioUtils:
             rms_vals = []
             for i in range(0, len(segment) - frame_size + 1, frame_size):
                 frame = segment[i : i + frame_size]
-                rms_vals.append(float(np.sqrt(np.mean(frame ** 2))))
+                rms_vals.append(float(np.sqrt(np.mean(frame**2))))
             if not rms_vals:
                 return None
 
@@ -609,7 +639,9 @@ class AudioUtils:
             lo = max(0, int(len(rms_vals) * 0.2))
             hi = min(len(rms_vals), int(len(rms_vals) * 0.5) + 1)
             robust = rms_vals[lo:hi]
-            result = float(np.median(robust)) if robust else rms_vals[len(rms_vals)//2]
+            result = (
+                float(np.median(robust)) if robust else rms_vals[len(rms_vals) // 2]
+            )
             return result if result > min_noise else None
 
         noise_rms = None
@@ -644,7 +676,7 @@ class AudioUtils:
 
             for start in range(0, len(audio) - window_size + 1, step):
                 window = audio[start : start + window_size]
-                w_rms = float(np.sqrt(np.mean(window ** 2)))
+                w_rms = float(np.sqrt(np.mean(window**2)))
                 if min_noise < w_rms < min_window_rms:
                     min_window_rms = w_rms
                     best_window = window
@@ -657,9 +689,7 @@ class AudioUtils:
         # 方式 3：全块扫描也没找到 → 回退到全局百分位估计
         if noise_rms is None:
             noise_rms = cls.estimate_silence_rms(audio, sample_rate, percentile=10.0)
-            logger.debug(
-                "Fallback to global silence estimate: %.6f", noise_rms
-            )
+            logger.debug("Fallback to global silence estimate: %.6f", noise_rms)
 
         noise_rms = max(noise_rms, min_noise)
 
@@ -696,8 +726,7 @@ class AudioUtils:
         Returns:
             输出文件路径
         """
-        pydub = cls._get_pydub()
-        audio = pydub.AudioSegment.from_file(str(input_path))
+        audio = cls._decode_audio(input_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         audio.export(str(output_path), format=target_format)
         return output_path
@@ -706,21 +735,34 @@ class AudioUtils:
 
     # 常见视频格式扩展名
     VIDEO_EXTENSIONS = {
-        ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv",
-        ".wmv", ".m4v", ".ts", ".mts", ".m2ts", ".3gp", ".ogv",
-        ".rmvb", ".vob", ".divx",
+        ".mp4",
+        ".mkv",
+        ".mov",
+        ".avi",
+        ".webm",
+        ".flv",
+        ".wmv",
+        ".m4v",
+        ".ts",
+        ".mts",
+        ".m2ts",
+        ".3gp",
+        ".ogv",
+        ".rmvb",
+        ".vob",
+        ".divx",
     }
 
     # 常见视频容器格式的魔数字节签名
     VIDEO_MAGIC = {
-        b"\x00\x00\x00\x18ftyp": ".mp4",       # ISO Base Media (MP4/M4V/MOV/3GP)
-        b"\x00\x00\x00\x20ftyp": ".mp4",       # ISO BMFF variant header size
-        b"\x1aE\xdf\xa3":       ".mkv",         # Matroska / WebM EBML
-        b"RIFF":                None,            # AVI = RIFF container — check next
-        b"\x00\x00\x01\xba":    ".mpg",          # MPEG-PS
-        b"\x00\x00\x01\xb3":    ".mpg",          # MPEG
-        b"\x47":                ".ts",           # MPEG-TS
-        b"FLV":                 ".flv",          # Flash Video
+        b"\x00\x00\x00\x18ftyp": ".mp4",  # ISO Base Media (MP4/M4V/MOV/3GP)
+        b"\x00\x00\x00\x20ftyp": ".mp4",  # ISO BMFF variant header size
+        b"\x1aE\xdf\xa3": ".mkv",  # Matroska / WebM EBML
+        b"RIFF": None,  # AVI = RIFF container — check next
+        b"\x00\x00\x01\xba": ".mpg",  # MPEG-PS
+        b"\x00\x00\x01\xb3": ".mpg",  # MPEG
+        b"\x47": ".ts",  # MPEG-TS
+        b"FLV": ".flv",  # Flash Video
     }
 
     @classmethod
@@ -787,37 +829,40 @@ class AudioUtils:
 
         # 使用 ffmpeg 提取音频流，重采样到 16kHz mono
         cmd = [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-i", str(video_path),
-            "-vn",                    # 丢弃视频流
-            "-acodec", "pcm_s16le",   # 16-bit PCM
-            "-ar", str(cls.DEFAULT_SAMPLE_RATE),  # 16kHz
-            "-ac", str(cls.DEFAULT_CHANNELS),     # mono
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            str(video_path),
+            "-vn",  # 丢弃视频流
+            "-acodec",
+            "pcm_s16le",  # 16-bit PCM
+            "-ar",
+            str(cls.DEFAULT_SAMPLE_RATE),  # 16kHz
+            "-ac",
+            str(cls.DEFAULT_CHANNELS),  # mono
             str(output_path),
         ]
 
         try:
             subprocess.run(cmd, check=True, timeout=600)
         except subprocess.TimeoutExpired:
-            raise RuntimeError(
-                f"音频提取超时（>10分钟）: {video_path.name}"
-            )
+            raise RuntimeError(f"音频提取超时（>10分钟）: {video_path.name}")
         except subprocess.CalledProcessError as e:
             # ffmpeg 失败时，尝试 pydub 降级方案
             import logging
+
             logging.getLogger(__name__).warning(
                 "ffmpeg extraction failed, trying pydub fallback: %s", e
             )
-            pydub = cls._get_pydub()
-            audio = pydub.AudioSegment.from_file(str(video_path))
+            audio = cls._decode_audio(video_path)
             audio = audio.set_frame_rate(cls.DEFAULT_SAMPLE_RATE)
             audio = audio.set_channels(cls.DEFAULT_CHANNELS)
             audio = audio.set_sample_width(cls.DEFAULT_SAMPLE_WIDTH)
             audio.export(str(output_path), format="wav")
 
         if not output_path.exists() or output_path.stat().st_size == 0:
-            raise RuntimeError(
-                f"音频提取失败，输出文件为空: {video_path.name}"
-            )
+            raise RuntimeError(f"音频提取失败，输出文件为空: {video_path.name}")
 
         return output_path

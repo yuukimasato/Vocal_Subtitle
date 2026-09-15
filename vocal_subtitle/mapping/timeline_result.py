@@ -12,8 +12,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any
 
 OVERLAP_TOLERANCE = 1e-9
 
@@ -27,7 +28,7 @@ class TimelineIssue:
     second_index: int
     overlap_seconds: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "kind": self.kind,
             "first_index": self.first_index,
@@ -41,11 +42,11 @@ class TimelineValidationReport:
     """只读校验结果(不携带事件引用,防误改)。"""
 
     ok: bool
-    issues: Tuple[TimelineIssue, ...] = ()
+    issues: tuple[TimelineIssue, ...] = ()
     checked_count: int = 0
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
             "checked_count": self.checked_count,
@@ -68,7 +69,7 @@ def validate_timeline(events: Sequence[Any]) -> TimelineValidationReport:
             float(getattr(pair[1], "end", 0.0)),
         ),
     )
-    issues: List[TimelineIssue] = []
+    issues: list[TimelineIssue] = []
     for (first_index, first), (second_index, second) in zip(ordered, ordered[1:]):
         first_end = float(getattr(first, "end", 0.0))
         second_start = float(getattr(second, "start", 0.0))
@@ -77,12 +78,14 @@ def validate_timeline(events: Sequence[Any]) -> TimelineValidationReport:
             continue
         if _genuine(first) or _genuine(second):
             continue
-        issues.append(TimelineIssue(
-            kind="overlap",
-            first_index=first_index,
-            second_index=second_index,
-            overlap_seconds=overlap,
-        ))
+        issues.append(
+            TimelineIssue(
+                kind="overlap",
+                first_index=first_index,
+                second_index=second_index,
+                overlap_seconds=overlap,
+            )
+        )
     return TimelineValidationReport(
         ok=not issues,
         issues=tuple(issues),

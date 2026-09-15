@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from typing import List
 
 from .timeline import ContextWindow, PhysicalTimeline
 
@@ -22,7 +21,7 @@ def build_context_windows(
     left_context: float,
     right_context: float,
     id_prefix: str = "ctx",
-) -> List[ContextWindow]:
+) -> list[ContextWindow]:
     """Build one independently owned context window per physical clip."""
     if not isinstance(timeline, PhysicalTimeline):
         raise ValueError("timeline must be a PhysicalTimeline")
@@ -34,7 +33,7 @@ def build_context_windows(
     if errors:
         raise ValueError("invalid physical timeline: " + "; ".join(errors))
 
-    windows: List[ContextWindow] = []
+    windows: list[ContextWindow] = []
     left_ms = round(left * 1000)
     right_ms = round(right * 1000)
     for clip in timeline.physical_clips:
@@ -46,13 +45,15 @@ def build_context_windows(
         metadata = {}
         if start != clip.start - left or end != clip.end + right:
             metadata["clamped_to_duration"] = True
-        windows.append(ContextWindow(
-            id=window_id,
-            start=start,
-            end=end,
-            physical_clip_id=clip.id,
-            left_context=left,
-            right_context=right,
-            metadata=metadata,
-        ))
+        windows.append(
+            ContextWindow(
+                id=window_id,
+                start=start,
+                end=end,
+                physical_clip_id=clip.id,
+                left_context=left,
+                right_context=right,
+                metadata=metadata,
+            )
+        )
     return sorted(windows, key=lambda item: (item.start, item.end, item.id))

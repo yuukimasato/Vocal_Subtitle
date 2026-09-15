@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import copy
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from .time_mapper import SubtitleEvent
-
 
 _PUNCTUATION = frozenset(
     " \t\r\n,，。.!！？?；;：:、………()（）[]【】{}｛｝<>《》\"'“”‘’"
@@ -150,9 +150,10 @@ def repair_short_unknown_fragments(
     Only the three-way consensus case is repaired here; an unknown event is
     never assigned from one neighbor alone, and interjections remain separate.
     """
-    result = [event for event in sorted(
-        events, key=lambda item: (item.start, item.end, item.index)
-    )]
+    result = [
+        event
+        for event in sorted(events, key=lambda item: (item.start, item.end, item.index))
+    ]
     index = 1
     while index < len(result) - 1:
         previous = result[index - 1]
@@ -310,11 +311,13 @@ def _split_word_safe(
         return [event]
 
     is_latin = _is_latin_text(event.text)
-    max_chars = cfg.max_chars_cjk * cfg.max_lines if _is_cjk_text(event.text) else cfg.max_chars_latin * cfg.max_lines
+    max_chars = (
+        cfg.max_chars_cjk * cfg.max_lines
+        if _is_cjk_text(event.text)
+        else cfg.max_chars_latin * cfg.max_lines
+    )
     max_duration = (
-        min(cfg.max_duration, cfg.latin_max_duration)
-        if is_latin
-        else cfg.max_duration
+        min(cfg.max_duration, cfg.latin_max_duration) if is_latin else cfg.max_duration
     )
     groups: list[list[Any]] = []
     current: list[Any] = []
@@ -326,7 +329,11 @@ def _split_word_safe(
         word_end = event.start + float(getattr(word, "end", 0.0))
         token = str(getattr(word, "word", "")).strip()
         token_chars = len(token.replace(" ", ""))
-        gap = word_start - (event.start + float(getattr(current[-1], "end", 0.0))) if current else 0.0
+        gap = (
+            word_start - (event.start + float(getattr(current[-1], "end", 0.0)))
+            if current
+            else 0.0
+        )
         next_token = token
         sentence_boundary = bool(
             cfg.split_on_sentence_end
@@ -352,12 +359,8 @@ def _split_word_safe(
                 or current_chars + token_chars > max_chars
             )
         )
-        duration_limit_hit = bool(
-            current and word_end - current_start > max_duration
-        )
-        character_limit_hit = bool(
-            current and current_chars + token_chars > max_chars
-        )
+        duration_limit_hit = bool(current and word_end - current_start > max_duration)
+        character_limit_hit = bool(current and current_chars + token_chars > max_chars)
         hard_boundary = bool(
             current and not _compatible_word_gap(event, word_start, gap, cfg)
         )
@@ -367,9 +370,7 @@ def _split_word_safe(
             hard_boundary
             and is_latin
             and gap <= cfg.silence_gap + 0.15
-            and _ends_soft_punctuation(
-                str(getattr(current[-1], "word", ""))
-            )
+            and _ends_soft_punctuation(str(getattr(current[-1], "word", "")))
         ):
             hard_boundary = False
         # English ASR often omits commas at clause boundaries. A moderate
@@ -379,14 +380,10 @@ def _split_word_safe(
             and is_latin
             and gap >= cfg.latin_pause_gap
             and (
-                event.start
-                + float(getattr(current[-1], "end", 0.0))
-                - current_start
+                event.start + float(getattr(current[-1], "end", 0.0)) - current_start
                 >= cfg.latin_pause_min_duration
             )
-            and not _ends_soft_punctuation(
-                str(getattr(current[-1], "word", ""))
-            )
+            and not _ends_soft_punctuation(str(getattr(current[-1], "word", "")))
         )
 
         if (
@@ -436,7 +433,10 @@ def _compatible_word_gap(
     if not cfg.allow_short_same_owner_merge:
         return False
     warning = str(getattr(event, "alignment_warning", "") or "")
-    if any(item in warning.split(";") for item in ("speaker_conflict", "discontinuous_physical_boundary")):
+    if any(
+        item in warning.split(";")
+        for item in ("speaker_conflict", "discontinuous_physical_boundary")
+    ):
         return False
     return True
 
@@ -475,11 +475,7 @@ def _should_split_soft_punctuation(
     previous = str(getattr(previous_word, "word", "")).strip()
     if not re.search(r"[,;；]$", previous) or not next_token:
         return False
-    duration = (
-        event.start
-        + float(getattr(previous_word, "end", 0.0))
-        - current_start
-    )
+    duration = event.start + float(getattr(previous_word, "end", 0.0)) - current_start
     if duration < cfg.soft_punctuation_min_duration:
         return False
     normalized_next = next_token.strip(" \t\n\r\"'([{“‘").casefold()
@@ -547,8 +543,14 @@ def _make_piece(
     else:
         source_start = getattr(source, "physical_start", None)
         source_end = getattr(source, "physical_end", None)
-        piece.physical_start = max(piece.start, float(source_start)) if source_start is not None else piece.start
-        piece.physical_end = min(piece.end, float(source_end)) if source_end is not None else piece.end
+        piece.physical_start = (
+            max(piece.start, float(source_start))
+            if source_start is not None
+            else piece.start
+        )
+        piece.physical_end = (
+            min(piece.end, float(source_end)) if source_end is not None else piece.end
+        )
     piece.revision_trace = [
         *list(getattr(source, "revision_trace", []) or []),
         {
@@ -569,7 +571,9 @@ def _make_piece(
     return piece
 
 
-def _filter_source_ids(source: SubtitleEvent, count: int, words: list[Any]) -> list[str]:
+def _filter_source_ids(
+    source: SubtitleEvent, count: int, words: list[Any]
+) -> list[str]:
     ids = list(getattr(source, "source_word_ids", []) or [])
     if not ids:
         return []
@@ -581,7 +585,9 @@ def _filter_source_ids(source: SubtitleEvent, count: int, words: list[Any]) -> l
         return ids[:count]
 
 
-def _normalize(events: list[SubtitleEvent], audio_duration: float | None) -> list[SubtitleEvent]:
+def _normalize(
+    events: list[SubtitleEvent], audio_duration: float | None
+) -> list[SubtitleEvent]:
     result = []
     for event in events:
         if audio_duration is not None:
@@ -596,7 +602,10 @@ def _normalize(events: list[SubtitleEvent], audio_duration: float | None) -> lis
 
 def _is_cjk_text(text: str) -> bool:
     chars = re.sub(r"\s", "", text)
-    return bool(chars) and sum("\u4e00" <= char <= "\u9fff" for char in chars) / len(chars) > 0.5
+    return (
+        bool(chars)
+        and sum("\u4e00" <= char <= "\u9fff" for char in chars) / len(chars) > 0.5
+    )
 
 
 def _is_latin_text(text: str) -> bool:
@@ -810,14 +819,26 @@ def _physical_owner_compatible(
         return str(value) if value is not None else None
 
     def span_start(span: Any) -> float:
-        return float(span.get("start", 0.0) if isinstance(span, dict) else getattr(span, "start", 0.0))
+        return float(
+            span.get("start", 0.0)
+            if isinstance(span, dict)
+            else getattr(span, "start", 0.0)
+        )
 
     def span_end(span: Any) -> float:
-        return float(span.get("end", 0.0) if isinstance(span, dict) else getattr(span, "end", 0.0))
+        return float(
+            span.get("end", 0.0)
+            if isinstance(span, dict)
+            else getattr(span, "end", 0.0)
+        )
 
     left_clip_ids = {clip_id(span) for span in left_spans if clip_id(span)}
     right_clip_ids = {clip_id(span) for span in right_spans if clip_id(span)}
-    if left_clip_ids and right_clip_ids and not left_clip_ids.intersection(right_clip_ids):
+    if (
+        left_clip_ids
+        and right_clip_ids
+        and not left_clip_ids.intersection(right_clip_ids)
+    ):
         return False
 
     ordered = sorted([*left_spans, *right_spans], key=span_start)
@@ -841,10 +862,14 @@ def _merge_event_in_place(previous: SubtitleEvent, current: SubtitleEvent) -> No
     previous.text = _append_text(previous.text, current.text)
     previous.end = max(float(previous.end), float(current.end))
     previous.words = [*(getattr(previous, "words", []) or []), *shifted_words]
-    previous.source_word_ids = list(dict.fromkeys([
-        *(getattr(previous, "source_word_ids", []) or []),
-        *(getattr(current, "source_word_ids", []) or []),
-    ]))
+    previous.source_word_ids = list(
+        dict.fromkeys(
+            [
+                *(getattr(previous, "source_word_ids", []) or []),
+                *(getattr(current, "source_word_ids", []) or []),
+            ]
+        )
+    )
     previous.physical_spans = [
         *(getattr(previous, "physical_spans", []) or []),
         *(getattr(current, "physical_spans", []) or []),
@@ -855,7 +880,11 @@ def _merge_event_in_place(previous: SubtitleEvent, current: SubtitleEvent) -> No
         if left is None:
             setattr(previous, field_name, right)
         elif right is not None:
-            setattr(previous, field_name, min(left, right) if field_name.endswith("start") else max(left, right))
+            setattr(
+                previous,
+                field_name,
+                min(left, right) if field_name.endswith("start") else max(left, right),
+            )
     warnings = _warning_set(previous) | _warning_set(current)
     previous.alignment_warning = ";".join(sorted(warnings)) or None
     if getattr(previous, "speaker_source", None) != getattr(

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Protocol, Sequence
+from typing import Any, Protocol
 
 from .evidence import CandidateEvidence, candidates_from_segments
 
@@ -17,7 +18,7 @@ class ReviewEnginePort(Protocol):
         sample_rate: int,
         window: Any,
         *,
-        language: Optional[str] = None,
+        language: str | None = None,
         cancellation_token: Any = None,
     ) -> Sequence[CandidateEvidence]:
         """Return evidence for a bounded review window."""
@@ -41,25 +42,30 @@ class QwenASRPort(ReviewEnginePort, Protocol):
 class ForcedAlignerPort(Protocol):
     name: str
 
-    def align(self, audio: Any, sample_rate: int, text: str, window: Any, *, language: Optional[str] = None) -> Sequence[Any]:
-        ...
+    def align(
+        self,
+        audio: Any,
+        sample_rate: int,
+        text: str,
+        window: Any,
+        *,
+        language: str | None = None,
+    ) -> Sequence[Any]: ...
 
 
 class SEDPort(Protocol):
     name: str
 
-    def detect(self, audio: Any, sample_rate: int, window: Any) -> dict[str, Any]:
-        ...
+    def detect(self, audio: Any, sample_rate: int, window: Any) -> dict[str, Any]: ...
 
 
 class SemanticReviewPort(Protocol):
     name: str
 
-    def review(self, text: str, context: str = "") -> dict[str, Any]:
-        ...
+    def review(self, text: str, context: str = "") -> dict[str, Any]: ...
 
 
-class ReviewEngineUnavailable(RuntimeError):
+class ReviewEngineUnavailableError(RuntimeError):
     """A review backend cannot run without breaking the base subtitle path."""
 
     def __init__(self, reason: str, detail: str = "") -> None:
@@ -94,14 +100,18 @@ class CallbackContextReASR:
     def __init__(self, callback: Callable[..., Sequence[CandidateEvidence]]):
         self._callback = callback
 
-    def review(self, audio: Any, sample_rate: int, window: Any, *, language: Optional[str] = None) -> Sequence[CandidateEvidence]:
+    def review(
+        self, audio: Any, sample_rate: int, window: Any, *, language: str | None = None
+    ) -> Sequence[CandidateEvidence]:
         return self._callback(audio, sample_rate, window, language=language)
 
 
 class CallbackForcedAligner:
     """Inject an external forced-aligner without coupling ASR to its SDK."""
 
-    def __init__(self, callback: Callable[..., Sequence[Any]], name: str = "forced-aligner"):
+    def __init__(
+        self, callback: Callable[..., Sequence[Any]], name: str = "forced-aligner"
+    ):
         self.name = name
         self._callback = callback
 
@@ -112,7 +122,7 @@ class CallbackForcedAligner:
         text: str,
         window: Any,
         *,
-        language: Optional[str] = None,
+        language: str | None = None,
     ) -> Sequence[Any]:
         return self._callback(
             audio,
@@ -137,7 +147,9 @@ class CallbackSED:
 class CallbackSemanticReview:
     """Inject structured semantic review while keeping LLM details outside ASR."""
 
-    def __init__(self, callback: Callable[..., dict[str, Any]], name: str = "semantic-review"):
+    def __init__(
+        self, callback: Callable[..., dict[str, Any]], name: str = "semantic-review"
+    ):
         self.name = name
         self._callback = callback
 
@@ -164,7 +176,7 @@ class WindowedASRContextReASR:
         sample_rate: int,
         window: Any,
         *,
-        language: Optional[str] = None,
+        language: str | None = None,
         cancellation_token: Any = None,
     ) -> Sequence[CandidateEvidence]:
         if cancellation_token is not None:
@@ -198,7 +210,7 @@ class WindowedASREngine(WindowedASRContextReASR):
         name: str,
         source: str,
         family: str,
-        model_name: Optional[str] = None,
+        model_name: str | None = None,
     ) -> None:
         super().__init__(engine_factory)
         self.name = name
@@ -223,7 +235,7 @@ __all__ = [
     "ForcedAlignerPort",
     "QwenASRPort",
     "ReviewEnginePort",
-    "ReviewEngineUnavailable",
+    "ReviewEngineUnavailableError",
     "ReviewUnavailable",
     "SEDPort",
     "SemanticReviewPort",

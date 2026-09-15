@@ -15,9 +15,8 @@ import numpy as np
 
 from vocal_subtitle.asr.base import WordTimestamp
 from vocal_subtitle.config import PipelineConfig
-from vocal_subtitle.diarization.base import DiarizationResult, SpeakerTurn
-from vocal_subtitle.diarization import early_turns as et
 from vocal_subtitle.diarization import speaker_fusion
+from vocal_subtitle.diarization.base import DiarizationResult, SpeakerTurn
 from vocal_subtitle.diarization.early_turns import (
     EarlyTurnsState,
     assign_event_speakers,
@@ -84,13 +83,16 @@ def _run_postprocess(pipeline, events, config):
 # "得了吧"核心场景（P2 词级切分）
 # ---------------------------------------------------------------------------
 
+
 def test_reaction_words_are_split_out_and_labeled_second_speaker():
     """A 长话轮 + B 短反应语、无静音间隙 → B 的词被切出并标 B。"""
     pipeline = _zh_pipeline()
-    pipeline._early_turns_state = _ok_state([
-        SpeakerTurn(0.0, 2.0, 0),
-        SpeakerTurn(2.0, 4.0, 1),
-    ])
+    pipeline._early_turns_state = _ok_state(
+        [
+            SpeakerTurn(0.0, 2.0, 0),
+            SpeakerTurn(2.0, 4.0, 1),
+        ]
+    )
     event = SubtitleEvent(
         1,
         0.0,
@@ -137,7 +139,10 @@ def test_overlapped_turn_region_is_marked_not_forced(monkeypatch):
     )
 
     events, diag = assign_event_speakers(
-        [event], turns, word_split=True, language="zh",
+        [event],
+        turns,
+        word_split=True,
+        language="zh",
     )
 
     overlapped = [e for e in events if e.genuine_overlap]
@@ -148,6 +153,7 @@ def test_overlapped_turn_region_is_marked_not_forced(monkeypatch):
 # ---------------------------------------------------------------------------
 # run_early_global_pass 门控与回退
 # ---------------------------------------------------------------------------
+
 
 def test_early_pass_disabled_by_config_never_runs_global_pass(monkeypatch):
     config = PipelineConfig()
@@ -178,11 +184,18 @@ def test_early_pass_success_normalizes_turns(monkeypatch):
     monkeypatch.setattr(
         speaker_fusion,
         "_run_global_pass",
-        lambda audio, sample_rate, config: (global_result, "pyannote/community-1", "ok"),
+        lambda audio, sample_rate, config: (
+            global_result,
+            "pyannote/community-1",
+            "ok",
+        ),
     )
 
     state = run_early_global_pass(
-        np.zeros(4 * 16000, dtype=np.float32), 16000, config, duration=4.0,
+        np.zeros(4 * 16000, dtype=np.float32),
+        16000,
+        config,
+        duration=4.0,
     )
 
     assert state.active
@@ -238,7 +251,8 @@ def test_early_turns_false_keeps_postprocess_fusion_path(monkeypatch):
     pipeline = Pipeline(PipelineConfig())
     assert pipeline.config.diarization.early_turns is False
     pipeline._early_turns_state = EarlyTurnsState(
-        status="disabled", diagnostics={"reason": "early_turns_disabled"},
+        status="disabled",
+        diagnostics={"reason": "early_turns_disabled"},
     )
 
     fusion_result = speaker_fusion.SpeakerFusionResult(
@@ -286,7 +300,9 @@ def test_early_labeling_error_falls_back_to_fusion(monkeypatch):
     pipeline._early_turns_state.turns = None
 
     events, stats = _run_postprocess(
-        pipeline, [SubtitleEvent(1, 0.0, 1.0, "甲")], config,
+        pipeline,
+        [SubtitleEvent(1, 0.0, 1.0, "甲")],
+        config,
     )
 
     assert stats.diarization_backend == "unknown"
@@ -297,6 +313,7 @@ def test_early_labeling_error_falls_back_to_fusion(monkeypatch):
 # ---------------------------------------------------------------------------
 # 单说话人短路
 # ---------------------------------------------------------------------------
+
 
 def test_single_speaker_shortcut_skips_splitting_and_multi_speaker_path():
     """TTS/口播素材：turns ≤1 个说话人时跳过切分，整链继承单一标签。"""
@@ -324,10 +341,12 @@ def test_single_speaker_shortcut_skips_splitting_and_multi_speaker_path():
 def test_word_split_still_applies_when_shortcut_disabled():
     """single_speaker_shortcut=false → 即使单人也强制走全路径配置语义。"""
     pipeline = Pipeline(PipelineConfig())
-    pipeline._early_turns_state = _ok_state([
-        SpeakerTurn(0.0, 2.0, 0),
-        SpeakerTurn(2.0, 4.0, 1),
-    ])
+    pipeline._early_turns_state = _ok_state(
+        [
+            SpeakerTurn(0.0, 2.0, 0),
+            SpeakerTurn(2.0, 4.0, 1),
+        ]
+    )
     config = _postprocess_config(single_speaker_shortcut=False)
     event = SubtitleEvent(
         1,
@@ -348,6 +367,7 @@ def test_word_split_still_applies_when_shortcut_disabled():
 # P1：无词级时间戳 fallback 与 word_split=false 主说话人继承
 # ---------------------------------------------------------------------------
 
+
 def test_no_word_timestamps_fallback_uses_split_event_intervals():
     """无词级时间戳：保留整段单事件并标记降级,不压进首个说话人片段。
 
@@ -359,7 +379,10 @@ def test_no_word_timestamps_fallback_uses_split_event_intervals():
     event = SubtitleEvent(1, 0.0, 4.0, "整段文本")
 
     events, diag = assign_event_speakers(
-        [event], turns, word_split=True, language="zh",
+        [event],
+        turns,
+        word_split=True,
+        language="zh",
     )
 
     assert len(events) == 1
@@ -375,7 +398,10 @@ def test_word_split_off_inherits_dominant_speaker_without_splitting():
     """word_split=false：事件不切分，整事件继承主说话人。"""
     turns = [SpeakerTurn(0.0, 2.0, 0), SpeakerTurn(2.0, 4.0, 1)]
     event = SubtitleEvent(
-        1, 0.0, 4.0, "甲乙",
+        1,
+        0.0,
+        4.0,
+        "甲乙",
         words=[WordTimestamp("甲", 0.2, 1.8), WordTimestamp("乙", 2.1, 3.8)],
     )
 
@@ -407,6 +433,7 @@ def test_ids_are_compacted_and_labels_stable():
 # P1：reconcile_regions 接线（骨架 × turns）
 # ---------------------------------------------------------------------------
 
+
 def test_spans_from_skeleton_splits_and_merges_same_speaker():
     turns = [
         SpeakerTurn(0.0, 1.0, 0),
@@ -416,7 +443,10 @@ def test_spans_from_skeleton_splits_and_merges_same_speaker():
     ]
 
     spans = spans_from_skeleton(
-        [(0.0, 4.0)], turns, duration=4.0, boundary_collar_ms=0,
+        [(0.0, 4.0)],
+        turns,
+        duration=4.0,
+        boundary_collar_ms=0,
     )
 
     assert [(s.start, s.end, s.speaker_id) for s in spans] == [
@@ -430,7 +460,9 @@ def test_spans_from_skeleton_without_turn_coverage_keeps_unknown():
     turns = [SpeakerTurn(5.0, 6.0, 0)]
 
     spans = spans_from_skeleton(
-        [(0.0, 1.0)], turns, duration=6.0,
+        [(0.0, 1.0)],
+        turns,
+        duration=6.0,
     )
 
     assert len(spans) == 1
@@ -440,10 +472,12 @@ def test_spans_from_skeleton_without_turn_coverage_keeps_unknown():
 
 def test_attach_early_turns_context_and_segment_speaker_lookup():
     pipeline = Pipeline(PipelineConfig())
-    pipeline._early_turns_state = _ok_state([
-        SpeakerTurn(0.0, 2.0, 0),
-        SpeakerTurn(2.0, 4.0, 1),
-    ])
+    pipeline._early_turns_state = _ok_state(
+        [
+            SpeakerTurn(0.0, 2.0, 0),
+            SpeakerTurn(2.0, 4.0, 1),
+        ]
+    )
     pipeline._early_turn_spans = spans_from_skeleton(
         [(0.0, 4.0)],
         pipeline._early_turns_state.turns,
@@ -459,8 +493,8 @@ def test_attach_early_turns_context_and_segment_speaker_lookup():
     assert any("global_turn_count=2" in d for d in ctx.diagnostics)
 
     segments = [
-        SpeechSegment(0.2, 1.8),   # 说话人 A
-        SpeechSegment(2.1, 3.6),   # 说话人 B
+        SpeechSegment(0.2, 1.8),  # 说话人 A
+        SpeechSegment(2.1, 3.6),  # 说话人 B
     ]
     ids = pipeline._early_speaker_ids_for_segments(segments, ctx, duration=4.0)
     assert ids == [0, 1]
@@ -469,7 +503,9 @@ def test_attach_early_turns_context_and_segment_speaker_lookup():
     ctx_shifted = PipelineContext(audio_path=None, audio=None, sample_rate=16000)
     pipeline._attach_early_turns_context(ctx_shifted, time_offset=10.0)
     ids_shifted = pipeline._early_speaker_ids_for_segments(
-        segments, ctx_shifted, duration=4.0,
+        segments,
+        ctx_shifted,
+        duration=4.0,
     )
     assert ids_shifted == [None, None]  # 10s 之后无 turns 覆盖
 
@@ -478,7 +514,9 @@ def test_attach_early_turns_context_and_segment_speaker_lookup():
     ctx_turns_only.early_turns = list(pipeline._early_turns_state.turns)
     ctx_turns_only.early_turns_window_offset = 0.0
     ids_turns = pipeline._early_speaker_ids_for_segments(
-        segments, ctx_turns_only, duration=4.0,
+        segments,
+        ctx_turns_only,
+        duration=4.0,
     )
     assert ids_turns == [0, 1]
 
@@ -486,6 +524,7 @@ def test_attach_early_turns_context_and_segment_speaker_lookup():
 # ---------------------------------------------------------------------------
 # P1：tiny-fragment 合并的说话人安全检查
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _StubText:
@@ -502,7 +541,9 @@ def test_tiny_fragment_same_speaker_merges():
     speaker_ids = [0, 0]
 
     merged_segs, merged_asr, merged_ids = pipeline._filter_tiny_fragments(
-        segments, [_asr("1."), _asr("正文内容足够长")], speaker_ids,
+        segments,
+        [_asr("1."), _asr("正文内容足够长")],
+        speaker_ids,
     )
 
     assert len(merged_segs) == 1
@@ -536,7 +577,9 @@ def test_tiny_fragment_mixed_speaker_info_keeps_separate():
     segments = [SpeechSegment(0.0, 0.4), SpeechSegment(0.4, 2.0)]
 
     merged_segs, _, merged_ids = pipeline._filter_tiny_fragments(
-        segments, [_asr("1."), _asr("正文内容足够长")], [0, None],
+        segments,
+        [_asr("1."), _asr("正文内容足够长")],
+        [0, None],
     )
 
     assert len(merged_segs) == 2
@@ -549,7 +592,9 @@ def test_tiny_fragment_two_uncovered_segments_merge():
     segments = [SpeechSegment(0.0, 0.4), SpeechSegment(0.4, 2.0)]
 
     merged_segs, _, merged_ids = pipeline._filter_tiny_fragments(
-        segments, [_asr("1."), _asr("正文内容足够长")], [None, None],
+        segments,
+        [_asr("1."), _asr("正文内容足够长")],
+        [None, None],
     )
 
     assert len(merged_segs) == 1
@@ -562,7 +607,9 @@ def test_tiny_fragment_without_speaker_info_keeps_legacy_behavior():
     segments = [SpeechSegment(0.0, 0.4), SpeechSegment(0.4, 2.0)]
 
     merged_segs, _, merged_ids = pipeline._filter_tiny_fragments(
-        segments, [_asr("1."), _asr("正文内容足够长")], [],
+        segments,
+        [_asr("1."), _asr("正文内容足够长")],
+        [],
     )
 
     assert len(merged_segs) == 1
@@ -572,6 +619,7 @@ def test_tiny_fragment_without_speaker_info_keeps_legacy_behavior():
 # ---------------------------------------------------------------------------
 # P1：speaker_offset 补丁在 early_turns 生效时跳过
 # ---------------------------------------------------------------------------
+
 
 def test_early_turns_active_gate_controls_offset_patch():
     pipeline = Pipeline(PipelineConfig())
@@ -611,7 +659,10 @@ def test_pyannote_turn_overlapped_propagates_from_global_pass(monkeypatch):
     )
 
     state = run_early_global_pass(
-        np.zeros(4 * 16000, dtype=np.float32), 16000, config, duration=4.0,
+        np.zeros(4 * 16000, dtype=np.float32),
+        16000,
+        config,
+        duration=4.0,
     )
 
     assert state.active

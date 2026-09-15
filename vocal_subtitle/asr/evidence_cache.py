@@ -5,10 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
-from .evidence import DECISION_POLICY_VERSION, EVIDENCE_SCHEMA_VERSION, RISK_POLICY_VERSION
-
+from .evidence import (
+    DECISION_POLICY_VERSION,
+    EVIDENCE_SCHEMA_VERSION,
+    RISK_POLICY_VERSION,
+)
 
 EVIDENCE_CACHE_STAGE = "evidence"
 CACHE_KEY_VERSION = "evidence-cache-v2"
@@ -17,11 +20,9 @@ CACHE_KEY_VERSION = "evidence-cache-v2"
 class EvidenceCachePort(Protocol):
     """Minimal cache capability required by evidence review."""
 
-    def get(self, stage: str, key: str) -> Any:
-        ...
+    def get(self, stage: str, key: str) -> Any: ...
 
-    def set(self, stage: str, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        ...
+    def set(self, stage: str, key: str, value: Any, ttl: int | None = None) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -36,7 +37,7 @@ class EvidenceCacheKeyContext:
     phase: str
     engine: str
     model: str
-    language: Optional[str]
+    language: str | None
     route_version: str
     evidence_schema_version: str = EVIDENCE_SCHEMA_VERSION
     risk_policy_version: str = RISK_POLICY_VERSION

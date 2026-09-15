@@ -23,7 +23,8 @@ def _decision(requested="auto", selected="faster-whisper", fallback=None):
 
 def test_explicit_engine_has_no_fallback():
     plan = build_execution_plan(
-        config=SimpleNamespace(), decision=_decision("faster-whisper"),
+        config=SimpleNamespace(),
+        decision=_decision("faster-whisper"),
         requested_path="segmented",
     )
 
@@ -34,7 +35,8 @@ def test_explicit_engine_has_no_fallback():
 
 def test_auto_route_selects_probed_engine_without_fallback():
     plan = build_execution_plan(
-        config=SimpleNamespace(), decision=_decision("auto", "faster-whisper"),
+        config=SimpleNamespace(),
+        decision=_decision("auto", "faster-whisper"),
         requested_path="segmented",
     )
 
@@ -57,7 +59,8 @@ def test_funasr_fallback_is_explicit_transition():
 
 def test_explicit_global_failure_does_not_degrade_silently():
     plan = build_execution_plan(
-        config=SimpleNamespace(), decision=_decision("auto"),
+        config=SimpleNamespace(),
+        decision=_decision("auto"),
         requested_path="global",
     )
 
@@ -66,7 +69,8 @@ def test_explicit_global_failure_does_not_degrade_silently():
 
 def test_global_primary_falls_back_to_segmented():
     plan = build_execution_plan(
-        config=SimpleNamespace(), decision=_decision("auto"),
+        config=SimpleNamespace(),
+        decision=_decision("auto"),
         requested_path="global_primary",
     )
 

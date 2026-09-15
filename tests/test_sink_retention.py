@@ -25,11 +25,14 @@ from vocal_subtitle.feedback.journal_retention import (
 )
 
 
-def _make_sink_file(sink_dir: Path, name: str = "s-1.jsonl", content: str | None = None) -> Path:
+def _make_sink_file(
+    sink_dir: Path, name: str = "s-1.jsonl", content: str | None = None
+) -> Path:
     path = sink_dir / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        content or '{"schema": "edit-journal-v1", "type": "header", "session_id": "s-1"}\n',
+        content
+        or '{"schema": "edit-journal-v1", "type": "header", "session_id": "s-1"}\n',
         encoding="utf-8",
     )
     return path
@@ -44,6 +47,7 @@ def _age(path: Path, days: float) -> None:
 # ---------------------------------------------------------------------------
 # 消费后保留策略（归档 / 删除）
 # ---------------------------------------------------------------------------
+
 
 class TestApplyRetention:
     def test_archive_moves_to_consumed(self, tmp_path):
@@ -68,7 +72,9 @@ class TestApplyRetention:
     def test_missing_source_is_idempotent(self, tmp_path):
         """源文件已被归档/删除时重复执行不报错（幂等）"""
         sink = tmp_path / "journal_sink"
-        result = apply_retention(sink / "s-1.jsonl", policy=RETENTION_ARCHIVE, sink_dir=sink)
+        result = apply_retention(
+            sink / "s-1.jsonl", policy=RETENTION_ARCHIVE, sink_dir=sink
+        )
         assert result.action == "skipped"
         assert result.reason == "missing"
 
@@ -77,7 +83,10 @@ class TestApplyRetention:
         sink = tmp_path / "journal_sink"
         first = _make_sink_file(sink)
         apply_retention(first, policy=RETENTION_ARCHIVE, sink_dir=sink)
-        second = _make_sink_file(sink, content='{"schema": "edit-journal-v1", "type": "header", "session_id": "s-1", "v": 2}\n')
+        second = _make_sink_file(
+            sink,
+            content='{"schema": "edit-journal-v1", "type": "header", "session_id": "s-1", "v": 2}\n',
+        )
         result = apply_retention(second, policy=RETENTION_ARCHIVE, sink_dir=sink)
         assert result.action == "archived"
         archived = consumed_dir(sink) / "s-1.jsonl"
@@ -88,7 +97,9 @@ class TestApplyRetention:
         outside = tmp_path / "exports" / "demo.journal.jsonl"
         outside.parent.mkdir(parents=True)
         outside.write_text("{}", encoding="utf-8")
-        result = apply_retention(outside, policy=RETENTION_DELETE, sink_dir=tmp_path / "journal_sink")
+        result = apply_retention(
+            outside, policy=RETENTION_DELETE, sink_dir=tmp_path / "journal_sink"
+        )
         assert result.action == "skipped"
         assert result.reason == "outside-sink"
         assert outside.exists()
@@ -112,6 +123,7 @@ class TestApplyRetention:
 # ---------------------------------------------------------------------------
 # TTL 兜底清理（只清从未被消费的超期文件）
 # ---------------------------------------------------------------------------
+
 
 class TestCleanupExpired:
     def test_expired_file_removed(self, tmp_path):
@@ -184,6 +196,7 @@ class TestCleanupExpired:
 # feedback 配置节（默认 30 天，不写死）
 # ---------------------------------------------------------------------------
 
+
 class TestConfig:
     def test_defaults(self):
         cfg = FeedbackConfig()
@@ -192,9 +205,14 @@ class TestConfig:
 
     def test_yaml_overrides(self):
         """feedback 配置节可覆盖两个数值"""
-        cfg = ConfigLoader._parse_config({
-            "feedback": {"journal_sink_retention": "delete", "journal_sink_ttl_days": 7},
-        })
+        cfg = ConfigLoader._parse_config(
+            {
+                "feedback": {
+                    "journal_sink_retention": "delete",
+                    "journal_sink_ttl_days": 7,
+                },
+            }
+        )
         assert cfg.feedback.journal_sink_retention == "delete"
         assert cfg.feedback.journal_sink_ttl_days == 7
 
@@ -202,6 +220,7 @@ class TestConfig:
 # ---------------------------------------------------------------------------
 # CLI：ingest-journal 消费后清理 + cleanup-journal-sink 子命令
 # ---------------------------------------------------------------------------
+
 
 def _journal_event(session_id="s-cli", seq=0):
     return {
@@ -212,8 +231,13 @@ def _journal_event(session_id="s-cli", seq=0):
         "ts": "2026-09-10T00:00:00Z",
         "actor": "human",
         "command": "updateCueTimes",
-        "diff": [{"op": "modify", "id": "cue-1",
-                  "changes": [{"field": "start", "before": 1.0, "after": 0.99}]}],
+        "diff": [
+            {
+                "op": "modify",
+                "id": "cue-1",
+                "changes": [{"field": "start", "before": 1.0, "after": 0.99}],
+            }
+        ],
         "context": {},
     }
 
@@ -233,10 +257,14 @@ def cli_env(tmp_path, monkeypatch):
 
     sink = tmp_path / "journal_sink"
     monkeypatch.setattr(fb_cmds, "_default_sink_dir", lambda: sink)
-    monkeypatch.setattr(sample_manager.FeedbackSampleManager, "ingest",
-                        lambda self, **kwargs: None)
-    monkeypatch.setattr(sample_manager.FeedbackSampleManager, "count_by_status",
-                        lambda self, status=None: 0)
+    monkeypatch.setattr(
+        sample_manager.FeedbackSampleManager, "ingest", lambda self, **kwargs: None
+    )
+    monkeypatch.setattr(
+        sample_manager.FeedbackSampleManager,
+        "count_by_status",
+        lambda self, status=None: 0,
+    )
     return sink
 
 
@@ -248,7 +276,9 @@ class TestCli:
     def _invoke_ingest(self, runner, sink, *extra):
         journal = _make_sink_file(sink, name="s-cli.jsonl")
         lines = [
-            json.dumps({"schema": "edit-journal-v1", "type": "header", "session_id": "s-cli"}),
+            json.dumps(
+                {"schema": "edit-journal-v1", "type": "header", "session_id": "s-cli"}
+            ),
             json.dumps(_journal_event()),
         ]
         journal.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -256,7 +286,15 @@ class TestCli:
         _original_srt(original)
         result = runner.invoke(
             main,
-            ["feedback", "ingest-journal", str(journal), "--original", str(original), "--no-apply", *extra],
+            [
+                "feedback",
+                "ingest-journal",
+                str(journal),
+                "--original",
+                str(original),
+                "--no-apply",
+                *extra,
+            ],
         )
         return result, journal
 
@@ -303,18 +341,43 @@ class TestCli:
         cli_env.mkdir(parents=True, exist_ok=True)
         # good.journal.jsonl 配对 good.srt（自动发现成功）；bad.journal.jsonl 无配对（重放跳过）
         good = cli_env / "good.journal.jsonl"
-        good.write_text("\n".join([
-            json.dumps({"schema": "edit-journal-v1", "type": "header", "session_id": "s-good"}),
-            json.dumps(_journal_event()),
-        ]) + "\n", encoding="utf-8")
+        good.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "schema": "edit-journal-v1",
+                            "type": "header",
+                            "session_id": "s-good",
+                        }
+                    ),
+                    json.dumps(_journal_event()),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         _original_srt(cli_env / "good.srt")
         bad = cli_env / "bad.journal.jsonl"
-        bad.write_text("\n".join([
-            json.dumps({"schema": "edit-journal-v1", "type": "header", "session_id": "s-bad"}),
-            json.dumps(_journal_event()),
-        ]) + "\n", encoding="utf-8")
+        bad.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "schema": "edit-journal-v1",
+                            "type": "header",
+                            "session_id": "s-bad",
+                        }
+                    ),
+                    json.dumps(_journal_event()),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         result = runner.invoke(
-            main, ["feedback", "ingest-journal", str(good), str(bad), "--no-apply"],
+            main,
+            ["feedback", "ingest-journal", str(good), str(bad), "--no-apply"],
         )
         assert result.exit_code == 0, result.output
         # 成功消费的按策略删除；未消费的原地保留并明确计数
@@ -339,14 +402,18 @@ class TestCli:
         fresh = _make_sink_file(sink, name="new.jsonl")
         _age(expired, days=31)
 
-        result = runner.invoke(main, ["feedback", "cleanup-journal-sink", "--sink-dir", str(sink)])
+        result = runner.invoke(
+            main, ["feedback", "cleanup-journal-sink", "--sink-dir", str(sink)]
+        )
         assert result.exit_code == 0, result.output
         assert not expired.exists()
         assert fresh.exists()
         assert "已清理 1 个超期未消费的 sink 文件" in result.output
 
         # 重复运行幂等
-        again = runner.invoke(main, ["feedback", "cleanup-journal-sink", "--sink-dir", str(sink)])
+        again = runner.invoke(
+            main, ["feedback", "cleanup-journal-sink", "--sink-dir", str(sink)]
+        )
         assert again.exit_code == 0
         assert "无超期未消费的 sink 文件" in again.output
 
@@ -354,7 +421,9 @@ class TestCli:
         sink = tmp_path / "journal_sink"
         archived = _make_sink_file(sink, name=f"{CONSUMED_SUBDIR}/s-old.jsonl")
         _age(archived, days=400)
-        result = runner.invoke(main, ["feedback", "cleanup-journal-sink", "--sink-dir", str(sink)])
+        result = runner.invoke(
+            main, ["feedback", "cleanup-journal-sink", "--sink-dir", str(sink)]
+        )
         assert result.exit_code == 0, result.output
         assert archived.exists()
         assert "不参与 TTL 清理" in result.output
@@ -364,7 +433,15 @@ class TestCli:
         expired = _make_sink_file(sink)
         _age(expired, days=400)
         result = runner.invoke(
-            main, ["feedback", "cleanup-journal-sink", "--sink-dir", str(sink), "--ttl-days", "0"],
+            main,
+            [
+                "feedback",
+                "cleanup-journal-sink",
+                "--sink-dir",
+                str(sink),
+                "--ttl-days",
+                "0",
+            ],
         )
         assert result.exit_code == 0, result.output
         assert expired.exists()
@@ -376,7 +453,15 @@ class TestCli:
         recent = _make_sink_file(sink)
         _age(recent, days=2)
         result = runner.invoke(
-            main, ["feedback", "cleanup-journal-sink", "--sink-dir", str(sink), "--ttl-days", "1"],
+            main,
+            [
+                "feedback",
+                "cleanup-journal-sink",
+                "--sink-dir",
+                str(sink),
+                "--ttl-days",
+                "1",
+            ],
         )
         assert result.exit_code == 0, result.output
         assert not recent.exists()

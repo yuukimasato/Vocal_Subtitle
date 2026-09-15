@@ -30,16 +30,18 @@ class TestMacroChunker:
 
     @pytest.fixture
     def chunker(self):
-        return MacroChunker(MacroChunkConfig(
-            enabled=True,
-            auto_enable_threshold=3.0,
-            silence_threshold_db=-30,
-            min_silence_duration=2.0,
-            target_chunk_duration=60.0,
-            max_chunk_duration=180.0,
-            overlap_ms=200,
-            recursive=False,  # 测试中关闭递归
-        ))
+        return MacroChunker(
+            MacroChunkConfig(
+                enabled=True,
+                auto_enable_threshold=3.0,
+                silence_threshold_db=-30,
+                min_silence_duration=2.0,
+                target_chunk_duration=60.0,
+                max_chunk_duration=180.0,
+                overlap_ms=200,
+                recursive=False,  # 测试中关闭递归
+            )
+        )
 
     # ----------------------------------------------------------------
     # should_split
@@ -115,7 +117,9 @@ class TestMacroChunker:
         # 每个块的时长应在合理范围
         for chunk in chunks:
             assert chunk.duration > 0
-            assert chunk.duration <= chunker.config.max_chunk_duration + 5  # 允许少许超出
+            assert (
+                chunk.duration <= chunker.config.max_chunk_duration + 5
+            )  # 允许少许超出
 
     # ----------------------------------------------------------------
     # _recursive_split
@@ -126,14 +130,16 @@ class TestMacroChunker:
         from vocal_subtitle.utils.audio_utils import AudioUtils
         from vocal_subtitle.vad.ffmpeg_vad import FFmpegSilenceVAD
 
-        chunker = MacroChunker(MacroChunkConfig(
-            enabled=True,
-            auto_enable_threshold=3.0,
-            max_chunk_duration=180.0,
-            overlap_ms=200,
-            recursive=True,
-            recursive_thresholds=[(-30, 3.0)],
-        ))
+        chunker = MacroChunker(
+            MacroChunkConfig(
+                enabled=True,
+                auto_enable_threshold=3.0,
+                max_chunk_duration=180.0,
+                overlap_ms=200,
+                recursive=True,
+                recursive_thresholds=[(-30, 3.0)],
+            )
+        )
 
         sample_rate = 16000
         audio = np.zeros(int(sample_rate * 300), dtype=np.float32)
@@ -181,9 +187,11 @@ class TestMacroChunker:
         audio = np.zeros(int(sample_rate * 1.0), dtype=np.float32)
 
         stitched = chunker.stitch_chunks(
-            events_a, events_b,
+            events_a,
+            events_b,
             overlap_region=(2.5, 3.0),  # A 结束到 B 开始
-            audio=audio, sample_rate=sample_rate,
+            audio=audio,
+            sample_rate=sample_rate,
         )
         # 所有事件都应保留（无跨越 overlap 的冲突）
         assert len(stitched) >= 2
@@ -203,12 +211,14 @@ class TestMacroChunker:
         sample_rate = 16000
         audio = np.zeros(int(sample_rate * 1.0), dtype=np.float32)
         # 在 3.0s 处放最低能量
-        audio[int(3.0 * sample_rate):int(3.05 * sample_rate)] = 0.0
+        audio[int(3.0 * sample_rate) : int(3.05 * sample_rate)] = 0.0
 
         stitched = chunker.stitch_chunks(
-            events_a, events_b,
+            events_a,
+            events_b,
             overlap_region=(2.5, 3.5),
-            audio=audio, sample_rate=sample_rate,
+            audio=audio,
+            sample_rate=sample_rate,
         )
         # 跨 overlap 的事件应被截断或保留
         assert len(stitched) >= 1

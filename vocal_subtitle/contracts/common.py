@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
-from typing import Any, Mapping, Optional
+from typing import Any
 
 CONTRACT_VERSION = "backend-contract-v1"
 ROUTE_VERSION = "asr-route-v1"
@@ -37,8 +38,8 @@ class ErrorInfo:
     message: str = ""
     retryable: bool = False
     recoverable: bool = False
-    stage: Optional[str] = None
-    engine: Optional[str] = None
+    stage: str | None = None
+    engine: str | None = None
     details: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -54,7 +55,7 @@ class ErrorInfo:
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any] | None) -> "ErrorInfo | None":
+    def from_dict(cls, payload: Mapping[str, Any] | None) -> ErrorInfo | None:
         if not payload:
             return None
         return cls(
@@ -78,7 +79,7 @@ class ErrorInfo:
         engine: str | None = None,
         retryable: bool = False,
         recoverable: bool = False,
-    ) -> "ErrorInfo":
+    ) -> ErrorInfo:
         """Normalize an exception while deliberately excluding its traceback."""
         return cls(
             category=category,

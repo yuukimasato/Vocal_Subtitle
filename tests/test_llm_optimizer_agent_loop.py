@@ -44,6 +44,7 @@ def test_agent_loop_applies_llm_result_and_fires_callback(monkeypatch):
 
     # 测试环境不强制安装 [llm] extra，用标准 json 顶替 json_repair
     import json as _json
+
     monkeypatch.setattr(optimizer_mod, "_ensure_json_repair", lambda: _json)
     monkeypatch.setattr(optimizer_mod, "call_llm", fake_call_llm)
 
@@ -56,10 +57,12 @@ def test_agent_loop_applies_llm_result_and_fires_callback(monkeypatch):
         api_key="fake",
         update_callback=updates.append,
     )
-    result = opt.optimize({
-        "1": "大家好啊今天呢",
-        "2": "那么它其实就是这样的",
-    })
+    result = opt.optimize(
+        {
+            "1": "大家好啊今天呢",
+            "2": "那么它其实就是这样的",
+        }
+    )
 
     assert calls, "stubbed LLM should have been called"
     assert result["1"] == optimized["1"], (

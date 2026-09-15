@@ -18,7 +18,6 @@
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -34,41 +33,41 @@ logger = logging.getLogger(__name__)
 
 # 孤立副词 —— 前面可能缺少被修饰的形容词/动词
 ORPHAN_ADVERBS = re.compile(
-    r'^(very|quite|rather|extremely|unbearably|really|so|too|just|only|even|'
-    r'almost|nearly|barely|hardly|scarcely|completely|totally|absolutely|'
-    r'especially|particularly|especially|specifically|actually|basically|'
-    r'literally|definitely|certainly|probably|possibly|maybe|perhaps)$',
+    r"^(very|quite|rather|extremely|unbearably|really|so|too|just|only|even|"
+    r"almost|nearly|barely|hardly|scarcely|completely|totally|absolutely|"
+    r"especially|particularly|especially|specifically|actually|basically|"
+    r"literally|definitely|certainly|probably|possibly|maybe|perhaps)$",
     re.IGNORECASE,
 )
 
 # 孤立形容词 —— 前面可能缺少修饰它的副词
 ORPHAN_ADJECTIVES = re.compile(
-    r'^(hot|cold|warm|cool|big|small|large|tiny|good|bad|nice|great|'
-    r'loud|quiet|dark|bright|fast|slow|high|low|long|short|'
-    r'beautiful|ugly|expensive|cheap|heavy|light|hard|soft|'
-    r'easy|difficult|important|interesting|boring|amazing|terrible|'
-    r'new|old|young|wet|dry|clean|dirty|rich|poor|strong|weak)$',
+    r"^(hot|cold|warm|cool|big|small|large|tiny|good|bad|nice|great|"
+    r"loud|quiet|dark|bright|fast|slow|high|low|long|short|"
+    r"beautiful|ugly|expensive|cheap|heavy|light|hard|soft|"
+    r"easy|difficult|important|interesting|boring|amazing|terrible|"
+    r"new|old|young|wet|dry|clean|dirty|rich|poor|strong|weak)$",
     re.IGNORECASE,
 )
 
 # 孤立连词/介词 —— 如果段首有这些词，很可能上一段尾的词被切掉了
 ORPHAN_CONJUNCTIONS = re.compile(
-    r'^(and|but|or|so|because|if|when|that|which|who|whom|whose|'
-    r'where|while|although|though|unless|until|since|after|before|'
-    r'however|therefore|meanwhile|furthermore|moreover|otherwise|'
-    r'to|for|with|without|about|against|between|through|during|'
-    r'also|then|now|well|okay|right|yeah|yes|no)$',
+    r"^(and|but|or|so|because|if|when|that|which|who|whom|whose|"
+    r"where|while|although|though|unless|until|since|after|before|"
+    r"however|therefore|meanwhile|furthermore|moreover|otherwise|"
+    r"to|for|with|without|about|against|between|through|during|"
+    r"also|then|now|well|okay|right|yeah|yes|no)$",
     re.IGNORECASE,
 )
 
 # 孤立单音节功能词 —— 几乎不可能是独立句首
 ORPHAN_SINGLE_SYLLABLE = re.compile(
-    r'^(a|an|the|is|are|was|were|be|been|has|had|have|do|does|did|'
-    r'will|would|shall|should|can|could|may|might|must|'
-    r'it|he|she|they|we|you|i|me|him|her|us|them|'
-    r'my|your|his|its|our|their|'
-    r'this|that|these|those|there|here|'
-    r'not|up|down|in|on|at|by|off|out|over)$',
+    r"^(a|an|the|is|are|was|were|be|been|has|had|have|do|does|did|"
+    r"will|would|shall|should|can|could|may|might|must|"
+    r"it|he|she|they|we|you|i|me|him|her|us|them|"
+    r"my|your|his|its|our|their|"
+    r"this|that|these|those|there|here|"
+    r"not|up|down|in|on|at|by|off|out|over)$",
     re.IGNORECASE,
 )
 
@@ -82,16 +81,16 @@ CLAUSE_ENDINGS = {",", "，", ";", "；", ":", "：", "、", "—", "…"}
 class BoundaryConfidence:
     """单个边界的置信度评估结果"""
 
-    boundary_index: int                     # 边界索引（第 i 和第 i+1 段之间）
-    score: float                            # 置信度 0.0 ~ 1.0（越高越清晰）
-    triggers: List[str] = field(default_factory=list)  # 触发的低置信条件
-    gap_sec: float = 0.0                    # 段间时间间隙
-    energy_ratio: float = 1.0               # 边界能量斜率比
-    prev_text_end: str = ""                 # 前段尾文本（最后几个词）
-    next_text_start: str = ""               # 后段首文本（最前几个词）
-    prev_has_fake_period: bool = False      # 前段是否被 ASR 误加句号
-    next_is_orphan: bool = False            # 后段首是否孤儿词
-    needs_redundancy: bool = False          # 是否需要冗余处理
+    boundary_index: int  # 边界索引（第 i 和第 i+1 段之间）
+    score: float  # 置信度 0.0 ~ 1.0（越高越清晰）
+    triggers: list[str] = field(default_factory=list)  # 触发的低置信条件
+    gap_sec: float = 0.0  # 段间时间间隙
+    energy_ratio: float = 1.0  # 边界能量斜率比
+    prev_text_end: str = ""  # 前段尾文本（最后几个词）
+    next_text_start: str = ""  # 后段首文本（最前几个词）
+    prev_has_fake_period: bool = False  # 前段是否被 ASR 误加句号
+    next_is_orphan: bool = False  # 后段首是否孤儿词
+    needs_redundancy: bool = False  # 是否需要冗余处理
 
 
 @dataclass
@@ -99,15 +98,17 @@ class BoundaryRedundancyConfig:
     """边界冗余配置"""
 
     enabled: bool = True
-    min_gap_trigger: float = 0.05           # gap < 此值触发（秒）
-    max_energy_slope_trigger: float = 3.0   # 能量斜率 < 此值触发
-    confidence_threshold: float = 0.5       # score < 此值需要冗余
+    min_gap_trigger: float = 0.05  # gap < 此值触发（秒）
+    max_energy_slope_trigger: float = 3.0  # 能量斜率 < 此值触发
+    confidence_threshold: float = 0.5  # score < 此值需要冗余
     # 孤儿词模式（可扩展 Regex）
-    orphan_patterns: List[str] = field(default_factory=lambda: [
-        r'^(very|quite|rather|extremely|unbearably|really|so|too|just|only|even)$',
-        r'^(hot|cold|big|small|good|bad|nice|great|loud|quiet|dark|bright)$',
-        r'^(and|but|or|so|because|if|when|that|which|who|to|for|with)$',
-    ])
+    orphan_patterns: list[str] = field(
+        default_factory=lambda: [
+            r"^(very|quite|rather|extremely|unbearably|really|so|too|just|only|even)$",
+            r"^(hot|cold|big|small|good|bad|nice|great|loud|quiet|dark|bright)$",
+            r"^(and|but|or|so|because|if|when|that|which|who|to|for|with)$",
+        ]
+    )
     # 段首短词：词长 < 此值且是孤立功能词则记低分
     short_word_max_chars: int = 5
 
@@ -126,16 +127,16 @@ class BoundaryConfidenceEstimator:
         low_conf = [b for b in boundaries if b.needs_redundancy]
     """
 
-    def __init__(self, config: Optional[BoundaryRedundancyConfig] = None):
+    def __init__(self, config: BoundaryRedundancyConfig | None = None):
         self.config = config or BoundaryRedundancyConfig()
 
     def evaluate_all(
         self,
-        segments: List[SpeechSegment],
-        asr_results: List[List[TranscriptionSegment]],
-        audio: Optional[np.ndarray] = None,
+        segments: list[SpeechSegment],
+        asr_results: list[list[TranscriptionSegment]],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> List[BoundaryConfidence]:
+    ) -> list[BoundaryConfidence]:
         """评估所有段间边界
 
         Args:
@@ -154,9 +155,13 @@ class BoundaryConfidenceEstimator:
         boundaries = []
         for i in range(len(segments) - 1):
             bc = self._evaluate_single(
-                i, segments[i], segments[i + 1],
-                asr_results[i], asr_results[i + 1],
-                audio, sample_rate,
+                i,
+                segments[i],
+                segments[i + 1],
+                asr_results[i],
+                asr_results[i + 1],
+                audio,
+                sample_rate,
             )
             boundaries.append(bc)
 
@@ -165,7 +170,8 @@ class BoundaryConfidenceEstimator:
         if low_count > 0:
             logger.info(
                 "Boundary confidence: %d/%d boundaries need redundancy (%.0f%%)",
-                low_count, len(boundaries),
+                low_count,
+                len(boundaries),
                 100 * low_count / max(len(boundaries), 1),
             )
 
@@ -176,15 +182,15 @@ class BoundaryConfidenceEstimator:
         idx: int,
         seg_prev: SpeechSegment,
         seg_next: SpeechSegment,
-        asr_prev: List[TranscriptionSegment],
-        asr_next: List[TranscriptionSegment],
-        audio: Optional[np.ndarray],
+        asr_prev: list[TranscriptionSegment],
+        asr_next: list[TranscriptionSegment],
+        audio: np.ndarray | None,
         sample_rate: int,
     ) -> BoundaryConfidence:
         """评估单个边界"""
         cfg = self.config
 
-        triggers: List[str] = []
+        triggers: list[str] = []
         score = 1.0  # 起始满分
 
         # ---- 1. 收集文本信息 ----
@@ -200,13 +206,15 @@ class BoundaryConfidenceEstimator:
 
         if gap < cfg.min_gap_trigger:
             score -= 0.25
-            triggers.append(f"micro_gap:{gap*1000:.0f}ms")
+            triggers.append(f"micro_gap:{gap * 1000:.0f}ms")
 
         # ---- 3. 前段尾句号检测 ----
         prev_has_fake_period = False
         if prev_text:
             last_char = prev_text.rstrip()[-1]
-            last_word = prev_text.rstrip().split()[-1] if prev_text.rstrip().split() else ""
+            last_word = (
+                prev_text.rstrip().split()[-1] if prev_text.rstrip().split() else ""
+            )
 
             # 前段以句号结尾 且 最后一个词以逗号/连词结尾的子句 或 不是完整句
             if last_char in SENTENCE_ENDINGS:
@@ -219,14 +227,18 @@ class BoundaryConfidenceEstimator:
         # ---- 4. 后段首孤儿词检测 ----
         next_is_orphan = False
         if next_text:
-            first_word = next_text.strip().split()[0] if next_text.strip().split() else ""
+            first_word = (
+                next_text.strip().split()[0] if next_text.strip().split() else ""
+            )
             first_word_clean = first_word.rstrip(",.;:!?，。；：！？").lower()
 
             if len(first_word_clean) <= cfg.short_word_max_chars:
-                if (ORPHAN_ADVERBS.match(first_word_clean) or
-                        ORPHAN_ADJECTIVES.match(first_word_clean) or
-                        ORPHAN_CONJUNCTIONS.match(first_word_clean) or
-                        ORPHAN_SINGLE_SYLLABLE.match(first_word_clean)):
+                if (
+                    ORPHAN_ADVERBS.match(first_word_clean)
+                    or ORPHAN_ADJECTIVES.match(first_word_clean)
+                    or ORPHAN_CONJUNCTIONS.match(first_word_clean)
+                    or ORPHAN_SINGLE_SYLLABLE.match(first_word_clean)
+                ):
                     next_is_orphan = True
                     score -= 0.25
                     triggers.append(f"orphan_word:{first_word_clean}")
@@ -257,7 +269,10 @@ class BoundaryConfidenceEstimator:
         energy_ratio = 1.0
         if audio is not None:
             energy_ratio = self._estimate_energy_ratio(
-                audio, sample_rate, seg_prev.end, "offset",
+                audio,
+                sample_rate,
+                seg_prev.end,
+                "offset",
             )
             if energy_ratio < cfg.max_energy_slope_trigger:
                 score -= 0.15
@@ -285,7 +300,7 @@ class BoundaryConfidenceEstimator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _join_asr_text(asr_segs: List[TranscriptionSegment]) -> str:
+    def _join_asr_text(asr_segs: list[TranscriptionSegment]) -> str:
         """将 ASR 结果列表拼接为完整文本"""
         if not asr_segs:
             return ""
@@ -308,7 +323,7 @@ class BoundaryConfidenceEstimator:
         return " ".join(words[:n]) if len(words) >= n else " ".join(words)
 
     @staticmethod
-    def _get_all_words(asr_segs: List[TranscriptionSegment]) -> List:
+    def _get_all_words(asr_segs: list[TranscriptionSegment]) -> list:
         """从 ASR 结果中提取所有词级时间戳"""
         all_words = []
         for seg in asr_segs:
@@ -374,7 +389,7 @@ class BoundaryConfidenceEstimator:
                 frame_end = frame_start + frame_size
                 if 0 <= frame_start < len(audio) and frame_end <= len(audio):
                     frame = audio[frame_start:frame_end]
-                    energies.append(float(np.sqrt(np.mean(frame ** 2))))
+                    energies.append(float(np.sqrt(np.mean(frame**2))))
                 else:
                     energies.append(0.0)
 
@@ -394,7 +409,7 @@ class BoundaryConfidenceEstimator:
 
     def get_low_confidence_boundaries(
         self,
-        boundaries: List[BoundaryConfidence],
-    ) -> List[int]:
+        boundaries: list[BoundaryConfidence],
+    ) -> list[int]:
         """提取需要冗余处理的边界索引列表"""
         return [b.boundary_index for b in boundaries if b.needs_redundancy]

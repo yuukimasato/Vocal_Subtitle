@@ -11,14 +11,25 @@ import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_AUDIO_SUFFIXES = frozenset({
-    ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".opus",
-    ".wma", ".webm", ".mp4", ".mkv", ".mov",
-})
+SUPPORTED_AUDIO_SUFFIXES = frozenset(
+    {
+        ".mp3",
+        ".wav",
+        ".m4a",
+        ".flac",
+        ".aac",
+        ".ogg",
+        ".opus",
+        ".wma",
+        ".webm",
+        ".mp4",
+        ".mkv",
+        ".mov",
+    }
+)
 
 MIN_FREE_DISK_BYTES = 512 * 1024 * 1024  # 512 MB
 DISK_OVERHEAD_FACTOR = 3.0  # per TASK_STATE_MACHINE.md: 输出预估 × 3
@@ -118,20 +129,30 @@ def run_preflight_checks(
 
     # ---- 1. input_exists ----
     exists = input_path.exists() and os.access(input_path, os.R_OK)
-    checks.append(PreflightCheck(
-        key="input_exists", label="输入文件存在且可读", critical=True,
-        passed=exists,
-        reason="" if exists else f"文件不存在或不可读: {input_path}",
-    ))
+    checks.append(
+        PreflightCheck(
+            key="input_exists",
+            label="输入文件存在且可读",
+            critical=True,
+            passed=exists,
+            reason="" if exists else f"文件不存在或不可读: {input_path}",
+        )
+    )
 
     # ---- 2. format_supported ----
     suffix = input_path.suffix.lower()
     fmt_ok = suffix in SUPPORTED_AUDIO_SUFFIXES
-    checks.append(PreflightCheck(
-        key="format_supported", label="音频格式支持", critical=True,
-        passed=fmt_ok,
-        reason="" if fmt_ok else f"不支持的音频格式: {suffix}，支持 {sorted(SUPPORTED_AUDIO_SUFFIXES)}",
-    ))
+    checks.append(
+        PreflightCheck(
+            key="format_supported",
+            label="音频格式支持",
+            critical=True,
+            passed=fmt_ok,
+            reason=""
+            if fmt_ok
+            else f"不支持的音频格式: {suffix}，支持 {sorted(SUPPORTED_AUDIO_SUFFIXES)}",
+        )
+    )
 
     # ---- 3-5. engine availability ----
     checker = EngineAvailabilityChecker(config)
@@ -156,26 +177,39 @@ def run_preflight_checks(
         sep_reason = f"未知的分离引擎: {getattr(config.separation, 'engine', '')}"
     else:
         sep_reason = selected_sep.reason or f"状态: {selected_sep.status}"
-    checks.append(PreflightCheck(
-        key="separation_available", label="分离引擎可用",
-        critical=not skip_separation,
-        passed=sep_ready,
-        reason="" if sep_ready else sep_reason,
-    ))
+    checks.append(
+        PreflightCheck(
+            key="separation_available",
+            label="分离引擎可用",
+            critical=not skip_separation,
+            passed=sep_ready,
+            reason="" if sep_ready else sep_reason,
+        )
+    )
 
     # critical: VAD
-    checks.append(PreflightCheck(
-        key="vad_available", label="VAD 引擎可用", critical=True,
-        passed=critical["vad_available"],
-        reason="" if critical["vad_available"] else "缺少 VAD 引擎（Silero VAD 或 WebRTC VAD）",
-    ))
+    checks.append(
+        PreflightCheck(
+            key="vad_available",
+            label="VAD 引擎可用",
+            critical=True,
+            passed=critical["vad_available"],
+            reason=""
+            if critical["vad_available"]
+            else "缺少 VAD 引擎（Silero VAD 或 WebRTC VAD）",
+        )
+    )
 
     # critical: ASR
-    checks.append(PreflightCheck(
-        key="asr_available", label="至少一个 ASR 引擎可用", critical=True,
-        passed=critical["asr_available"],
-        reason="" if critical["asr_available"] else "缺少可用的 ASR 引擎",
-    ))
+    checks.append(
+        PreflightCheck(
+            key="asr_available",
+            label="至少一个 ASR 引擎可用",
+            critical=True,
+            passed=critical["asr_available"],
+            reason="" if critical["asr_available"] else "缺少可用的 ASR 引擎",
+        )
+    )
 
     # ---- 6. disk_space ----
     try:
@@ -188,11 +222,17 @@ def run_preflight_checks(
         disk_ok = usage.free >= required
     except OSError:
         disk_ok = True  # can't check; assume ok
-    checks.append(PreflightCheck(
-        key="disk_space", label="磁盘空间充足", critical=True,
-        passed=disk_ok,
-        reason="" if disk_ok else f"磁盘空间不足（需要 ≥ {required // 1024**2} MB）",
-    ))
+    checks.append(
+        PreflightCheck(
+            key="disk_space",
+            label="磁盘空间充足",
+            critical=True,
+            passed=disk_ok,
+            reason=""
+            if disk_ok
+            else f"磁盘空间不足（需要 ≥ {required // 1024**2} MB）",
+        )
+    )
 
     # ---- 7. output_writable ----
     try:
@@ -201,11 +241,15 @@ def run_preflight_checks(
         writable = os.access(output_parent, os.W_OK)
     except OSError:
         writable = False
-    checks.append(PreflightCheck(
-        key="output_writable", label="输出目录可写", critical=True,
-        passed=writable,
-        reason="" if writable else f"输出目录不可写: {output_parent}",
-    ))
+    checks.append(
+        PreflightCheck(
+            key="output_writable",
+            label="输出目录可写",
+            critical=True,
+            passed=writable,
+            reason="" if writable else f"输出目录不可写: {output_parent}",
+        )
+    )
 
     all_critical_pass = all(c.passed for c in checks if c.critical)
     return PreflightResult(
@@ -233,7 +277,7 @@ def _sync_lifecycle_from_availability(config) -> None:
         snapshot = checker.check_all()
 
         # 引擎键名映射：EngineAvailabilityChecker key → EngineRegistry key
-        _KEY_MAP = {
+        key_map = {
             "separation_uvr": "uvr",
             "separation_spleeter": "spleeter",
             "separation_open_unmix": "open-unmix",
@@ -257,7 +301,7 @@ def _sync_lifecycle_from_availability(config) -> None:
         lm = LifecycleManager(registry)
 
         for checker_key, entry in snapshot.entries.items():
-            registry_key = _KEY_MAP.get(checker_key)
+            registry_key = key_map.get(checker_key)
             if not registry_key:
                 continue
             eng = registry.get(registry_key)
@@ -279,8 +323,11 @@ def _sync_lifecycle_from_availability(config) -> None:
             if eng.status != target:
                 try:
                     lm.transition(
-                        registry_key, target,
-                        reason=f"Synced from availability check: {entry.reason}" if entry.reason else "Synced from availability check",
+                        registry_key,
+                        target,
+                        reason=f"Synced from availability check: {entry.reason}"
+                        if entry.reason
+                        else "Synced from availability check",
                         force=True,
                     )
                 except ValueError:

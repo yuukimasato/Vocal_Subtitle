@@ -18,11 +18,9 @@ import random
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from vocal_subtitle.quality.scene_slicer import (
-    DIMENSION_NAMES,
-    MAX_SINGLE_DIMENSION_RATIO,
     SceneSlicer,
 )
 
@@ -33,9 +31,11 @@ logger = logging.getLogger(__name__)
 class SamplingPlan:
     """抽样计划"""
 
-    version_id: str                # "D3-20260901-001"
+    version_id: str  # "D3-20260901-001"
     description: str = ""
-    strata: list[str] = field(default_factory=lambda: ["language", "scene", "speaker_count"])
+    strata: list[str] = field(
+        default_factory=lambda: ["language", "scene", "speaker_count"]
+    )
     quotas: dict[str, dict[str, int]] = field(default_factory=dict)
     min_per_stratum: int = 1
     seed: int = 42
@@ -58,7 +58,7 @@ class SamplingResult:
     selected: list[dict] = field(default_factory=list)
     rejected: list[str] = field(default_factory=list)
     balance: dict = field(default_factory=dict)
-    plan: Optional[SamplingPlan] = None
+    plan: SamplingPlan | None = None
 
     @property
     def sample_count(self) -> int:
@@ -96,10 +96,11 @@ class StratifiedSampler:
                                  description="首次 D3 抽样")
     """
 
-    def __init__(self, storage_dir: Optional[Path] = None):
-        self._storage_dir = Path(storage_dir or (
-            Path(__file__).parent.parent.parent / "cache" / "datasets" / "sampling"
-        ))
+    def __init__(self, storage_dir: Path | None = None):
+        self._storage_dir = Path(
+            storage_dir
+            or (Path(__file__).parent.parent.parent / "cache" / "datasets" / "sampling")
+        )
         self._storage_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
@@ -136,8 +137,8 @@ class StratifiedSampler:
         self,
         pool: list[dict],
         *,
-        strata: Optional[list[str]] = None,
-        quotas: Optional[dict[str, dict[str, int]]] = None,
+        strata: list[str] | None = None,
+        quotas: dict[str, dict[str, int]] | None = None,
         min_per_stratum: int = 1,
         seed: int = 42,
         description: str = "",
@@ -242,9 +243,7 @@ class StratifiedSampler:
 
         # 如果某维度超过 60%，尝试从超代表组移除一些
         for warning in balance.get("warnings", []):
-            logger.warning(
-                "Balance warning in D3 sample: %s", warning["message"]
-            )
+            logger.warning("Balance warning in D3 sample: %s", warning["message"])
 
         result = SamplingResult(
             selected=selected,
@@ -258,7 +257,9 @@ class StratifiedSampler:
 
         logger.info(
             "Stratified sampling complete: %d selected, %d rejected from %d pool",
-            len(selected), len(rejected_ids), len(pool),
+            len(selected),
+            len(rejected_ids),
+            len(pool),
         )
         return result
 
@@ -288,22 +289,29 @@ class StratifiedSampler:
                 DatasetTier,
                 DataVersionManager,
             )
+
             data_version_manager = DataVersionManager()
 
         from vocal_subtitle.quality.data_version_manager import DatasetTier
 
         plan = result.plan
-        version_id = plan.version_id if plan else f"D3-{datetime.now(timezone.utc).strftime('%Y%m%d')}-001"
+        version_id = (
+            plan.version_id
+            if plan
+            else f"D3-{datetime.now(timezone.utc).strftime('%Y%m%d')}-001"
+        )
 
         entries = []
         for sample in result.selected:
-            entries.append({
-                "sample_id": sample.get("sample_id", ""),
-                "language": sample.get("language", "unknown"),
-                "scene": sample.get("scene", "unknown"),
-                "scene_tags": self._extract_tags(sample),
-                "source_sample": sample.get("sample_id", ""),
-            })
+            entries.append(
+                {
+                    "sample_id": sample.get("sample_id", ""),
+                    "language": sample.get("language", "unknown"),
+                    "scene": sample.get("scene", "unknown"),
+                    "scene_tags": self._extract_tags(sample),
+                    "source_sample": sample.get("sample_id", ""),
+                }
+            )
 
         return data_version_manager.freeze(
             tier=DatasetTier.D3,

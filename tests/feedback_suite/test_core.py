@@ -1,6 +1,11 @@
 """Feedback tests: test_core."""
 
-from .common import *
+from datetime import datetime, timedelta
+
+import pytest
+
+from .common import _make_events
+
 
 class TestSubtitleAligner:
     """智能字幕对齐器测试"""
@@ -9,11 +14,13 @@ class TestSubtitleAligner:
         """完全匹配: 自动版与修订版完全相同 → 全部 1:1"""
         from vocal_subtitle.feedback.aligner import SubtitleAligner
 
-        events = _make_events([
-            (0.0, 2.0, "今天天气真不错"),
-            (2.5, 5.0, "我们去看电影吧"),
-            (5.5, 8.0, "你觉得怎么样"),
-        ])
+        events = _make_events(
+            [
+                (0.0, 2.0, "今天天气真不错"),
+                (2.5, 5.0, "我们去看电影吧"),
+                (5.5, 8.0, "你觉得怎么样"),
+            ]
+        )
 
         aligner = SubtitleAligner(semantic_enabled=False)
         pairs = aligner.align(events, events)
@@ -28,67 +35,86 @@ class TestSubtitleAligner:
         from vocal_subtitle.feedback.aligner import SubtitleAligner
 
         # 使用 _dtw_align 绕过 coverage 门控，直接测试 DTW 匹配逻辑
-        auto_sub = _make_events([
-            (0.0, 1.5, "所以我们需要"),
-            (1.5, 3.5, "考虑这个方案的可行性"),
-        ])
-        manual_sub = _make_events([
-            (0.0, 3.5, "所以我们需要考虑这个方案的可行性"),
-        ])
+        auto_sub = _make_events(
+            [
+                (0.0, 1.5, "所以我们需要"),
+                (1.5, 3.5, "考虑这个方案的可行性"),
+            ]
+        )
+        manual_sub = _make_events(
+            [
+                (0.0, 3.5, "所以我们需要考虑这个方案的可行性"),
+            ]
+        )
 
         aligner = SubtitleAligner(semantic_enabled=False)
         pairs = aligner._dtw_align(auto_sub, manual_sub)
 
         merge_pairs = [p for p in pairs if p.match_type in ("N:1", "N:M")]
-        assert len(merge_pairs) >= 1, f"Expected N:1 merge, got types: {[p.match_type for p in pairs]}"
+        assert len(merge_pairs) >= 1, (
+            f"Expected N:1 merge, got types: {[p.match_type for p in pairs]}"
+        )
 
     def test_1_to_n_split_detection(self):
         """1:N 检测: 自动版 1 条长句 → 修订版拆分为 2 条（通过 _dtw_align 测试）"""
         from vocal_subtitle.feedback.aligner import SubtitleAligner
 
-        auto_sub = _make_events([
-            (0.0, 5.0, "那么接下来我们看第二个问题也就是说如何优化性能"),
-        ])
-        manual_sub = _make_events([
-            (0.0, 2.5, "那么接下来我们看第二个问题"),
-            (2.5, 5.0, "也就是说如何优化性能"),
-        ])
+        auto_sub = _make_events(
+            [
+                (0.0, 5.0, "那么接下来我们看第二个问题也就是说如何优化性能"),
+            ]
+        )
+        manual_sub = _make_events(
+            [
+                (0.0, 2.5, "那么接下来我们看第二个问题"),
+                (2.5, 5.0, "也就是说如何优化性能"),
+            ]
+        )
 
         aligner = SubtitleAligner(semantic_enabled=False)
         pairs = aligner._dtw_align(auto_sub, manual_sub)
 
         split_pairs = [p for p in pairs if p.match_type in ("1:N", "N:M")]
-        assert len(split_pairs) >= 1, f"Expected 1:N split, got types: {[p.match_type for p in pairs]}"
+        assert len(split_pairs) >= 1, (
+            f"Expected 1:N split, got types: {[p.match_type for p in pairs]}"
+        )
 
     def test_insert_and_delete_detection(self):
         """INSERT/DELETE: 修订版增加/删除了字幕行（通过 _residual_match 测试）"""
         from vocal_subtitle.feedback.aligner import AlignmentPair, SubtitleAligner
 
         # 构造 3 对 1:1 匹配 + 1 个 auto 未匹配 + 1 个 manual 未匹配
-        auto_events = _make_events([
-            (0.0, 2.0, "第一句"),
-            (3.0, 5.0, "第二句"),   # manual 删除此句
-            (6.0, 8.0, "第三句"),
-        ])
-        manual_events = _make_events([
-            (0.0, 2.0, "第一句"),
-            (6.0, 8.0, "第三句"),
-            (9.0, 11.0, "新句子"),  # auto 没有此句
-        ])
+        auto_events = _make_events(
+            [
+                (0.0, 2.0, "第一句"),
+                (3.0, 5.0, "第二句"),  # manual 删除此句
+                (6.0, 8.0, "第三句"),
+            ]
+        )
+        manual_events = _make_events(
+            [
+                (0.0, 2.0, "第一句"),
+                (6.0, 8.0, "第三句"),
+                (9.0, 11.0, "新句子"),  # auto 没有此句
+            ]
+        )
 
         # 只提供已匹配的 2 对
-        from vocal_subtitle.feedback.aligner import _time_iou, _levenshtein_similarity
+        from vocal_subtitle.feedback.aligner import _levenshtein_similarity, _time_iou
+
         pairs = [
             AlignmentPair(
-                auto_events=[auto_events[0]], manual_events=[manual_events[0]],
+                auto_events=[auto_events[0]],
+                manual_events=[manual_events[0]],
                 match_type="1:1",
-                time_iou=_time_iou(0,2,0,2),
+                time_iou=_time_iou(0, 2, 0, 2),
                 text_similarity=_levenshtein_similarity("第一句", "第一句"),
             ),
             AlignmentPair(
-                auto_events=[auto_events[2]], manual_events=[manual_events[1]],
+                auto_events=[auto_events[2]],
+                manual_events=[manual_events[1]],
                 match_type="1:1",
-                time_iou=_time_iou(6,8,6,8),
+                time_iou=_time_iou(6, 8, 6, 8),
                 text_similarity=_levenshtein_similarity("第三句", "第三句"),
             ),
         ]
@@ -109,15 +135,14 @@ class TestSubtitleAligner:
         # 自动版 3 条 vs 手动版 15 条（完全不同的内容 + 数量悬殊）
         # DTW 只能匹配 ~3 条，其余为 INSERT/DELETE（不算 matched），
         # coverage = 3 / max(3, 15) = 20% < 70% → 应抛出异常
-        auto = _make_events([
-            (0.0, 2.0, "完全不同的一句"),
-            (3.0, 5.0, "完全不相关的另一句"),
-            (6.0, 8.0, "第三句也不像"),
-        ])
-        manual = _make_events([
-            (20.0, 22.0, f"完全不同的内容A{i}")
-            for i in range(15)
-        ])
+        auto = _make_events(
+            [
+                (0.0, 2.0, "完全不同的一句"),
+                (3.0, 5.0, "完全不相关的另一句"),
+                (6.0, 8.0, "第三句也不像"),
+            ]
+        )
+        manual = _make_events([(20.0, 22.0, f"完全不同的内容A{i}") for i in range(15)])
 
         aligner = SubtitleAligner(semantic_enabled=False)
         with pytest.raises(AlignmentError, match="coverage too low"):
@@ -139,18 +164,22 @@ class TestSubtitleAligner:
         """长停顿 (>2s) 能正确触发段落切分"""
         from vocal_subtitle.feedback.aligner import SubtitleAligner
 
-        auto = _make_events([
-            (0.0, 2.0, "段落A的第一句"),
-            (2.5, 4.0, "段落A的第二句"),
-            (7.0, 9.0, "段落B的第一句"),   # 间隔 3s > 2s
-            (9.5, 12.0, "段落B的第二句"),
-        ])
-        manual = _make_events([
-            (0.0, 2.2, "段落A的第一句修改"),
-            (2.5, 4.2, "段落A的第二句修改"),
-            (7.0, 9.2, "段落B的第一句修改"),
-            (9.5, 12.2, "段落B的第二句修改"),
-        ])
+        auto = _make_events(
+            [
+                (0.0, 2.0, "段落A的第一句"),
+                (2.5, 4.0, "段落A的第二句"),
+                (7.0, 9.0, "段落B的第一句"),  # 间隔 3s > 2s
+                (9.5, 12.0, "段落B的第二句"),
+            ]
+        )
+        manual = _make_events(
+            [
+                (0.0, 2.2, "段落A的第一句修改"),
+                (2.5, 4.2, "段落A的第二句修改"),
+                (7.0, 9.2, "段落B的第一句修改"),
+                (9.5, 12.2, "段落B的第二句修改"),
+            ]
+        )
 
         aligner = SubtitleAligner(semantic_enabled=False)
         anchors = aligner._find_global_anchors(auto, manual)
@@ -190,6 +219,7 @@ class TestSubtitleAligner:
 #  2. DiffAnalyzer 测试
 # ============================================================================
 
+
 class TestDiffAnalyzer:
     """差异分类与归因分析器测试"""
 
@@ -199,33 +229,42 @@ class TestDiffAnalyzer:
 
         pairs = []
         for i, (ae, me) in enumerate(zip(auto_events, manual_events)):
-            from vocal_subtitle.feedback.aligner import _levenshtein_similarity, _time_iou
+            from vocal_subtitle.feedback.aligner import (
+                _levenshtein_similarity,
+                _time_iou,
+            )
 
             iou = _time_iou(ae.start, ae.end, me.start, me.end)
             text_sim = _levenshtein_similarity(ae.text, me.text)
-            pairs.append(AlignmentPair(
-                auto_events=[ae],
-                manual_events=[me],
-                match_type=match_type,
-                time_iou=iou,
-                text_similarity=text_sim,
-                composite_score=(0.35 * iou + 0.30 * text_sim),
-            ))
+            pairs.append(
+                AlignmentPair(
+                    auto_events=[ae],
+                    manual_events=[me],
+                    match_type=match_type,
+                    time_iou=iou,
+                    text_similarity=text_sim,
+                    composite_score=(0.35 * iou + 0.30 * text_sim),
+                )
+            )
         return pairs
 
     def test_time_shift_attribution(self):
         """系统性后移 → 归因到 merging.padding"""
         from vocal_subtitle.feedback.diff_analyzer import DiffAnalyzer
 
-        auto = _make_events([
-            (0.0, 2.0, "今天天气不错"),
-            (2.5, 5.0, "我们去吧"),
-        ])
+        auto = _make_events(
+            [
+                (0.0, 2.0, "今天天气不错"),
+                (2.5, 5.0, "我们去吧"),
+            ]
+        )
         # 修订版：每句结束时间都后移了 150ms
-        manual = _make_events([
-            (0.0, 2.15, "今天天气不错"),
-            (2.5, 5.15, "我们去吧"),
-        ])
+        manual = _make_events(
+            [
+                (0.0, 2.15, "今天天气不错"),
+                (2.5, 5.15, "我们去吧"),
+            ]
+        )
 
         pairs = self._make_alignment_pairs(auto, manual)
         analyzer = DiffAnalyzer()
@@ -241,47 +280,64 @@ class TestDiffAnalyzer:
         from vocal_subtitle.feedback.aligner import AlignmentPair
         from vocal_subtitle.feedback.diff_analyzer import DiffAnalyzer
 
-        auto = _make_events([
-            (0.0, 1.0, "短句A"), (1.1, 2.0, "短句B"),
-            (3.0, 4.0, "短句C"), (4.1, 5.0, "短句D"),
-            (6.0, 7.0, "短句E"), (7.1, 8.0, "短句F"),
-            (9.0, 10.0, "独立句"),
-        ])
-        manual = _make_events([
-            (0.0, 2.0, "短句A短句B"),
-            (3.0, 5.0, "短句C短句D"),
-            (6.0, 8.0, "短句E短句F"),
-            (9.0, 10.0, "独立句"),
-        ])
+        auto = _make_events(
+            [
+                (0.0, 1.0, "短句A"),
+                (1.1, 2.0, "短句B"),
+                (3.0, 4.0, "短句C"),
+                (4.1, 5.0, "短句D"),
+                (6.0, 7.0, "短句E"),
+                (7.1, 8.0, "短句F"),
+                (9.0, 10.0, "独立句"),
+            ]
+        )
+        manual = _make_events(
+            [
+                (0.0, 2.0, "短句A短句B"),
+                (3.0, 5.0, "短句C短句D"),
+                (6.0, 8.0, "短句E短句F"),
+                (9.0, 10.0, "独立句"),
+            ]
+        )
 
         # 构造 N:1 对齐对
-        from vocal_subtitle.feedback.aligner import _time_iou, _levenshtein_similarity
+        from vocal_subtitle.feedback.aligner import _levenshtein_similarity, _time_iou
 
         pairs = []
         for i in range(3):
-            ae_group = auto[i * 2:(i + 1) * 2]
+            ae_group = auto[i * 2 : (i + 1) * 2]
             me = manual[i]
             iou = _time_iou(
-                min(e.start for e in ae_group), max(e.end for e in ae_group),
-                me.start, me.end,
+                min(e.start for e in ae_group),
+                max(e.end for e in ae_group),
+                me.start,
+                me.end,
             )
             text_sim = _levenshtein_similarity(
-                " ".join(e.text for e in ae_group), me.text,
+                " ".join(e.text for e in ae_group),
+                me.text,
             )
-            pairs.append(AlignmentPair(
-                auto_events=ae_group,
-                manual_events=[me],
-                match_type="N:1",
-                time_iou=iou,
-                text_similarity=text_sim,
-            ))
+            pairs.append(
+                AlignmentPair(
+                    auto_events=ae_group,
+                    manual_events=[me],
+                    match_type="N:1",
+                    time_iou=iou,
+                    text_similarity=text_sim,
+                )
+            )
         # 第 4 对 1:1
-        pairs.append(AlignmentPair(
-            auto_events=[auto[6]], manual_events=[manual[3]],
-            match_type="1:1",
-            time_iou=_time_iou(auto[6].start, auto[6].end, manual[3].start, manual[3].end),
-            text_similarity=_levenshtein_similarity(auto[6].text, manual[3].text),
-        ))
+        pairs.append(
+            AlignmentPair(
+                auto_events=[auto[6]],
+                manual_events=[manual[3]],
+                match_type="1:1",
+                time_iou=_time_iou(
+                    auto[6].start, auto[6].end, manual[3].start, manual[3].end
+                ),
+                text_similarity=_levenshtein_similarity(auto[6].text, manual[3].text),
+            )
+        )
 
         analyzer = DiffAnalyzer()
         report = analyzer.analyze(pairs)
@@ -312,10 +368,12 @@ class TestDiffAnalyzer:
         """完全相同的事件不应产生归因"""
         from vocal_subtitle.feedback.diff_analyzer import DiffAnalyzer
 
-        events = _make_events([
-            (0.0, 2.0, "完全一致"),
-            (2.5, 5.0, "毫无差异"),
-        ])
+        events = _make_events(
+            [
+                (0.0, 2.0, "完全一致"),
+                (2.5, 5.0, "毫无差异"),
+            ]
+        )
 
         pairs = self._make_alignment_pairs(events, events)
         analyzer = DiffAnalyzer()
@@ -327,22 +385,28 @@ class TestDiffAnalyzer:
 
     def test_param_isolation_suppresses_weaker(self):
         """同组耦合参数同时调整 → 仅保留置信度高的"""
-        from vocal_subtitle.feedback.param_learner import ParamDecoupler
         from vocal_subtitle.feedback.diff_analyzer import ParamAdjustment
+        from vocal_subtitle.feedback.param_learner import ParamDecoupler
 
         # llm_decision_min_gap 和 llm_decision_max_gap 在同一耦合组 ("interval")
         attr = {
             "merge_decision.llm_decision_min_gap": ParamAdjustment(
                 param_path="merge_decision.llm_decision_min_gap",
                 param_tier="medium_term",
-                observed_value=0.05, confidence=0.9, learn_weight=1.0,
-                direction="increase", reason="test min_gap",
+                observed_value=0.05,
+                confidence=0.9,
+                learn_weight=1.0,
+                direction="increase",
+                reason="test min_gap",
             ),
             "merge_decision.llm_decision_max_gap": ParamAdjustment(
                 param_path="merge_decision.llm_decision_max_gap",
                 param_tier="medium_term",
-                observed_value=0.10, confidence=0.5, learn_weight=1.0,
-                direction="decrease", reason="test max_gap",
+                observed_value=0.10,
+                confidence=0.5,
+                learn_weight=1.0,
+                direction="decrease",
+                reason="test max_gap",
             ),
         }
 
@@ -355,6 +419,7 @@ class TestDiffAnalyzer:
 # ============================================================================
 #  3. ParamLearner 测试
 # ============================================================================
+
 
 class TestParamLearner:
     """参数学习器测试"""
@@ -427,6 +492,7 @@ class TestParamLearner:
 # ============================================================================
 #  4. UserProfileManager 测试
 # ============================================================================
+
 
 class TestUserProfileManager:
     """用户配置文件管理测试"""
@@ -536,8 +602,13 @@ class TestUserProfileManager:
         from vocal_subtitle.feedback.user_profile import UserProfileManager
 
         mgr = UserProfileManager()
-        for name in ["__test_temp__", "__test_save__", "__test_rollback__",
-                      "__test_reset__", "__test_backup_rotation__"]:
+        for name in [
+            "__test_temp__",
+            "__test_save__",
+            "__test_rollback__",
+            "__test_reset__",
+            "__test_backup_rotation__",
+        ]:
             try:
                 mgr.delete(name)
             except Exception:
@@ -547,6 +618,7 @@ class TestUserProfileManager:
 # ============================================================================
 #  5. FewShotBuilder / FewShotCacheManager 测试
 # ============================================================================
+
 
 class TestFewShotCache:
     """Few-shot 示例缓存管理测试"""
@@ -559,12 +631,14 @@ class TestFewShotCache:
         )
 
         cache = FewShotCacheManager(max_capacity=20)
-        cache.add(FewShotExample(
-            example_type="merge",
-            fragments=["对", "就是说"],
-            decision="MERGE",
-            reason="填充词合并",
-        ))
+        cache.add(
+            FewShotExample(
+                example_type="merge",
+                fragments=["对", "就是说"],
+                decision="MERGE",
+                reason="填充词合并",
+            )
+        )
 
         active = cache.get_active_examples(max_count=5, min_weight=0.1)
         assert len(active) == 1
@@ -579,11 +653,13 @@ class TestFewShotCache:
 
         cache = FewShotCacheManager(max_capacity=5)
         for i in range(7):
-            cache.add(FewShotExample(
-                example_type="merge",
-                fragments=[f"片段{i}"],
-                decision="MERGE",
-            ))
+            cache.add(
+                FewShotExample(
+                    example_type="merge",
+                    fragments=[f"片段{i}"],
+                    decision="MERGE",
+                )
+            )
 
         assert cache.size() == 5  # max_capacity
 
@@ -595,18 +671,22 @@ class TestFewShotCache:
         )
 
         cache = FewShotCacheManager(max_capacity=20)
-        cache.add(FewShotExample(
-            example_type="merge",
-            fragments=["同一个片段"],
-            decision="MERGE",
-            weight=0.5,
-        ))
-        cache.add(FewShotExample(
-            example_type="merge",
-            fragments=["同一个片段"],
-            decision="MERGE",
-            weight=0.8,
-        ))
+        cache.add(
+            FewShotExample(
+                example_type="merge",
+                fragments=["同一个片段"],
+                decision="MERGE",
+                weight=0.5,
+            )
+        )
+        cache.add(
+            FewShotExample(
+                example_type="merge",
+                fragments=["同一个片段"],
+                decision="MERGE",
+                weight=0.8,
+            )
+        )
 
         assert cache.size() == 1
         active = cache.get_active_examples(min_weight=0.1)
@@ -621,21 +701,27 @@ class TestFewShotCache:
         )
 
         cache = FewShotCacheManager()
-        cache.add(FewShotExample(
-            example_type="merge",
-            fragments=["对", "就是说"],
-            decision="MERGE",
-            reason="填充词合并",
-        ))
-        cache.add(FewShotExample(
-            example_type="format",
-            rule="句末统一使用中文句号。",
-            reason="标点偏好",
-        ))
+        cache.add(
+            FewShotExample(
+                example_type="merge",
+                fragments=["对", "就是说"],
+                decision="MERGE",
+                reason="填充词合并",
+            )
+        )
+        cache.add(
+            FewShotExample(
+                example_type="format",
+                rule="句末统一使用中文句号。",
+                reason="标点偏好",
+            )
+        )
 
         builder = FewShotBuilder(cache_manager=cache, max_examples=3)
         base_prompt = "你是一个字幕优化助手。"
-        injected = builder.inject_into_prompt(base_prompt, max_examples=3, min_weight=0.1)
+        injected = builder.inject_into_prompt(
+            base_prompt, max_examples=3, min_weight=0.1
+        )
 
         assert "User Preference Examples" in injected
         assert "对" in injected
@@ -647,5 +733,3 @@ class TestFewShotCache:
 # ============================================================================
 #  6. HealthScorer 测试
 # ============================================================================
-
-

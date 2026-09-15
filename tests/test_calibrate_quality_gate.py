@@ -6,7 +6,9 @@ from pathlib import Path
 from scripts.calibrate_quality_gate import calibrate
 
 
-def test_calibration_reports_reference_metrics_and_unavailable_acoustic_gold(tmp_path: Path):
+def test_calibration_reports_reference_metrics_and_unavailable_acoustic_gold(
+    tmp_path: Path,
+):
     summary_path = tmp_path / "summary.json"
     summary = {
         "manifest": "test/quality_manifest.yaml",

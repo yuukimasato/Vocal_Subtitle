@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ..application.pipeline_result import PipelineStats
 from ..application.run_finalizer import finalize_task_state
@@ -19,8 +19,8 @@ class PipelineRunMixin(PipelineLifecycleMixin):
         self,
         input_path: Path,
         output_path: Path,
-        task_id: Optional[str],
-        stats: "PipelineStats",
+        task_id: str | None,
+        stats: PipelineStats,
         skip_separation: bool = False,
     ) -> None:
         """Compatibility wrapper for the application preflight component."""
@@ -35,9 +35,9 @@ class PipelineRunMixin(PipelineLifecycleMixin):
 
     def _finalize_task_state(
         self,
-        stats: "PipelineStats",
+        stats: PipelineStats,
         *,
-        result_payload: Optional[Dict[str, Any]] = None,
+        result_payload: dict[str, Any] | None = None,
     ) -> None:
         """Compatibility wrapper for task-history finalization."""
         finalize_task_state(self, stats, result_payload=result_payload)
@@ -45,10 +45,10 @@ class PipelineRunMixin(PipelineLifecycleMixin):
     def _generate_run_report(
         self,
         input_path: Path,
-        stats: "PipelineStats",
-        task_id: Optional[str] = None,
+        stats: PipelineStats,
+        task_id: str | None = None,
         sample_rate: int = 0,
-        final_subtitle_path: Optional[Path] = None,
+        final_subtitle_path: Path | None = None,
     ) -> None:
         """Compatibility wrapper for the run-report component."""
         generate_run_report(

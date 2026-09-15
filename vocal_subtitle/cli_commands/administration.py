@@ -5,7 +5,6 @@ from __future__ import annotations
 import platform
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 
@@ -15,18 +14,32 @@ from .common import profile_option, verbose_option
 
 @click.command("download-models")
 @click.option("--all", "download_all", is_flag=True, help="下载所有模型")
-@click.option("--asr-model", default=None,
-              type=click.Choice(["tiny", "small", "medium", "large-v3"]),
-              help="下载 faster-whisper ASR 模型")
+@click.option(
+    "--asr-model",
+    default=None,
+    type=click.Choice(["tiny", "small", "medium", "large-v3"]),
+    help="下载 faster-whisper ASR 模型",
+)
 @click.option("--separator", default=None, help="分离引擎 (uvr / spleeter)")
-@click.option("--speaker-model", "speaker_models", multiple=True,
-              type=click.Choice(["speechbrain-ecapa", "pyannote-embedding", "community-1", "diarization-3.1"]),
-              help="下载 speaker 模型，可重复指定")
+@click.option(
+    "--speaker-model",
+    "speaker_models",
+    multiple=True,
+    type=click.Choice(
+        ["speechbrain-ecapa", "pyannote-embedding", "community-1", "diarization-3.1"]
+    ),
+    help="下载 speaker 模型，可重复指定",
+)
 @click.option("--hf-token", default=None, help="Hugging Face Token（仅用于本次下载）")
 @click.option("--list-speaker-models", is_flag=True, help="列出 speaker 模型缓存状态")
-def download_models(download_all: bool, asr_model: Optional[str], separator: Optional[str],
-                    speaker_models: tuple[str, ...], hf_token: Optional[str],
-                    list_speaker_models: bool):
+def download_models(
+    download_all: bool,
+    asr_model: str | None,
+    separator: str | None,
+    speaker_models: tuple[str, ...],
+    hf_token: str | None,
+    list_speaker_models: bool,
+):
     """预下载模型文件。"""
     from ..diarization.model_registry import download_model, list_model_status
 
@@ -40,7 +53,9 @@ def download_models(download_all: bool, asr_model: Optional[str], separator: Opt
             raise click.ClickException(
                 f"faster-whisper 模型 {asr_model} 不可用: {exc}"
             ) from exc
-        click.echo(f"  ✓ {status['status']}: {status['model_ref']} (cache={status['cache_dir']})")
+        click.echo(
+            f"  ✓ {status['status']}: {status['model_ref']} (cache={status['cache_dir']})"
+        )
 
     if list_speaker_models:
         for item in list_model_status():
@@ -96,24 +111,36 @@ def info():
     if device_info["memory_mb"]:
         click.echo(f"  显存 (MB): {device_info['memory_mb']}")
     click.echo(f"  推荐计算精度: {device_info['recommended_compute_type']}")
-    click.echo(f"  推荐模型: {GPUDetector.select_whisper_model(GPUDetector.get_best_device())}")
+    click.echo(
+        f"  推荐模型: {GPUDetector.select_whisper_model(GPUDetector.get_best_device())}"
+    )
     gpu_mem = GPUDetector.get_gpu_memory_used_mb()
     if gpu_mem is not None:
         click.echo(f"  当前 GPU 显存使用: {gpu_mem:.0f} MB")
 
     click.echo("\n=== 引擎状态 ===")
     try:
-        from ..governance.engine_lifecycle import EngineRegistry, EngineLifecycle
+        from ..governance.engine_lifecycle import EngineLifecycle, EngineRegistry
 
         registry = EngineRegistry()
         status_counts = {status.value: 0 for status in EngineLifecycle}
         for engine in registry.list_all():
             status_counts[engine.status.value] += 1
-        icons = {"unavailable": "❌", "model_missing": "📥", "ready_shadow": "🔬",
-                 "ready_review": "🔍", "ready_default": "✅"}
-        status_lines = [f"{icons.get(status, '❓')} {status}: {count}"
-                        for status, count in status_counts.items() if count > 0]
-        click.echo(f"  {', '.join(status_lines)} (共 {len(registry.list_all())} 个引擎)")
+        icons = {
+            "unavailable": "❌",
+            "model_missing": "📥",
+            "ready_shadow": "🔬",
+            "ready_review": "🔍",
+            "ready_default": "✅",
+        }
+        status_lines = [
+            f"{icons.get(status, '❓')} {status}: {count}"
+            for status, count in status_counts.items()
+            if count > 0
+        ]
+        click.echo(
+            f"  {', '.join(status_lines)} (共 {len(registry.list_all())} 个引擎)"
+        )
     except Exception:
         pass
 
@@ -124,9 +151,13 @@ def info():
         experiments = ExperimentRegistry().list_all()
         statuses = {}
         for experiment in experiments:
-            statuses[experiment.status.value] = statuses.get(experiment.status.value, 0) + 1
+            statuses[experiment.status.value] = (
+                statuses.get(experiment.status.value, 0) + 1
+            )
         parts = [f"{status}: {count}" for status, count in sorted(statuses.items())]
-        click.echo(f"  {', '.join(parts) if parts else '(无)'} (共 {len(experiments)} 个实验)")
+        click.echo(
+            f"  {', '.join(parts) if parts else '(无)'} (共 {len(experiments)} 个实验)"
+        )
     except Exception:
         pass
 
@@ -141,7 +172,9 @@ def info():
             for task in history.list_recent(limit=5):
                 status = task.get("status", "unknown")
                 by_status[status] = by_status.get(status, 0) + 1
-            parts = [f"{status}: {count}" for status, count in sorted(by_status.items())]
+            parts = [
+                f"{status}: {count}" for status, count in sorted(by_status.items())
+            ]
             click.echo(f"  最近任务 ({min(5, total)}/{total}): {', '.join(parts)}")
         else:
             click.echo("  (无历史任务)")
@@ -150,13 +183,15 @@ def info():
 
     click.echo("\n=== 数据资产 ===")
     try:
-        from ..quality import DataVersionManager, DatasetTier
+        from ..quality import DatasetTier, DataVersionManager
 
         manager = DataVersionManager()
         for tier in DatasetTier:
             version = manager.current(tier)
             if version:
-                click.echo(f"  {tier.value}: {version.version_id} ({version.sample_count} 样本)")
+                click.echo(
+                    f"  {tier.value}: {version.version_id} ({version.sample_count} 样本)"
+                )
             else:
                 click.echo(f"  {tier.value}: 尚未建立")
     except Exception:
@@ -167,7 +202,9 @@ def info():
         from ..governance.release import ReleaseManager
 
         state = ReleaseManager().current_state()
-        click.echo(f"  版本: {state.get('current_version', 'N/A')} ({state.get('status', 'N/A')})")
+        click.echo(
+            f"  版本: {state.get('current_version', 'N/A')} ({state.get('status', 'N/A')})"
+        )
         blockers = state.get("blockers", [])
         if blockers:
             click.echo(f"  阻塞项: {len(blockers)} 项")
@@ -201,22 +238,46 @@ def experiment_group():
 
 
 @experiment_group.command("list")
-@click.option("--status", "-s", default=None, help="按状态过滤 (proposed/shadow/review/enabled/rolled_back)")
-@click.option("--category", "-c", default=None, help="按类别过滤 (engine/model/quantization/config/composite)")
-def experiment_list(status: Optional[str] = None, category: Optional[str] = None):
+@click.option(
+    "--status",
+    "-s",
+    default=None,
+    help="按状态过滤 (proposed/shadow/review/enabled/rolled_back)",
+)
+@click.option(
+    "--category",
+    "-c",
+    default=None,
+    help="按类别过滤 (engine/model/quantization/config/composite)",
+)
+def experiment_list(status: str | None = None, category: str | None = None):
     """列出所有注册实验。"""
     from ..governance.experiment_registry import ExperimentRegistry
 
     registry = ExperimentRegistry()
-    experiments = registry.list_by_status(status) if status else registry.list_by_category(category) if category else registry.list_all()
+    experiments = (
+        registry.list_by_status(status)
+        if status
+        else registry.list_by_category(category)
+        if category
+        else registry.list_all()
+    )
     if not experiments:
         click.echo("(无匹配实验)")
         return
     for experiment in experiments:
-        icon = {"proposed": "📋", "shadow": "🔬", "review": "🔍", "enabled": "✅", "rolled_back": "⬅️"}.get(experiment.status.value, "❓")
+        icon = {
+            "proposed": "📋",
+            "shadow": "🔬",
+            "review": "🔍",
+            "enabled": "✅",
+            "rolled_back": "⬅️",
+        }.get(experiment.status.value, "❓")
         click.echo(f"  {icon} [{experiment.status.value}] {experiment.experiment_id}")
         click.echo(f"     Name: {experiment.name}")
-        click.echo(f"     Scope: {experiment.enable_scope}  |  Category: {experiment.category.value}")
+        click.echo(
+            f"     Scope: {experiment.enable_scope}  |  Category: {experiment.category.value}"
+        )
         click.echo(f"     Benefit: {experiment.expected_benefit[:80]}")
         if experiment.known_risks:
             click.echo(f"     Risks: {len(experiment.known_risks)} items")
@@ -240,8 +301,12 @@ def experiment_show(experiment_id: str):
     click.echo(f"  Scope:      {experiment.enable_scope}")
     click.echo(f"  Owner:      {experiment.owner}")
     click.echo(f"  Created:    {experiment.created}")
-    click.echo(f"  Engines:    {', '.join(experiment.engines) if experiment.engines else 'N/A'}")
-    click.echo(f"  Models:     {', '.join(experiment.models) if experiment.models else 'N/A'}")
+    click.echo(
+        f"  Engines:    {', '.join(experiment.engines) if experiment.engines else 'N/A'}"
+    )
+    click.echo(
+        f"  Models:     {', '.join(experiment.models) if experiment.models else 'N/A'}"
+    )
     click.echo(f"  Languages:  {', '.join(experiment.languages)}")
     click.echo("\n  Expected Benefit:")
     click.echo(f"    {experiment.expected_benefit}")
@@ -289,14 +354,18 @@ def data_assets_list(tier: str = "D0"):
     click.echo("    D0-G01  non_speech_tone.wav (4.00s, 纯音与噪声)")
     click.echo("    D0-G02  repeated_phrase_me.wav (2.80s, 重复短语)")
     click.echo("\n  ✅/❌ = 人工修正字幕是否被自动化测试使用（非文件存在性）")
-    click.echo("  原评估清单 test/quality_manifest.yaml 已移除，场景定义见 docs/20260802/DATA_ASSETS.md")
+    click.echo(
+        "  原评估清单 test/quality_manifest.yaml 已移除，场景定义见 docs/20260802/DATA_ASSETS.md"
+    )
     click.echo("\n  D1-D4: 尚未建立（见 DATA_ASSETS.md）")
 
 
 @click.command("preflight")
 @click.argument("input_path", type=click.Path(exists=True))
 @profile_option
-@click.option("--output", "-o", default=None, help="预估输出路径（默认与输入同目录同名 .srt）")
+@click.option(
+    "--output", "-o", default=None, help="预估输出路径（默认与输入同目录同名 .srt）"
+)
 @verbose_option
 def preflight(input_path: str, profile: str, output: str | None, verbose: bool):
     """检查音频文件是否可被管道处理（只检查，不处理）。"""
@@ -308,13 +377,23 @@ def preflight(input_path: str, profile: str, output: str | None, verbose: bool):
     result = run_preflight_checks(in_path, out_path, config)
     click.echo(f"\n  预检结果 for: {in_path.name}\n  配置模板: {profile}\n")
     for check in result.checks:
-        icon = ("✅" if check.passed else "❌") if check.critical else ("⚠️" if not check.passed else "✅")
+        icon = (
+            ("✅" if check.passed else "❌")
+            if check.critical
+            else ("⚠️" if not check.passed else "✅")
+        )
         line = f"  {icon} {check.label}: {'通过' if check.passed else '未通过'}"
         click.echo(line + (f" — {check.reason}" if check.reason else ""))
     if result.engine_snapshot:
         click.echo("\n  引擎状态:")
         for engine, status in sorted(result.engine_snapshot.items()):
-            icon = "✅" if status.startswith("ready") else "⚠️" if status == "model_missing" else "❌"
+            icon = (
+                "✅"
+                if status.startswith("ready")
+                else "⚠️"
+                if status == "model_missing"
+                else "❌"
+            )
             click.echo(f"    {icon} {engine}: {status}")
     if result.passed:
         click.echo("\n  ✅ 预检通过，可以处理")
@@ -337,18 +416,36 @@ def engine_status():
     from ..governance.engine_lifecycle import EngineRegistry
 
     registry = EngineRegistry()
-    categories = {"分离": ["uvr", "spleeter", "open-unmix"], "VAD": ["silero", "webrtc"],
-                  "ASR": ["faster-whisper", "funasr", "qwen-asr", "whisper.cpp"],
-                  "复核": ["global-asr-evidence", "context-reasr", "qwen-review", "forced-aligner", "sed", "semantic-review"],
-                  "说话人": ["speechbrain-ecapa", "pyannote"]}
-    icons = {"unavailable": "❌", "model_missing": "📥", "ready_shadow": "🔬", "ready_review": "🔍", "ready_default": "✅"}
+    categories = {
+        "分离": ["uvr", "spleeter", "open-unmix"],
+        "VAD": ["silero", "webrtc"],
+        "ASR": ["faster-whisper", "funasr", "qwen-asr", "whisper.cpp"],
+        "复核": [
+            "global-asr-evidence",
+            "context-reasr",
+            "qwen-review",
+            "forced-aligner",
+            "sed",
+            "semantic-review",
+        ],
+        "说话人": ["speechbrain-ecapa", "pyannote"],
+    }
+    icons = {
+        "unavailable": "❌",
+        "model_missing": "📥",
+        "ready_shadow": "🔬",
+        "ready_review": "🔍",
+        "ready_default": "✅",
+    }
     for category, keys in categories.items():
         click.echo(f"\n  {category}:")
         for key in keys:
             engine = registry.get(key)
             if engine:
                 model = f" ({engine.model})" if engine.model else ""
-                click.echo(f"    {icons.get(engine.status.value, '❓')} {engine.engine}{model}: {engine.status.value}")
+                click.echo(
+                    f"    {icons.get(engine.status.value, '❓')} {engine.engine}{model}: {engine.status.value}"
+                )
     click.echo()
 
 
@@ -364,7 +461,9 @@ def quality_classify(text: str):
     from ..quality import IssueClassifier
 
     category = IssueClassifier.classify(text)
-    click.echo(f"  文本: {text[:80]}\n  类别: {category.value}\n  严重度: {IssueClassifier.assess_severity(category).value}")
+    click.echo(
+        f"  文本: {text[:80]}\n  类别: {category.value}\n  严重度: {IssueClassifier.assess_severity(category).value}"
+    )
 
 
 @quality_group.command("trend")
@@ -375,11 +474,26 @@ def quality_trend(version: str, baseline: str, date: str):
     """生成版本趋势报告。"""
     from ..quality import TrendReporter, VersionMetrics
 
-    report = VersionMetrics(version=version, date=date, baseline=baseline, trends={
-        "D0_engineering": {"test_pass_rate": 0.98, "regression_count": 0, "status": "ok"},
-        "D1_reference": {"status": "not_available"}, "D3_feedback": {"status": "not_available"},
-        "D4_challenge": {"status": "not_available"}, "operations": {"crash_rate": 0.001, "degradation_rate": 0.05, "status": "ok"},
-    })
+    report = VersionMetrics(
+        version=version,
+        date=date,
+        baseline=baseline,
+        trends={
+            "D0_engineering": {
+                "test_pass_rate": 0.98,
+                "regression_count": 0,
+                "status": "ok",
+            },
+            "D1_reference": {"status": "not_available"},
+            "D3_feedback": {"status": "not_available"},
+            "D4_challenge": {"status": "not_available"},
+            "operations": {
+                "crash_rate": 0.001,
+                "degradation_rate": 0.05,
+                "status": "ok",
+            },
+        },
+    )
     path = TrendReporter().write_report(report)
     click.echo(f"  趋势报告已生成: {path}\n  版本: {version} (基线: {baseline})")
 
@@ -387,12 +501,16 @@ def quality_trend(version: str, baseline: str, date: str):
 @quality_group.command("datasets")
 def quality_datasets():
     """列出数据集版本。"""
-    from ..quality import DataVersionManager, DatasetTier
+    from ..quality import DatasetTier, DataVersionManager
 
     manager = DataVersionManager()
     for tier in DatasetTier:
         version = manager.current(tier)
-        click.echo(f"  {tier.value}: {version.version_id} ({version.sample_count} 样本, {version.freeze_date})" if version else f"  {tier.value}: 尚未建立")
+        click.echo(
+            f"  {tier.value}: {version.version_id} ({version.sample_count} 样本, {version.freeze_date})"
+            if version
+            else f"  {tier.value}: 尚未建立"
+        )
 
 
 @click.group("release")
@@ -406,7 +524,9 @@ def release_status():
     from ..governance.release import ReleaseManager
 
     state = ReleaseManager().current_state()
-    click.echo(f"  当前版本: {state.get('current_version', 'N/A')}\n  发布状态: {state.get('status', 'N/A')}\n  目标状态: {state.get('target', 'N/A')}")
+    click.echo(
+        f"  当前版本: {state.get('current_version', 'N/A')}\n  发布状态: {state.get('status', 'N/A')}\n  目标状态: {state.get('target', 'N/A')}"
+    )
     blockers = state.get("blockers", [])
     if blockers:
         click.echo(f"\n  阻断项 ({len(blockers)}):")
@@ -427,28 +547,49 @@ def release_check(version: str):
     for section, items in checklist.sections.items():
         click.echo(f"  [{section}]")
         for item in items:
-            icon = "✅" if item["passed"] is True else "⬜" if item["passed"] is None else "❌"
+            icon = (
+                "✅"
+                if item["passed"] is True
+                else "⬜"
+                if item["passed"] is None
+                else "❌"
+            )
             click.echo(f"    {icon} {item['description']}")
         click.echo()
     if checklist.all_passed():
         click.echo("  ✅ 所有检查项通过")
     else:
-        pending = sum(1 for items in checklist.sections.values() for item in items if item["passed"] is not True)
+        pending = sum(
+            1
+            for items in checklist.sections.values()
+            for item in items
+            if item["passed"] is not True
+        )
         click.echo(f"  ⚠️ {pending} 项待完成或未通过")
 
 
 @release_group.command("notes")
 @click.option("--version", "-v", required=True, help="版本号")
-@click.option("--status", "-s", default="production-usable",
-              type=click.Choice(["development", "production-usable", "quality-improving"]), help="发布状态")
+@click.option(
+    "--status",
+    "-s",
+    default="production-usable",
+    type=click.Choice(["development", "production-usable", "quality-improving"]),
+    help="发布状态",
+)
 def release_notes(version: str, status: str):
     """生成版本发布说明。"""
     from ..governance.release import ReleaseManager, ReleaseStatus
 
-    click.echo(ReleaseManager.release_notes(version=version, status=ReleaseStatus(status),
-                                             changes={"优化": ["请在此填写具体变更"]},
-                                             upgrades=["请在此填写升级注意事项"],
-                                             known_issues=["请在此填写已知问题"]))
+    click.echo(
+        ReleaseManager.release_notes(
+            version=version,
+            status=ReleaseStatus(status),
+            changes={"优化": ["请在此填写具体变更"]},
+            upgrades=["请在此填写升级注意事项"],
+            known_issues=["请在此填写已知问题"],
+        )
+    )
 
 
 @release_group.command("limitations")
@@ -457,19 +598,23 @@ def release_limitations():
     from ..governance.release import ReleaseManager
 
     for limitation in ReleaseManager.list_known_limitations():
-        click.echo(f"  [{limitation['limitation_id']}] {limitation['title']}\n    问题: {limitation['description']}\n    缓解: {limitation['mitigation']}\n")
+        click.echo(
+            f"  [{limitation['limitation_id']}] {limitation['title']}\n    问题: {limitation['description']}\n    缓解: {limitation['mitigation']}\n"
+        )
 
 
 @release_group.command("support")
 @click.argument("issue", required=False)
-def release_support(issue: Optional[str] = None):
+def release_support(issue: str | None = None):
     """查看支持手册或搜索特定问题。"""
     from ..governance.release import ReleaseManager
 
     if issue:
         info = ReleaseManager.get_support_info(issue)
         if info:
-            click.echo(f"  问题: {info['issue']}\n  诊断: {info['diagnosis']}\n  解决: {info['resolution']}")
+            click.echo(
+                f"  问题: {info['issue']}\n  诊断: {info['diagnosis']}\n  解决: {info['resolution']}"
+            )
         else:
             click.echo(f"  未找到匹配问题: {issue}")
         return
@@ -486,5 +631,11 @@ def register(main) -> None:
     """Register administration commands on the public root group."""
     for command in (download_models, profiles, info, version_command, preflight):
         main.add_command(command)
-    for group in (experiment_group, data_assets_group, engine_group, quality_group, release_group):
+    for group in (
+        experiment_group,
+        data_assets_group,
+        engine_group,
+        quality_group,
+        release_group,
+    ):
         main.add_command(group)

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-
 DEFAULT_QWEN_MODEL = "qwen3-asr-1.7b"
 REVIEW_MODEL_DIR_ENV = "VOCAL_SUBTITLE_REVIEW_MODEL_DIR"
 

@@ -16,7 +16,6 @@ from vocal_subtitle.asr.evidence_review import (
     EvidenceReviewService,
 )
 from vocal_subtitle.config.models import EvidenceReviewConfig
-
 from vocal_subtitle.physical.timeline import PhysicalTimeline
 
 
@@ -54,9 +53,7 @@ def _global_candidate(**overrides):
         start=1.0,
         end=1.2,
         window_id="global",
-        words=(
-            EvidenceWord("global-word", "the right phrase", 1.02, 1.18, 0.95),
-        ),
+        words=(EvidenceWord("global-word", "the right phrase", 1.02, 1.18, 0.95),),
     )
     base.update(overrides)
     return CandidateEvidence(
@@ -109,9 +106,7 @@ def test_signal_only_config_keeps_global_out_of_replacement_set():
     # global 证据仍然作为 signal 参与风险评分。
     assert result.diagnostics["global_evidence_count"] == 1
     risk_codes = {
-        code
-        for item in result.diagnostics["risk"]
-        for code in item["evidence_codes"]
+        code for item in result.diagnostics["risk"] for code in item["evidence_codes"]
     }
     assert "global_text_conflict" in risk_codes
 
@@ -148,8 +143,7 @@ def test_enabled_admission_still_rejects_missing_word_times_and_window():
     global_diag = result.diagnostics["global_evidence"]
     assert global_diag["accepted_alternative_count"] == 0
     reasons = {
-        item["candidate_id"]: item["reasons"]
-        for item in global_diag["rejected"]
+        item["candidate_id"]: item["reasons"] for item in global_diag["rejected"]
     }
     assert "missing_word_timestamps" in reasons["global-untimed"]
     assert "missing_window_id" in reasons["global-nowindow"]

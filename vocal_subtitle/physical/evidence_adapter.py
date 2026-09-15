@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..vad.base import SpeechSegment
 from .timeline import PhysicalTimeline, SpeechEvidenceSpan
@@ -15,12 +16,12 @@ if TYPE_CHECKING:
 
 @dataclass
 class EvidenceAdaptResult:
-    evidence_spans: List[SpeechEvidenceSpan] = field(default_factory=list)
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    evidence_spans: list[SpeechEvidenceSpan] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
     skipped_count: int = 0
-    source_counts: Dict[str, int] = field(default_factory=dict)
+    source_counts: dict[str, int] = field(default_factory=dict)
 
-    def record_skip(self, message: str, source: Optional[str] = None) -> None:
+    def record_skip(self, message: str, source: str | None = None) -> None:
         self.skipped_count += 1
         self.diagnostics.setdefault("skipped", []).append(message)
         if source:
@@ -41,18 +42,24 @@ def _finite(value: Any, name: str) -> float:
     return result
 
 
-def _read_range(item: Any) -> Tuple[float, float]:
+def _read_range(item: Any) -> tuple[float, float]:
     if isinstance(item, Mapping):
         return _finite(item.get("start"), "start"), _finite(item.get("end"), "end")
     if isinstance(item, (tuple, list)):
         if len(item) < 2:
             raise ValueError("range tuple must contain start and end")
         return _finite(item[0], "start"), _finite(item[1], "end")
-    return _finite(getattr(item, "start", None), "start"), _finite(getattr(item, "end", None), "end")
+    return _finite(getattr(item, "start", None), "start"), _finite(
+        getattr(item, "end", None), "end"
+    )
 
 
-def _read_confidence(item: Any) -> Optional[float]:
-    value = item.get("confidence") if isinstance(item, Mapping) else getattr(item, "confidence", None)
+def _read_confidence(item: Any) -> float | None:
+    value = (
+        item.get("confidence")
+        if isinstance(item, Mapping)
+        else getattr(item, "confidence", None)
+    )
     if value is None:
         return None
     return _finite(value, "confidence")
@@ -65,7 +72,7 @@ def _add_items(
     source: str,
     *,
     time_offset: float,
-    physical_clip_id: Optional[str],
+    physical_clip_id: str | None,
 ) -> EvidenceAdaptResult:
     if not isinstance(source, str) or not source.strip():
         raise ValueError("source must be a non-empty string")
@@ -117,9 +124,16 @@ def adapt_speech_segments(
     source: str,
     *,
     time_offset: float = 0.0,
-    physical_clip_id: Optional[str] = None,
+    physical_clip_id: str | None = None,
 ) -> EvidenceAdaptResult:
-    return _add_items(segments, timeline, EvidenceAdaptResult(), source, time_offset=time_offset, physical_clip_id=physical_clip_id)
+    return _add_items(
+        segments,
+        timeline,
+        EvidenceAdaptResult(),
+        source,
+        time_offset=time_offset,
+        physical_clip_id=physical_clip_id,
+    )
 
 
 def adapt_ffmpeg_result(
@@ -127,7 +141,7 @@ def adapt_ffmpeg_result(
     timeline: PhysicalTimeline,
     *,
     time_offset: float = 0.0,
-    physical_clip_id: Optional[str] = None,
+    physical_clip_id: str | None = None,
 ) -> EvidenceAdaptResult:
     if not isinstance(result, Mapping):
         raise ValueError("ffmpeg result must be a mapping")
@@ -145,16 +159,27 @@ def adapt_ffmpeg_result(
             continue
         seen.add(field_name)
         value = result.get(field_name) or []
-        current = _add_items(value, timeline, output, source, time_offset=time_offset, physical_clip_id=physical_clip_id)
+        current = _add_items(
+            value,
+            timeline,
+            output,
+            source,
+            time_offset=time_offset,
+            physical_clip_id=physical_clip_id,
+        )
         output = current
     if "raw_silence_intervals" in result:
-        output.diagnostics["ffmpeg_raw_silence_intervals"] = len(result.get("raw_silence_intervals") or [])
+        output.diagnostics["ffmpeg_raw_silence_intervals"] = len(
+            result.get("raw_silence_intervals") or []
+        )
     if isinstance(result.get("diagnostics"), Mapping):
         output.diagnostics["input_diagnostics"] = dict(result["diagnostics"])
     return output
 
 
-def _merge_results(target: EvidenceAdaptResult, source_result: EvidenceAdaptResult) -> None:
+def _merge_results(
+    target: EvidenceAdaptResult, source_result: EvidenceAdaptResult
+) -> None:
     target.evidence_spans.extend(source_result.evidence_spans)
     target.skipped_count += source_result.skipped_count
     for key, value in source_result.source_counts.items():
@@ -173,7 +198,7 @@ def build_timeline_from_context(
     duration: float,
     *,
     time_offset: float = 0.0,
-    physical_clip_id: Optional[str] = None,
+    physical_clip_id: str | None = None,
 ) -> EvidenceAdaptResult:
     """Collect existing detector outputs without changing their algorithms."""
     if context is None or not hasattr(context, "ffmpeg_unified_result"):
@@ -184,11 +209,40 @@ def build_timeline_from_context(
     output = EvidenceAdaptResult()
     unified = context.ffmpeg_unified_result
     if unified:
-        _merge_results(output, adapt_ffmpeg_result(unified, timeline, time_offset=time_offset, physical_clip_id=physical_clip_id))
-    for field_name, source in (("silero_segments", "silero"), ("fused_segments", "boundary_fusion")):
-        _merge_results(output, adapt_speech_segments(getattr(context, field_name, []) or [], timeline, source, time_offset=time_offset, physical_clip_id=physical_clip_id))
+        _merge_results(
+            output,
+            adapt_ffmpeg_result(
+                unified,
+                timeline,
+                time_offset=time_offset,
+                physical_clip_id=physical_clip_id,
+            ),
+        )
+    for field_name, source in (
+        ("silero_segments", "silero"),
+        ("fused_segments", "boundary_fusion"),
+    ):
+        _merge_results(
+            output,
+            adapt_speech_segments(
+                getattr(context, field_name, []) or [],
+                timeline,
+                source,
+                time_offset=time_offset,
+                physical_clip_id=physical_clip_id,
+            ),
+        )
     if not unified:
-        _merge_results(output, adapt_speech_segments(context.ffmpeg_segments or [], timeline, "ffmpeg_coarse", time_offset=time_offset, physical_clip_id=physical_clip_id))
+        _merge_results(
+            output,
+            adapt_speech_segments(
+                context.ffmpeg_segments or [],
+                timeline,
+                "ffmpeg_coarse",
+                time_offset=time_offset,
+                physical_clip_id=physical_clip_id,
+            ),
+        )
     if getattr(context, "diagnostics", None):
         output.diagnostics["context_diagnostics"] = list(context.diagnostics)
     return output

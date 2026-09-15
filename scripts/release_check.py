@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -76,8 +75,8 @@ def check_models_status() -> dict:
 
     # Silero VAD
     try:
-        import torch  # noqa: F401
         import onnxruntime  # noqa: F401
+        import torch  # noqa: F401
     except ImportError:
         issues.append("torch/onnxruntime not installed (Silero VAD requires)")
 
@@ -132,20 +131,31 @@ def run_tests(test_pattern: str = "") -> dict:
         else:
             # Run core tests only (skip slow)
             cmd = [
-                sys.executable, "-m", "pytest",
+                sys.executable,
+                "-m",
+                "pytest",
                 str(PROJECT_ROOT / "tests" / "test_cli.py"),
                 str(PROJECT_ROOT / "tests" / "test_asr" / "test_router.py"),
-                "-x", "--tb=short",
+                "-x",
+                "--tb=short",
             ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, cwd=str(PROJECT_ROOT))
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=180, cwd=str(PROJECT_ROOT)
+        )
         passed = result.returncode == 0
         return {
             "name": f"Core tests ({test_pattern or 'test_cli + test_router'})",
             "passed": passed,
-            "issues": [] if passed else [result.stdout[-500:] if result.stdout else result.stderr[-500:]],
+            "issues": []
+            if passed
+            else [result.stdout[-500:] if result.stdout else result.stderr[-500:]],
         }
     except subprocess.TimeoutExpired:
-        return {"name": "Core tests", "passed": False, "issues": ["Test timeout (180s)"]}
+        return {
+            "name": "Core tests",
+            "passed": False,
+            "issues": ["Test timeout (180s)"],
+        }
     except Exception as e:
         return {"name": "Core tests", "passed": False, "issues": [str(e)]}
 
@@ -155,7 +165,10 @@ def check_cli_smoke() -> dict:
     try:
         result = subprocess.run(
             [sys.executable, "-m", "vocal_subtitle.cli", "--help"],
-            capture_output=True, text=True, timeout=30, cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(PROJECT_ROOT),
         )
         return {
             "name": "CLI smoke (--help)",
@@ -182,7 +195,9 @@ def check_architecture_state() -> dict:
     return {
         "name": "ARCHITECTURE_STATE.md present",
         "passed": state.exists(),
-        "issues": [] if state.exists() else ["docs/20260802/ARCHITECTURE_STATE.md not found"],
+        "issues": []
+        if state.exists()
+        else ["docs/20260802/ARCHITECTURE_STATE.md not found"],
     }
 
 
@@ -205,7 +220,9 @@ def run_all_checks() -> dict[str, Any]:
     try:
         checks.append(run_tests())
     except Exception:
-        checks.append({"name": "Core tests", "passed": False, "issues": ["Test runner error"]})
+        checks.append(
+            {"name": "Core tests", "passed": False, "issues": ["Test runner error"]}
+        )
 
     passed = sum(1 for c in checks if c["passed"])
     total = len(checks)
@@ -220,9 +237,7 @@ def run_all_checks() -> dict[str, Any]:
             "failed": total - passed,
             "all_pass": all_pass,
         },
-        "recommendation": (
-            "production-usable" if all_pass else "issues-found"
-        ),
+        "recommendation": ("production-usable" if all_pass else "issues-found"),
         "checks": checks,
     }
 
@@ -254,7 +269,9 @@ def main() -> None:
     # 持久化
     output_path = PROJECT_ROOT / "cache" / "release_check_report.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     print(f"\n  Report saved: {output_path}")
 
     sys.exit(0 if report["summary"]["all_pass"] else 1)

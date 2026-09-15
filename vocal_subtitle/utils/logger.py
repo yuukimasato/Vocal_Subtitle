@@ -4,16 +4,14 @@
 """
 
 import logging
-import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 
 def setup_logging(
     level: str = "INFO",
     log_format: str = "json",
-    log_file: Optional[str] = None,
+    log_file: str | None = None,
 ) -> logging.Logger:
     """配置结构化日志
 
@@ -74,7 +72,7 @@ def setup_logging(
 def _setup_standard_logging(
     root_logger: logging.Logger,
     level: str,
-    log_file: Optional[str] = None,
+    log_file: str | None = None,
 ) -> logging.Logger:
     """标准 logging 格式的降级配置"""
     fmt = logging.Formatter(

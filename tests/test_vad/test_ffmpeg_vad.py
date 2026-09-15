@@ -33,28 +33,32 @@ class TestFFmpegSilenceVAD:
     def test_invert_single_silence_middle(self):
         """中间一段静音 → 两段语音"""
         result = FFmpegSilenceVAD._invert_intervals(
-            [(3.0, 5.0)], total_duration=10.0,
+            [(3.0, 5.0)],
+            total_duration=10.0,
         )
         assert result == [(0.0, 3.0), (5.0, 10.0)]
 
     def test_invert_leading_silence(self):
         """开头静音 → 从第一个语音段开始"""
         result = FFmpegSilenceVAD._invert_intervals(
-            [(0.0, 2.0)], total_duration=10.0,
+            [(0.0, 2.0)],
+            total_duration=10.0,
         )
         assert result == [(2.0, 10.0)]
 
     def test_invert_trailing_silence(self):
         """结尾静音 → 最后一段语音到静音开始处"""
         result = FFmpegSilenceVAD._invert_intervals(
-            [(7.0, 10.0)], total_duration=10.0,
+            [(7.0, 10.0)],
+            total_duration=10.0,
         )
         assert result == [(0.0, 7.0)]
 
     def test_invert_min_speech_filter(self):
         """太短的语音段应被过滤"""
         result = FFmpegSilenceVAD._invert_intervals(
-            [(0.1, 5.0)], total_duration=10.0,
+            [(0.1, 5.0)],
+            total_duration=10.0,
             min_speech_duration=0.25,
         )
         # 0.0-0.1 只有 100ms < 250ms，应被过滤
@@ -64,7 +68,8 @@ class TestFFmpegSilenceVAD:
     def test_invert_multiple_silences(self):
         """多个静音区间"""
         result = FFmpegSilenceVAD._invert_intervals(
-            [(2.0, 3.0), (6.0, 7.0)], total_duration=10.0,
+            [(2.0, 3.0), (6.0, 7.0)],
+            total_duration=10.0,
         )
         assert result == [(0.0, 2.0), (3.0, 6.0), (7.0, 10.0)]
 
@@ -100,16 +105,20 @@ class TestFFmpegSilenceVAD:
         audio = np.zeros(int(sample_rate * 1.5), dtype=np.float32)
         # 语音段 1: 0.0-0.5s
         t1 = np.arange(0, int(0.5 * sample_rate)) / sample_rate
-        audio[:len(t1)] = np.sin(2 * np.pi * 440 * t1).astype(np.float32)
+        audio[: len(t1)] = np.sin(2 * np.pi * 440 * t1).astype(np.float32)
         # 语音段 2: 1.0-1.5s
         t2 = np.arange(0, int(0.5 * sample_rate)) / sample_rate
-        audio[int(1.0 * sample_rate):] = np.sin(2 * np.pi * 880 * t2).astype(np.float32)
+        audio[int(1.0 * sample_rate) :] = np.sin(2 * np.pi * 880 * t2).astype(
+            np.float32
+        )
 
         wav_path = temp_dir / "test_silence.wav"
         AudioUtils.save_audio(audio, wav_path)
 
         silence_intervals = FFmpegSilenceVAD._detect_silence(
-            wav_path, noise_db=-30.0, min_silence_duration=0.3,
+            wav_path,
+            noise_db=-30.0,
+            min_silence_duration=0.3,
         )
         # 中间应有约 0.5s 的静音
         assert len(silence_intervals) >= 1

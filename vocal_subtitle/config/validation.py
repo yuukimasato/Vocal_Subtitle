@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import List
-
 from .models import PipelineConfig
 
 
-def validate_config_consistency(config: PipelineConfig) -> List[str]:
+def validate_config_consistency(config: PipelineConfig) -> list[str]:
     """Return warnings for incompatible or suspicious configuration values."""
     warnings = []
     acoustic = config.acoustic_validation

@@ -11,7 +11,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "download_review_models.py"
 
@@ -47,10 +46,15 @@ def test_list_prints_json_registry(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert len(rows) == 4
     assert rows[0]["repo_id"] == "Qwen/Qwen3-ASR-1.7B"
-    assert rows[-1]["repo_url"] == "https://huggingface.co/MIT/ast-finetuned-audioset-10-10-0.4593"
+    assert (
+        rows[-1]["repo_url"]
+        == "https://huggingface.co/MIT/ast-finetuned-audioset-10-10-0.4593"
+    )
 
 
-def test_dry_run_does_not_import_or_call_huggingface(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_dry_run_does_not_import_or_call_huggingface(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     downloader = load_downloader()
 
     def fail_import(name, *args, **kwargs):
@@ -61,14 +65,19 @@ def test_dry_run_does_not_import_or_call_huggingface(tmp_path: Path, monkeypatch
     original_import = __import__
     monkeypatch.setattr("builtins.__import__", fail_import)
 
-    assert downloader.main(
-        ["--model", "qwen3-asr-1.7b", "--dry-run", "--cache-dir", str(tmp_path)]
-    ) == 0
+    assert (
+        downloader.main(
+            ["--model", "qwen3-asr-1.7b", "--dry-run", "--cache-dir", str(tmp_path)]
+        )
+        == 0
+    )
     assert not (tmp_path / "qwen3-asr-1.7b").exists()
     assert "https://huggingface.co/Qwen/Qwen3-ASR-1.7B" in capsys.readouterr().out
 
 
-def test_download_uses_local_dir_and_mirror_endpoint(tmp_path: Path, monkeypatch) -> None:
+def test_download_uses_local_dir_and_mirror_endpoint(
+    tmp_path: Path, monkeypatch
+) -> None:
     downloader = load_downloader()
     calls = []
 
@@ -80,7 +89,11 @@ def test_download_uses_local_dir_and_mirror_endpoint(tmp_path: Path, monkeypatch
         (target / "model.safetensors").write_bytes(b"weights")
         return str(target)
 
-    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=fake_snapshot_download))
+    monkeypatch.setitem(
+        sys.modules,
+        "huggingface_hub",
+        SimpleNamespace(snapshot_download=fake_snapshot_download),
+    )
 
     result = downloader.main(
         ["--model", "sed-ast-audioset", "--mirror", "--cache-dir", str(tmp_path)]

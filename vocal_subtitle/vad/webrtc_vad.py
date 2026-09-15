@@ -9,7 +9,6 @@
 
 import logging
 from pathlib import Path
-from typing import List
 
 import numpy as np
 
@@ -72,7 +71,7 @@ class WebRTCVAD(VADEngine):
         threshold: float = 0.5,
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 400,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """检测语音区间"""
         from ..utils.audio_utils import AudioUtils
 
@@ -88,7 +87,7 @@ class WebRTCVAD(VADEngine):
         threshold: float = 0.5,
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 400,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """在 numpy 数组上检测语音区间
 
         WebRTC VAD 要求帧长为 10/20/30ms 的整数倍，
@@ -100,8 +99,7 @@ class WebRTCVAD(VADEngine):
         # 确保采样率兼容
         if sample_rate not in self.VALID_SAMPLE_RATES:
             logger.warning(
-                "Sample rate %d not supported by WebRTC VAD, "
-                "resampling to 16000",
+                "Sample rate %d not supported by WebRTC VAD, resampling to 16000",
                 sample_rate,
             )
             sample_rate = 16000
@@ -152,10 +150,7 @@ class WebRTCVAD(VADEngine):
                 silence_count += 1
                 if silence_count >= min_silence_frames:
                     speech_end_frame = i - silence_count
-                    if (
-                        speech_end_frame - speech_start_frame
-                        >= min_speech_frames
-                    ):
+                    if speech_end_frame - speech_start_frame >= min_speech_frames:
                         segments.append(
                             SpeechSegment(
                                 start=speech_start_frame * frame_duration_ms / 1000.0,

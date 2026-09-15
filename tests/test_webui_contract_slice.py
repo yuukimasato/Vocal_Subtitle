@@ -15,13 +15,15 @@ def test_history_serializers_backfill_run_id_from_result():
         "id": "task-1",
         "input_file_name": "episode.wav",
         "status": "completed",
-        "result_json": json.dumps({
-            "contract_version": CONTRACT_VERSION,
-            "task_id": "task-1",
-            "run_id": "run-1",
-            "stats": {"run_id": "run-1", "quality_status": "pass"},
-            "events": [],
-        }),
+        "result_json": json.dumps(
+            {
+                "contract_version": CONTRACT_VERSION,
+                "task_id": "task-1",
+                "run_id": "run-1",
+                "stats": {"run_id": "run-1", "quality_status": "pass"},
+                "events": [],
+            }
+        ),
     }
 
     assert history_item(task)["run_id"] == "run-1"
@@ -29,20 +31,24 @@ def test_history_serializers_backfill_run_id_from_result():
 
 
 def test_task_status_exposes_standard_contract_fields(monkeypatch):
-    monkeypatch.setattr(api, "_task_store", {
-        "task-1": {
-            "task_id": "task-1",
-            "status": "degraded_completed",
-            "result": {
-                "contract_version": CONTRACT_VERSION,
+    monkeypatch.setattr(
+        api,
+        "_task_store",
+        {
+            "task-1": {
                 "task_id": "task-1",
-                "run_id": "run-1",
-                "artifacts": {"subtitle": "/tmp/subtitle.srt"},
-                "diagnostics": {"fallback": "review_unavailable"},
-                "stats": {"run_id": "run-1"},
-            },
-        }
-    })
+                "status": "degraded_completed",
+                "result": {
+                    "contract_version": CONTRACT_VERSION,
+                    "task_id": "task-1",
+                    "run_id": "run-1",
+                    "artifacts": {"subtitle": "/tmp/subtitle.srt"},
+                    "diagnostics": {"fallback": "review_unavailable"},
+                    "stats": {"run_id": "run-1"},
+                },
+            }
+        },
+    )
 
     response = TestClient(create_app()).get("/api/tasks/task-1")
 
@@ -57,15 +63,19 @@ def test_task_status_exposes_standard_contract_fields(monkeypatch):
 def test_input_audio_download_uses_session_input_file(tmp_path, monkeypatch):
     input_file = tmp_path / "input.wav"
     input_file.write_bytes(b"RIFF-test-audio")
-    monkeypatch.setattr(api, "_task_store", {
-        "task-1": {
-            "task_id": "task-1",
-            "status": "completed",
-            "session_dir": str(tmp_path),
-            "input_file_name": "episode.wav",
-            "result": {"run_id": "run-1"},
-        }
-    })
+    monkeypatch.setattr(
+        api,
+        "_task_store",
+        {
+            "task-1": {
+                "task_id": "task-1",
+                "status": "completed",
+                "session_dir": str(tmp_path),
+                "input_file_name": "episode.wav",
+                "result": {"run_id": "run-1"},
+            }
+        },
+    )
 
     response = TestClient(create_app()).get("/api/tasks/task-1/audio?type=input")
 

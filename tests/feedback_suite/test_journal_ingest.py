@@ -37,22 +37,27 @@ def _event(session_id="s-1", seq=0, command="updateCueTimes", diff=None, **extra
 
 
 def _ndjson(records) -> str:
-    return "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n"
+    return (
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n"
+    )
 
 
 # ---------------------------------------------------------------------------
 # 解析与校验
 # ---------------------------------------------------------------------------
 
+
 class TestParse:
     def test_header_events_rejected(self):
-        text = _ndjson([
-            {"schema": "edit-journal-v1", "type": "header", "session_id": "s-1"},
-            _event(seq=0),
-            {"schema": "wrong", "type": "event"},
-            "not json",
-            {"schema": "edit-journal-v1", "type": "event"},  # 缺必填字段
-        ])
+        text = _ndjson(
+            [
+                {"schema": "edit-journal-v1", "type": "header", "session_id": "s-1"},
+                _event(seq=0),
+                {"schema": "wrong", "type": "event"},
+                "not json",
+                {"schema": "edit-journal-v1", "type": "event"},  # 缺必填字段
+            ]
+        )
         header, events, rejected = parse_journal_text(text)
         assert header["session_id"] == "s-1"
         assert len(events) == 1
@@ -61,18 +66,32 @@ class TestParse:
     def test_load_files_dedupes_across_files(self, tmp_path):
         record = _event(seq=3)
         (tmp_path / "a.journal.jsonl").write_text(_ndjson([record]), encoding="utf-8")
-        (tmp_path / "b.journal.jsonl").write_text(_ndjson([record, _event(seq=4)]), encoding="utf-8")
-        files = load_journal_files([tmp_path / "a.journal.jsonl", tmp_path / "b.journal.jsonl"])
+        (tmp_path / "b.journal.jsonl").write_text(
+            _ndjson([record, _event(seq=4)]), encoding="utf-8"
+        )
+        files = load_journal_files(
+            [tmp_path / "a.journal.jsonl", tmp_path / "b.journal.jsonl"]
+        )
         assert files[0].events[0]["seq"] == 3
         assert [e["seq"] for e in files[1].events] == [4]  # 跨文件去重
 
     def test_legacy_session_field_alias_accepted(self):
         """早期编辑器导出以 session 命名会话字段（session_id 契约化前的旧名），摄取端双读"""
-        text = _ndjson([
-            {"schema": "edit-journal-v1", "type": "header", "session": "s-legacy"},
-            {"schema": "edit-journal-v1", "type": "event", "session": "s-legacy", "seq": 0,
-             "ts": "2026-09-10T00:00:00Z", "actor": "human", "command": "updateCueTimes", "diff": []},
-        ])
+        text = _ndjson(
+            [
+                {"schema": "edit-journal-v1", "type": "header", "session": "s-legacy"},
+                {
+                    "schema": "edit-journal-v1",
+                    "type": "event",
+                    "session": "s-legacy",
+                    "seq": 0,
+                    "ts": "2026-09-10T00:00:00Z",
+                    "actor": "human",
+                    "command": "updateCueTimes",
+                    "diff": [],
+                },
+            ]
+        )
         header, events, rejected = parse_journal_text(text)
         assert header["session"] == "s-legacy"
         assert len(events) == 1
@@ -80,13 +99,25 @@ class TestParse:
 
     def test_dedupe_treats_session_alias_as_same_key(self, tmp_path):
         """同一会话以 session 与 session_id 两种拼写重复导出时按 (会话, seq) 去重"""
-        legacy = {"schema": "edit-journal-v1", "type": "event", "session": "s-1", "seq": 5,
-                  "command": "updateCueTimes", "diff": []}
+        legacy = {
+            "schema": "edit-journal-v1",
+            "type": "event",
+            "session": "s-1",
+            "seq": 5,
+            "command": "updateCueTimes",
+            "diff": [],
+        }
         modern = _event(seq=5)
         (tmp_path / "old.journal.jsonl").write_text(_ndjson([legacy]), encoding="utf-8")
-        (tmp_path / "new.journal.jsonl").write_text(_ndjson([modern, _event(seq=6)]), encoding="utf-8")
-        files = load_journal_files([tmp_path / "old.journal.jsonl", tmp_path / "new.journal.jsonl"])
-        assert [e["seq"] for e in files[1].events] == [6]  # seq=5 为同一事件（别名同键）
+        (tmp_path / "new.journal.jsonl").write_text(
+            _ndjson([modern, _event(seq=6)]), encoding="utf-8"
+        )
+        files = load_journal_files(
+            [tmp_path / "old.journal.jsonl", tmp_path / "new.journal.jsonl"]
+        )
+        assert [e["seq"] for e in files[1].events] == [
+            6
+        ]  # seq=5 为同一事件（别名同键）
 
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(JournalIngestError):
@@ -96,6 +127,7 @@ class TestParse:
 # ---------------------------------------------------------------------------
 # 重放（原始字幕 + 日志 = 最终字幕）
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def original_srt(tmp_path):
@@ -114,19 +146,50 @@ class TestReplay:
         original = parse_subtitle_file(original_srt)
         events = [
             # 修改第一句时间
-            _event(seq=0, diff=[{"op": "modify", "id": "cue-a", "changes": [
-                {"field": "start", "before": 1.0, "after": 0.9},
-                {"field": "end", "before": 3.0, "after": 3.2},
-            ]}]),
+            _event(
+                seq=0,
+                diff=[
+                    {
+                        "op": "modify",
+                        "id": "cue-a",
+                        "changes": [
+                            {"field": "start", "before": 1.0, "after": 0.9},
+                            {"field": "end", "before": 3.0, "after": 3.2},
+                        ],
+                    }
+                ],
+            ),
             # 第二句与第三句合并（改第二句 end + 删第三句）
-            _event(seq=1, command="mergeWithNext", diff=[
-                {"op": "modify", "id": "cue-b", "changes": [{"field": "end", "before": 6.0, "after": 6.5}]},
-                {"op": "remove", "id": "cue-c", "index": 2, "cue": {"start": 8.0, "end": 10.0, "text": "第三句"}},
-            ]),
+            _event(
+                seq=1,
+                command="mergeWithNext",
+                diff=[
+                    {
+                        "op": "modify",
+                        "id": "cue-b",
+                        "changes": [{"field": "end", "before": 6.0, "after": 6.5}],
+                    },
+                    {
+                        "op": "remove",
+                        "id": "cue-c",
+                        "index": 2,
+                        "cue": {"start": 8.0, "end": 10.0, "text": "第三句"},
+                    },
+                ],
+            ),
             # 新增一行
-            _event(seq=2, command="insertAtTime", diff=[
-                {"op": "add", "id": "cue-new", "index": 2, "cue": {"start": 11.0, "end": 12.5, "text": "新增"}},
-            ]),
+            _event(
+                seq=2,
+                command="insertAtTime",
+                diff=[
+                    {
+                        "op": "add",
+                        "id": "cue-new",
+                        "index": 2,
+                        "cue": {"start": 11.0, "end": 12.5, "text": "新增"},
+                    },
+                ],
+            ),
         ]
         result = replay_journal(original, events)
         texts = [e.text for e in result.final_events]
@@ -147,8 +210,23 @@ class TestReplay:
 
     def test_empty_events_list_rejected(self, original_srt):
         original = parse_subtitle_file(original_srt)
-        result = replay_journal(original, [_event(seq=0, diff=[{"op": "modify", "id": "ghost", "changes": [
-            {"field": "start", "before": 99.0, "after": 98.0}]}])])
+        result = replay_journal(
+            original,
+            [
+                _event(
+                    seq=0,
+                    diff=[
+                        {
+                            "op": "modify",
+                            "id": "ghost",
+                            "changes": [
+                                {"field": "start", "before": 99.0, "after": 98.0}
+                            ],
+                        }
+                    ],
+                )
+            ],
+        )
         # 对不回任何原始事件 → 不精确（警告信号，不阻塞）
         assert result.exact is False
 
@@ -157,16 +235,47 @@ class TestReplay:
 # V1 统计与偏好
 # ---------------------------------------------------------------------------
 
+
 def _stats_events():
     return [
-        _event(seq=0, diff=[{"op": "modify", "id": "a", "changes": [
-            {"field": "start", "before": 1.0, "after": 0.9}]}],
-            context={"cue": {"gap_after": 1.5, "cps": 2.0}, "audio": {"nearest_speech_boundary": {"t": 0.92, "dist": 0.02}}}),
-        _event(seq=1, diff=[{"op": "modify", "id": "b", "changes": [
-            {"field": "end", "before": 3.0, "after": 3.3}]}],
-            context={"cue": {"gap_after": 2.5, "cps": 3.0}}, provenance={"source_stage": "asr"}),
-        _event(seq=2, command="removeCues", diff=[
-            {"op": "remove", "id": "c", "index": 0, "cue": {"start": 8.0, "end": 9.0, "text": "幻觉行"}}]),
+        _event(
+            seq=0,
+            diff=[
+                {
+                    "op": "modify",
+                    "id": "a",
+                    "changes": [{"field": "start", "before": 1.0, "after": 0.9}],
+                }
+            ],
+            context={
+                "cue": {"gap_after": 1.5, "cps": 2.0},
+                "audio": {"nearest_speech_boundary": {"t": 0.92, "dist": 0.02}},
+            },
+        ),
+        _event(
+            seq=1,
+            diff=[
+                {
+                    "op": "modify",
+                    "id": "b",
+                    "changes": [{"field": "end", "before": 3.0, "after": 3.3}],
+                }
+            ],
+            context={"cue": {"gap_after": 2.5, "cps": 3.0}},
+            provenance={"source_stage": "asr"},
+        ),
+        _event(
+            seq=2,
+            command="removeCues",
+            diff=[
+                {
+                    "op": "remove",
+                    "id": "c",
+                    "index": 0,
+                    "cue": {"start": 8.0, "end": 9.0, "text": "幻觉行"},
+                }
+            ],
+        ),
     ]
 
 
@@ -174,7 +283,11 @@ class TestStatistics:
     def test_summary(self):
         header = {"schema": "edit-journal-v1", "type": "header", "session_id": "s-1"}
         _, events, _ = parse_journal_text(_ndjson([header, *_stats_events()]))
-        journal_file = type("JF", (), {"path": Path("x"), "header": header, "events": events, "skipped": 0})()
+        journal_file = type(
+            "JF",
+            (),
+            {"path": Path("x"), "header": header, "events": events, "skipped": 0},
+        )()
         stats = journal_statistics([journal_file])
         assert stats.event_count == 3
         assert stats.session_count == 1
@@ -191,10 +304,17 @@ class TestStatistics:
 
 class TestEditorPreferences:
     def test_systematic_shift_only_above_threshold(self):
-        stats = type("S", (), {
-            "start_delta_median": -0.1, "end_delta_median": 0.005,
-            "gap_after_median": 0.8, "cps_p90": 4.5, "boundary_snap_rate": 0.9,
-        })()
+        stats = type(
+            "S",
+            (),
+            {
+                "start_delta_median": -0.1,
+                "end_delta_median": 0.005,
+                "gap_after_median": 0.8,
+                "cps_p90": 4.5,
+                "boundary_snap_rate": 0.9,
+            },
+        )()
         prefs = derive_editor_preferences(stats)
         assert prefs["editor.offset_start_ms"] == -100.0
         assert "editor.offset_end_ms" not in prefs  # 5ms 不足以体现系统性偏移
@@ -203,10 +323,17 @@ class TestEditorPreferences:
         assert prefs["editor.boundary_snap_to_speech"] == 1.0
 
     def test_no_preferences_without_signal(self):
-        stats = type("S", (), {
-            "start_delta_median": None, "end_delta_median": None,
-            "gap_after_median": None, "cps_p90": None, "boundary_snap_rate": None,
-        })()
+        stats = type(
+            "S",
+            (),
+            {
+                "start_delta_median": None,
+                "end_delta_median": None,
+                "gap_after_median": None,
+                "cps_p90": None,
+                "boundary_snap_rate": None,
+            },
+        )()
         assert derive_editor_preferences(stats) == {}
 
 
@@ -214,35 +341,63 @@ class TestEditorPreferences:
 # 事件级归因
 # ---------------------------------------------------------------------------
 
+
 class TestJournalAttribution:
     def test_padding_direction(self):
         events = [
-            _event(seq=0, diff=[{"op": "modify", "id": "a", "changes": [
-                {"field": "start", "before": 1.0, "after": 0.85}]}]),   # 开始提前 → padding_min ↑
-            _event(seq=1, diff=[{"op": "modify", "id": "b", "changes": [
-                {"field": "end", "before": 3.0, "after": 2.9}]}]),      # 结束收紧 → padding_max ↓
+            _event(
+                seq=0,
+                diff=[
+                    {
+                        "op": "modify",
+                        "id": "a",
+                        "changes": [{"field": "start", "before": 1.0, "after": 0.85}],
+                    }
+                ],
+            ),  # 开始提前 → padding_min ↑
+            _event(
+                seq=1,
+                diff=[
+                    {
+                        "op": "modify",
+                        "id": "b",
+                        "changes": [{"field": "end", "before": 3.0, "after": 2.9}],
+                    }
+                ],
+            ),  # 结束收紧 → padding_max ↓
         ]
         attribution = analyze_journal_events(events)
         assert attribution["merging.padding_min"].direction == "increase"
         assert attribution["merging.padding_max"].direction == "decrease"
 
     def test_merge_signal(self):
-        events = [
-            _event(seq=i, command="mergeWithNext") for i in range(4)
-        ] + [_event(seq=9, command="updateCueTimes")]
+        events = [_event(seq=i, command="mergeWithNext") for i in range(4)] + [
+            _event(seq=9, command="updateCueTimes")
+        ]
         attribution = analyze_journal_events(events)
         assert attribution["merge_decision.fast_merge_max_gap"].direction == "increase"
 
     def test_insufficient_behavior_no_attribution(self):
         assert analyze_journal_events([]) == {}
-        tiny = [_event(seq=0, diff=[{"op": "modify", "id": "a", "changes": [
-            {"field": "start", "before": 1.0, "after": 1.005}]}])]
+        tiny = [
+            _event(
+                seq=0,
+                diff=[
+                    {
+                        "op": "modify",
+                        "id": "a",
+                        "changes": [{"field": "start", "before": 1.0, "after": 1.005}],
+                    }
+                ],
+            )
+        ]
         assert analyze_journal_events(tiny) == {}  # 5ms 偏移不归因
 
 
 # ---------------------------------------------------------------------------
 # V3 触发机制（D16）
 # ---------------------------------------------------------------------------
+
 
 class TestV3Trigger:
     def test_no_thresholds_configured_skips(self):
@@ -251,7 +406,9 @@ class TestV3Trigger:
         assert "未配置" in message
 
     def test_thresholds_enforced(self):
-        ok, _ = check_v3_trigger(120, 0.9, 0.05, min_samples=100, min_coverage=0.8, max_conflict_rate=0.1)
+        ok, _ = check_v3_trigger(
+            120, 0.9, 0.05, min_samples=100, min_coverage=0.8, max_conflict_rate=0.1
+        )
         assert ok is True
         not_ok, _ = check_v3_trigger(50, 0.9, 0.05, min_samples=100)
         assert not_ok is False
@@ -262,6 +419,7 @@ class TestV3Trigger:
 # ---------------------------------------------------------------------------
 # 配套工具
 # ---------------------------------------------------------------------------
+
 
 class TestCompanions:
     def test_find_original_subtitle(self, original_srt):

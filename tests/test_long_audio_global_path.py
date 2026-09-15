@@ -5,7 +5,10 @@ from dataclasses import dataclass
 import numpy as np
 
 from vocal_subtitle.asr.base import ASREngine
-from vocal_subtitle.asr.global_transcriber import GlobalTranscriber, GlobalTranscriberConfig
+from vocal_subtitle.asr.global_transcriber import (
+    GlobalTranscriber,
+    GlobalTranscriberConfig,
+)
 
 
 @dataclass
@@ -47,10 +50,14 @@ def test_long_audio_is_bounded_and_reports_absolute_window_diagnostics():
     result = transcriber.transcribe(np.zeros(50, dtype=np.float32), 10)
 
     assert result.diagnostics["window_count"] == 3
-    assert all(item["end"] - item["start"] <= 2.0 for item in result.diagnostics["windows"])
+    assert all(
+        item["end"] - item["start"] <= 2.0 for item in result.diagnostics["windows"]
+    )
     assert result.diagnostics["failed_windows"] == []
     assert result.diagnostics["audio_duration"] == 5.0
-    assert all(0.0 <= word.raw_start <= word.raw_end <= 5.0 for word in result.transcript.words)
+    assert all(
+        0.0 <= word.raw_start <= word.raw_end <= 5.0 for word in result.transcript.words
+    )
 
 
 def test_long_audio_failed_window_is_retained_in_diagnostics():

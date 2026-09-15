@@ -1,7 +1,5 @@
 """Deterministic tests for task-level ASR routing."""
 
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 
@@ -49,11 +47,13 @@ def test_probe_windows_cover_short_audio_head_and_tail():
 
 
 def test_all_high_probability_chinese_windows_select_funasr():
-    router, probe = _router([
-        LanguageDetection("zh", 0.98, "tiny"),
-        LanguageDetection("zh", 0.91, "tiny"),
-        LanguageDetection("zh", 0.96, "tiny"),
-    ])
+    router, probe = _router(
+        [
+            LanguageDetection("zh", 0.98, "tiny"),
+            LanguageDetection("zh", 0.91, "tiny"),
+            LanguageDetection("zh", 0.96, "tiny"),
+        ]
+    )
     decision = router.decide(np.zeros(3000, dtype=np.float32), 1000)
     assert decision.selected_engine == "funasr"
     assert decision.detected_language == "zh"
@@ -62,21 +62,25 @@ def test_all_high_probability_chinese_windows_select_funasr():
 
 
 def test_any_english_window_selects_faster_whisper():
-    router, _ = _router([
-        LanguageDetection("zh", 0.99, "tiny"),
-        LanguageDetection("en", 0.99, "tiny"),
-        LanguageDetection("zh", 0.99, "tiny"),
-    ])
+    router, _ = _router(
+        [
+            LanguageDetection("zh", 0.99, "tiny"),
+            LanguageDetection("en", 0.99, "tiny"),
+            LanguageDetection("zh", 0.99, "tiny"),
+        ]
+    )
     decision = router.decide(np.zeros(3000, dtype=np.float32), 1000)
     assert decision.selected_engine == "faster-whisper"
     assert decision.detected_language == "en"
 
 
 def test_uncertain_or_probe_failure_selects_faster_whisper():
-    router, _ = _router([
-        LanguageDetection("zh", 0.50, "tiny"),
-        RuntimeError("probe failed"),
-    ])
+    router, _ = _router(
+        [
+            LanguageDetection("zh", 0.50, "tiny"),
+            RuntimeError("probe failed"),
+        ]
+    )
     decision = router.decide(np.zeros(3000, dtype=np.float32), 1000)
     assert decision.selected_engine == "faster-whisper"
     assert decision.decision_reason == "language_probe_failed"

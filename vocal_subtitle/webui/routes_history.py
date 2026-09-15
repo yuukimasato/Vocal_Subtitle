@@ -10,15 +10,14 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ..utils.session_manager import SessionManager
 from .api_serializers import history_detail, history_item
 from .models import CacheConfigUpdate, CacheInfoResponse, PersistenceSettingsModel
 from .runtime_state import state
 from .storage_services import WebUIStorageService
-from ..utils.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -33,7 +32,7 @@ _ACTIVE_TASK_STATUSES = frozenset({"pending", "running"})
 async def list_history(
     limit: int = Query(default=20, le=200),
     offset: int = Query(default=0, ge=0),
-    status: Optional[str] = Query(default=None),
+    status: str | None = Query(default=None),
 ):
     tasks = state.task_history.list(limit=limit, offset=offset, status=status)
     items = [history_item(task) for task in tasks]
@@ -116,7 +115,7 @@ async def delete_history(task_id: str):
 
 
 @router.delete("/history")
-async def clear_history(older_than_days: Optional[int] = Query(default=None)):
+async def clear_history(older_than_days: int | None = Query(default=None)):
     # 清空历史只作用于已结束的任务：排队中/运行中的任务条目、历史行与会话
     # 目录都要保留，否则运行线程完成时写回 task_store 会 KeyError，成功的
     # 结果会被错误地记成 failed，或从历史中直接消失。
@@ -181,7 +180,7 @@ async def get_cache_info():
 
 
 @router.delete("/cache")
-async def clear_cache(stage: Optional[str] = Query(default=None)):
+async def clear_cache(stage: str | None = Query(default=None)):
     """清除缓存
 
     Args:
@@ -276,7 +275,9 @@ async def apply_persistence(task_id: str):
 async def get_persisted_files(task_id: str):
     files = _get_persistence_mgr().get_persisted_files(task_id)
     if not files:
-        raise HTTPException(status_code=404, detail="No persisted files found for this task")
+        raise HTTPException(
+            status_code=404, detail="No persisted files found for this task"
+        )
     return files
 
 

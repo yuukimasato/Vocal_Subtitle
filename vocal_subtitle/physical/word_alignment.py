@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -58,7 +59,7 @@ def _rms_features(
     width = max(1, int(window * sample_rate))
 
     def rms(start: int, end: int) -> float:
-        frame = audio[max(0, start):min(len(audio), end)]
+        frame = audio[max(0, start) : min(len(audio), end)]
         if len(frame) == 0:
             return 0.0
         return float(np.sqrt(np.mean(frame.astype(np.float64) ** 2)))
@@ -85,9 +86,9 @@ def _vad_features(
     active = [
         float(getattr(item, "confidence", 1.0))
         for item in vad_segments
-        if float(getattr(item, "start", 0.0)) <= time <= float(
-            getattr(item, "end", 0.0)
-        )
+        if float(getattr(item, "start", 0.0))
+        <= time
+        <= float(getattr(item, "end", 0.0))
     ]
     return {
         "vad_probability": max(0.0, min(1.0, max(active, default=0.0))),
@@ -108,11 +109,17 @@ def _ffmpeg_boundaries(result: Mapping[str, Any] | None) -> list[tuple[float, st
             if isinstance(item, Mapping):
                 start, end = item.get("start"), item.get("end")
             else:
-                start = getattr(item, "start", item[0] if isinstance(item, (tuple, list)) else None)
-                end = getattr(item, "end", item[1] if isinstance(item, (tuple, list)) else None)
+                start = getattr(
+                    item, "start", item[0] if isinstance(item, (tuple, list)) else None
+                )
+                end = getattr(
+                    item, "end", item[1] if isinstance(item, (tuple, list)) else None
+                )
             if start is None or end is None:
                 continue
-            values.extend(((float(start), f"{label}_start"), (float(end), f"{label}_end")))
+            values.extend(
+                ((float(start), f"{label}_start"), (float(end), f"{label}_end"))
+            )
     return values
 
 
@@ -121,9 +128,12 @@ def _ffmpeg_features(time: float, result: Mapping[str, Any] | None) -> dict[str,
     if not boundaries:
         return {}
     distances = [abs(time - value) for value, _ in boundaries]
-    silence = result.get("raw_silence_intervals", ()) if isinstance(result, Mapping) else ()
+    silence = (
+        result.get("raw_silence_intervals", ()) if isinstance(result, Mapping) else ()
+    )
     in_silence = any(
-        isinstance(item, (tuple, list)) and len(item) >= 2
+        isinstance(item, (tuple, list))
+        and len(item) >= 2
         and float(item[0]) <= time <= float(item[1])
         for item in silence or ()
     )
@@ -136,12 +146,13 @@ def _ffmpeg_features(time: float, result: Mapping[str, Any] | None) -> dict[str,
 
 def _evidence_features(
     time: float,
-    timeline: Optional[PhysicalTimeline],
+    timeline: PhysicalTimeline | None,
 ) -> tuple[dict[str, float], tuple[str, ...]]:
     if timeline is None:
         return {}, ()
     nearby = [
-        item for item in timeline.speech_evidence_spans
+        item
+        for item in timeline.speech_evidence_spans
         if item.start - 0.2 <= time <= item.end + 0.2
     ]
     distances = [min(abs(time - item.start), abs(time - item.end)) for item in nearby]
@@ -164,7 +175,7 @@ def _candidate_features(
     vad_segments: Sequence[Any] | None,
     ffmpeg_result: Mapping[str, Any] | None,
     noise_profile: Any | None,
-    timeline: Optional[PhysicalTimeline],
+    timeline: PhysicalTimeline | None,
 ) -> tuple[dict[str, float], tuple[str, ...]]:
     features: dict[str, float] = {}
     features.update(_rms_features(audio, sample_rate, time))
@@ -188,7 +199,11 @@ def _score_with_features(
     """Score all available signals and return auditable components."""
     asr_proximity = max(0.0, 1.0 - abs(candidate - asr_time) / 0.2)
     rms_gradient = float(features.get("rms_gradient", 0.0))
-    rms_scale = max(abs(float(features.get("rms_before", 0.0))), abs(float(features.get("rms_after", 0.0))), 1e-6)
+    rms_scale = max(
+        abs(float(features.get("rms_before", 0.0))),
+        abs(float(features.get("rms_after", 0.0))),
+        1e-6,
+    )
     gradient = max(0.0, min(1.0, (rms_gradient / rms_scale + 1.0) / 2.0))
     if boundary_type == "end":
         gradient = 1.0 - gradient
@@ -218,7 +233,7 @@ def _score_with_features(
     return score, tuple((key, round(value, 6)) for key, value in components.items())
 
 
-def _asr_confidence_tier(confidence: Optional[float]) -> str:
+def _asr_confidence_tier(confidence: float | None) -> str:
     """Map raw ASR confidence to a calibrated tier.
 
     Tiers are: "high", "medium", "low", "unknown".
@@ -253,9 +268,9 @@ def _score_start_candidate(
     candidate: float,
     *,
     asr_time: float,
-    rms_gradient: Optional[float] = None,
-    vad_prob: Optional[float] = None,
-    ffmpeg_boundary: Optional[float] = None,
+    rms_gradient: float | None = None,
+    vad_prob: float | None = None,
+    ffmpeg_boundary: float | None = None,
     ffmpeg_distance: float = 1.0,
     source_consistency: float = 1.0,
     weight_asr: float = 0.30,
@@ -303,9 +318,9 @@ def _score_end_candidate(
     candidate: float,
     *,
     asr_time: float,
-    rms_gradient: Optional[float] = None,
-    vad_prob: Optional[float] = None,
-    ffmpeg_boundary: Optional[float] = None,
+    rms_gradient: float | None = None,
+    vad_prob: float | None = None,
+    ffmpeg_boundary: float | None = None,
     ffmpeg_distance: float = 1.0,
     silence_duration: float = 0.0,
     source_consistency: float = 1.0,
@@ -359,9 +374,9 @@ def _score_end_candidate(
 def _is_within_legal_range(
     time: float,
     bins: Sequence[PhysicalSubtitleBin],
-    timeline: Optional[PhysicalTimeline] = None,
-    clip_start: Optional[float] = None,
-    clip_end: Optional[float] = None,
+    timeline: PhysicalTimeline | None = None,
+    clip_start: float | None = None,
+    clip_end: float | None = None,
 ) -> bool:
     """Check whether a time falls within all legal constraints."""
     # PhysicalSubtitleBin check
@@ -379,17 +394,17 @@ def align_words_to_physical(
     allocations: Sequence[WordAllocation],
     physical_bins: Sequence[PhysicalSubtitleBin],
     *,
-    bin_owner_map: Optional[Dict[str, str]] = None,
-    timeline: Optional[PhysicalTimeline] = None,
-    clip_bounds: Optional[Dict[str, Tuple[float, float]]] = None,
+    bin_owner_map: dict[str, str] | None = None,
+    timeline: PhysicalTimeline | None = None,
+    clip_bounds: dict[str, tuple[float, float]] | None = None,
     audio: np.ndarray | None = None,
     sample_rate: int = 16000,
     vad_segments: Sequence[Any] | None = None,
     ffmpeg_result: Mapping[str, Any] | None = None,
     noise_profile: Any | None = None,
-    hard_silences: Sequence[Tuple[float, float]] = (),
-    large_snap_evidence: Optional[Mapping[str, bool]] = None,
-) -> List[WordAllocation]:
+    hard_silences: Sequence[tuple[float, float]] = (),
+    large_snap_evidence: Mapping[str, bool] | None = None,
+) -> list[WordAllocation]:
     """Produce aligned WordAllocations with BoundaryDecision on each word endpoint.
 
     ASR word timestamps are treated as OBSERVATIONS. VAD/FFmpeg/RMS are the
@@ -409,7 +424,7 @@ def align_words_to_physical(
     Returns:
         New list of WordAllocation with aligned_start/end and BoundaryDecisions.
     """
-    result: List[WordAllocation] = []
+    result: list[WordAllocation] = []
     if not allocations:
         return result
     arbiter = BoundaryArbiter()
@@ -423,13 +438,11 @@ def align_words_to_physical(
 
         # Determine the primary bin for this word
         assigned_bin = assign_word_to_bin(word, physical_bins)
-        primary_bin_id = (
-            alloc.physical_bin_id
-            or (assigned_bin.id if assigned_bin is not None else None)
+        primary_bin_id = alloc.physical_bin_id or (
+            assigned_bin.id if assigned_bin is not None else None
         )
         relevant_bins = [
-            b for b in physical_bins
-            if primary_bin_id is None or b.id == primary_bin_id
+            b for b in physical_bins if primary_bin_id is None or b.id == primary_bin_id
         ]
         if not relevant_bins:
             relevant_bins = list(physical_bins)
@@ -457,22 +470,27 @@ def align_words_to_physical(
             if abs(b.start - raw_start) < search_radius * 2:
                 start_candidates.append((b.start, "bin_start"))
         for item in timeline.speech_evidence_spans if timeline else ():
-            for value, label in ((item.start, f"{item.source}_start"), (item.end, f"{item.source}_end")):
+            for value, label in (
+                (item.start, f"{item.source}_start"),
+                (item.end, f"{item.source}_end"),
+            ):
                 if abs(value - raw_start) < search_radius * 2:
                     start_candidates.append((value, label))
         for value, label in _ffmpeg_boundaries(ffmpeg_result):
             if abs(value - raw_start) < search_radius * 2:
                 start_candidates.append((value, label))
         for item in vad_segments or ():
-            for value, label in ((float(item.start), "vad_start"), (float(item.end), "vad_end")):
+            for value, label in (
+                (float(item.start), "vad_start"),
+                (float(item.end), "vad_end"),
+            ):
                 if abs(value - raw_start) < search_radius * 2:
                     start_candidates.append((value, label))
 
         previous_end = None
         if result:
             previous_end = max(
-                getattr(a, "aligned_end", a.word.raw_end)
-                for a in result[-1:]
+                getattr(a, "aligned_end", a.word.raw_end) for a in result[-1:]
             )
         scored_start_candidates = []
         for time, label in _dedupe_times(start_candidates):
@@ -501,15 +519,21 @@ def align_words_to_physical(
                 features=features,
                 asr_confidence=word.confidence or 0.5,
             )
-            scored_start_candidates.append(BoundaryCandidate(
-                label=label,
-                time=time,
-                score=score,
-                evidence_ids=tuple(dict.fromkeys(alloc.evidence_ids + feature_evidence_ids)),
-                rejection_reasons=tuple(rejection_reasons),
-                features=tuple(sorted((key, float(value)) for key, value in features.items())),
-                score_components=score_components,
-            ))
+            scored_start_candidates.append(
+                BoundaryCandidate(
+                    label=label,
+                    time=time,
+                    score=score,
+                    evidence_ids=tuple(
+                        dict.fromkeys(alloc.evidence_ids + feature_evidence_ids)
+                    ),
+                    rejection_reasons=tuple(rejection_reasons),
+                    features=tuple(
+                        sorted((key, float(value)) for key, value in features.items())
+                    ),
+                    score_components=score_components,
+                )
+            )
         start_decision = arbiter.decide(
             "start",
             scored_start_candidates,
@@ -524,14 +548,20 @@ def align_words_to_physical(
             if abs(b.end - raw_end) < search_radius * 2:
                 end_candidates.append((b.end, "bin_end"))
         for item in timeline.speech_evidence_spans if timeline else ():
-            for value, label in ((item.start, f"{item.source}_start"), (item.end, f"{item.source}_end")):
+            for value, label in (
+                (item.start, f"{item.source}_start"),
+                (item.end, f"{item.source}_end"),
+            ):
                 if abs(value - raw_end) < search_radius * 2:
                     end_candidates.append((value, label))
         for value, label in _ffmpeg_boundaries(ffmpeg_result):
             if abs(value - raw_end) < search_radius * 2:
                 end_candidates.append((value, label))
         for item in vad_segments or ():
-            for value, label in ((float(item.start), "vad_start"), (float(item.end), "vad_end")):
+            for value, label in (
+                (float(item.start), "vad_start"),
+                (float(item.end), "vad_end"),
+            ):
                 if abs(value - raw_end) < search_radius * 2:
                     end_candidates.append((value, label))
 
@@ -562,15 +592,21 @@ def align_words_to_physical(
                 features=features,
                 asr_confidence=word.confidence or 0.5,
             )
-            scored_end_candidates.append(BoundaryCandidate(
-                label=label,
-                time=time,
-                score=score,
-                evidence_ids=tuple(dict.fromkeys(alloc.evidence_ids + feature_evidence_ids)),
-                rejection_reasons=tuple(rejection_reasons),
-                features=tuple(sorted((key, float(value)) for key, value in features.items())),
-                score_components=score_components,
-            ))
+            scored_end_candidates.append(
+                BoundaryCandidate(
+                    label=label,
+                    time=time,
+                    score=score,
+                    evidence_ids=tuple(
+                        dict.fromkeys(alloc.evidence_ids + feature_evidence_ids)
+                    ),
+                    rejection_reasons=tuple(rejection_reasons),
+                    features=tuple(
+                        sorted((key, float(value)) for key, value in features.items())
+                    ),
+                    score_components=score_components,
+                )
+            )
         end_decision = arbiter.decide(
             "end",
             scored_end_candidates,
@@ -618,9 +654,7 @@ def align_words_to_physical(
             aligned_start=start_decision.boundary_time,
             aligned_end=end_decision.boundary_time,
             physical_bin_id=primary_bin_id,
-            boundary_confidence=min(
-                start_decision.confidence, end_decision.confidence
-            ),
+            boundary_confidence=min(start_decision.confidence, end_decision.confidence),
             alignment_status=(
                 "aligned"
                 if start_decision.accepted and end_decision.accepted
@@ -628,9 +662,9 @@ def align_words_to_physical(
             ),
             start_boundary_decision=start_decision,
             end_boundary_decision=end_decision,
-            boundary_evidence_ids=tuple(dict.fromkeys(
-                start_decision.evidence_ids + end_decision.evidence_ids
-            )),
+            boundary_evidence_ids=tuple(
+                dict.fromkeys(start_decision.evidence_ids + end_decision.evidence_ids)
+            ),
             time_source=start_decision.time_source or "segment_boundary",
         )
 

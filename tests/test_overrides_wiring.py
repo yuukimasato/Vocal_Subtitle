@@ -26,7 +26,6 @@ from vocal_subtitle.feedback.user_profile import (
 from vocal_subtitle.utils.file_hasher import compute_config_hash
 from vocal_subtitle.webui import api, pipeline_tasks
 
-
 RUN_OVERRIDES = {"language": "zh", "vad_threshold": 0.6}
 
 
@@ -71,7 +70,9 @@ def test_toggle_state_persists_in_profile_dir(isolated_home):
     assert load_apply_overrides_on_run() is True
     assert save_apply_overrides_on_run(False) is False
     assert load_apply_overrides_on_run() is False
-    toggle_file = isolated_home / ".vocal_subtitle" / "profiles" / APPLY_OVERRIDES_TOGGLE_FILE
+    toggle_file = (
+        isolated_home / ".vocal_subtitle" / "profiles" / APPLY_OVERRIDES_TOGGLE_FILE
+    )
     assert toggle_file.exists()
 
 
@@ -85,7 +86,9 @@ def test_switch_off_config_identical_to_prewiring(isolated_home):
     loader = ConfigLoader()
     first = pipeline_tasks._build_run_config(loader, "default", dict(RUN_OVERRIDES))
     second = pipeline_tasks._build_run_config(loader, "default", dict(RUN_OVERRIDES))
-    legacy = loader.merge_with_overrides(loader.load_profile("default"), **RUN_OVERRIDES)
+    legacy = loader.merge_with_overrides(
+        loader.load_profile("default"), **RUN_OVERRIDES
+    )
     # 同输入同配置两次构建产物一致，且与接线前路径逐字段一致
     assert dataclasses.asdict(first) == dataclasses.asdict(second)
     assert dataclasses.asdict(first) == dataclasses.asdict(legacy)
@@ -97,7 +100,9 @@ def test_switch_on_without_profile_overrides_is_noop(isolated_home):
     _install_learned_profile(overrides={})
     loader = ConfigLoader()
     wired = pipeline_tasks._build_run_config(loader, "default", dict(RUN_OVERRIDES))
-    legacy = loader.merge_with_overrides(loader.load_profile("default"), **RUN_OVERRIDES)
+    legacy = loader.merge_with_overrides(
+        loader.load_profile("default"), **RUN_OVERRIDES
+    )
     assert dataclasses.asdict(wired) == dataclasses.asdict(legacy)
 
 
@@ -194,7 +199,9 @@ def test_run_thread_consumes_wired_config(monkeypatch, tmp_path, isolated_home):
                 return {"subtitle_path": output_path, "stats": stats, "events": []}
 
         monkeypatch.setattr(api, "Pipeline", FakePipeline)
-        monkeypatch.setattr(api, "_task_store", {"task-1": {"task_id": "task-1", "status": "pending"}})
+        monkeypatch.setattr(
+            api, "_task_store", {"task-1": {"task_id": "task-1", "status": "pending"}}
+        )
         monkeypatch.setattr(api, "_task_history", history)
         monkeypatch.setattr(pipeline_tasks, "ws_manager", _WebSocketSpy())
         monkeypatch.setattr(
@@ -203,7 +210,14 @@ def test_run_thread_consumes_wired_config(monkeypatch, tmp_path, isolated_home):
             lambda: type("Persistence", (), {"persist_task": lambda *args: None})(),
         )
         pipeline_tasks.run_pipeline_in_thread(
-            "task-1", input_path, output_path, "default", "srt", True, {}, tmp_path,
+            "task-1",
+            input_path,
+            output_path,
+            "default",
+            "srt",
+            True,
+            {},
+            tmp_path,
         )
         assert history.updates[-1]["status"] == "completed"
 
@@ -235,11 +249,17 @@ def test_submit_builds_wired_config(monkeypatch, tmp_path, isolated_home):
     # 开关关闭：历史记录中的配置与基线一致（零行为变化）
     spy_off = _SubmitHistorySpy()
     monkeypatch.setattr(api, "_task_history", spy_off)
-    result = asyncio.run(service.submit(
-        b"RIFF", "clip.wav",
-        profile="default", output_format="srt", skip_separation=True,
-        overrides_text="{}", thread_target=_noop_thread,
-    ))
+    result = asyncio.run(
+        service.submit(
+            b"RIFF",
+            "clip.wav",
+            profile="default",
+            output_format="srt",
+            skip_separation=True,
+            overrides_text="{}",
+            thread_target=_noop_thread,
+        )
+    )
     assert result["task_id"]
     assert dataclasses.asdict(spy_off.created["config"]) == dataclasses.asdict(baseline)
 
@@ -247,11 +267,17 @@ def test_submit_builds_wired_config(monkeypatch, tmp_path, isolated_home):
     _install_learned_profile(overrides={"merging": {"padding": 0.22}})
     spy_on = _SubmitHistorySpy()
     monkeypatch.setattr(api, "_task_history", spy_on)
-    asyncio.run(service.submit(
-        b"RIFF", "clip2.wav",
-        profile="default", output_format="srt", skip_separation=True,
-        overrides_text="{}", thread_target=_noop_thread,
-    ))
+    asyncio.run(
+        service.submit(
+            b"RIFF",
+            "clip2.wav",
+            profile="default",
+            output_format="srt",
+            skip_separation=True,
+            overrides_text="{}",
+            thread_target=_noop_thread,
+        )
+    )
     assert spy_on.created is not None
     assert spy_on.created["config"].merging.padding == pytest.approx(0.22)
     assert baseline.merging.padding != pytest.approx(0.22)
@@ -263,14 +289,26 @@ def test_submit_builds_wired_config(monkeypatch, tmp_path, isolated_home):
 
 
 OSCILLATION_HISTORY = [
-    {"adjustments": {"merging.padding": [0.10, 0.14]},
-     "timestamp": "2026-07-01T10:00:00", "diff_report_summary": "增大"},
-    {"adjustments": {"merging.padding": [0.14, 0.09]},
-     "timestamp": "2026-07-02T10:00:00", "diff_report_summary": "减小"},
-    {"adjustments": {"merging.padding": [0.09, 0.13]},
-     "timestamp": "2026-07-03T10:00:00", "diff_report_summary": "增大"},
-    {"adjustments": {"merging.padding": [0.13, 0.08]},
-     "timestamp": "2026-07-04T10:00:00", "diff_report_summary": "减小"},
+    {
+        "adjustments": {"merging.padding": [0.10, 0.14]},
+        "timestamp": "2026-07-01T10:00:00",
+        "diff_report_summary": "增大",
+    },
+    {
+        "adjustments": {"merging.padding": [0.14, 0.09]},
+        "timestamp": "2026-07-02T10:00:00",
+        "diff_report_summary": "减小",
+    },
+    {
+        "adjustments": {"merging.padding": [0.09, 0.13]},
+        "timestamp": "2026-07-03T10:00:00",
+        "diff_report_summary": "增大",
+    },
+    {
+        "adjustments": {"merging.padding": [0.13, 0.08]},
+        "timestamp": "2026-07-04T10:00:00",
+        "diff_report_summary": "减小",
+    },
 ]
 
 
@@ -290,8 +328,12 @@ def _auto_events():
     from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 
     return [
-        SubtitleEvent(index=1, start=0.0, end=2.0, text="今天天气不错", speaker_label=None),
-        SubtitleEvent(index=2, start=2.5, end=5.0, text="我们去看电影", speaker_label=None),
+        SubtitleEvent(
+            index=1, start=0.0, end=2.0, text="今天天气不错", speaker_label=None
+        ),
+        SubtitleEvent(
+            index=2, start=2.5, end=5.0, text="我们去看电影", speaker_label=None
+        ),
     ]
 
 
@@ -328,7 +370,9 @@ def test_wired_learning_path_respects_oscillation_lock(isolated_home, tmp_path):
 
     stage = _WiredStage(_wired_stage_config())
     report = stage._run_feedback_learning(
-        _auto_events(), _write_reference_srt(tmp_path), str(tmp_path / "audio.wav"),
+        _auto_events(),
+        _write_reference_srt(tmp_path),
+        str(tmp_path / "audio.wav"),
     )
     assert report is not None
     assert report["oscillations_detected"] >= 1
@@ -349,7 +393,9 @@ def test_wired_learning_path_auto_rollback_restores_overrides(isolated_home, tmp
 
     stage = _WiredStage(_wired_stage_config())
     report = stage._run_feedback_learning(
-        _auto_events(), _write_reference_srt(tmp_path), str(tmp_path / "audio.wav"),
+        _auto_events(),
+        _write_reference_srt(tmp_path),
+        str(tmp_path / "audio.wav"),
     )
     assert report is not None
     learned = mgr.load("user_default")
@@ -358,7 +404,9 @@ def test_wired_learning_path_auto_rollback_restores_overrides(isolated_home, tmp
 
     # 自动回滚判定（pipeline_stage Step 4.5 同款调用）在接线后的配置上仍触发
     should, reason = should_auto_rollback(
-        80.0, 40.0, drop_threshold=stage.config.feedback.quality_drop_threshold,
+        80.0,
+        40.0,
+        drop_threshold=stage.config.feedback.quality_drop_threshold,
     )
     assert should
     restored = mgr.rollback("user_default")

@@ -10,8 +10,8 @@ import json
 import logging
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional, Tuple
 
 from .base import LicenseInfo, SeparationEngine, SeparationResult
 
@@ -34,7 +34,7 @@ _MIN_SEP_INPUT_SECONDS = 10.0
 _ORIGINAL_TQDM_INIT = None
 """保存 tqdm.tqdm.__init__ 的原始引用，用于卸载钩子"""
 
-_progress_callback_ref: Optional[Callable] = None
+_progress_callback_ref: Callable | None = None
 """当前活跃的进度回调 (current: int, total: int) -> None"""
 
 
@@ -99,7 +99,7 @@ class UVREngine(SeparationEngine):
 
     def __init__(self):
         self._model = None
-        self._model_name: Optional[str] = None
+        self._model_name: str | None = None
 
     @property
     def name(self) -> str:
@@ -114,15 +114,13 @@ class UVREngine(SeparationEngine):
         )
 
     # 模型缓存目录（持久化在项目内，避免 /tmp 重启丢失）
-    _PROJECT_ROOT = os.path.dirname(
-        os.path.dirname(os.path.dirname(__file__))
-    )
+    _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     MODEL_DIR = os.path.join(_PROJECT_ROOT, "cache", "models") + os.sep
     OUTPUT_DIR = os.path.join(_PROJECT_ROOT, "cache", "models", "tmp") + os.sep
     # 本地捆绑的 download_checks.json（避免每次启动都从 GitHub 拉取）
     _BUNDLED_CHECKSUM = Path(__file__).parent / "data" / "download_checks.json"
 
-    def load_model(self, model_name: Optional[str] = None) -> None:
+    def load_model(self, model_name: str | None = None) -> None:
         """加载 UVR 模型
 
         遵循 ML 模型加载模式：优先使用本地缓存避免联网。
@@ -203,18 +201,18 @@ class UVREngine(SeparationEngine):
             bundled = UVREngine._BUNDLED_CHECKSUM
             if bundled.is_file():
                 import shutil
+
                 shutil.copy2(str(bundled), checks_path)
-                logger.info(
-                    "Placed bundled download_checks.json → %s", checks_path
-                )
+                logger.info("Placed bundled download_checks.json → %s", checks_path)
             else:
                 logger.warning(
                     "Bundled download_checks.json not found at %s; "
-                    "will trigger network download", bundled
+                    "will trigger network download",
+                    bundled,
                 )
 
     @staticmethod
-    def _pad_short_input(input_path: Path) -> Tuple[Path, float]:
+    def _pad_short_input(input_path: Path) -> tuple[Path, float]:
         """短音频 pad 到安全长度，返回 (用于分离的路径, pad 的秒数)。
 
         时长已达标时原样返回输入路径（pad 秒数为 0）。
@@ -234,20 +232,25 @@ class UVREngine(SeparationEngine):
         padded = np.pad(data, ((0, int(round(sr * pad_seconds))), (0, 0)))
 
         with tempfile.NamedTemporaryFile(
-            suffix=".wav", prefix="uvr_padded_", delete=False,
+            suffix=".wav",
+            prefix="uvr_padded_",
+            delete=False,
         ) as tmp_f:
             tmp_path = Path(tmp_f.name)
         sf.write(str(tmp_path), padded, sr, subtype=info.subtype)
         logger.info(
             "Padded short input %.2fs → %.2fs to stay above the "
             "separator's inference chunk size",
-            original_seconds, original_seconds + pad_seconds,
+            original_seconds,
+            original_seconds + pad_seconds,
         )
         return tmp_path, pad_seconds
 
     @staticmethod
     def _trim_audio_to_length(
-        src: Path, dst: Path, keep_seconds: Optional[float],
+        src: Path,
+        dst: Path,
+        keep_seconds: float | None,
     ) -> None:
         """复制 stem；keep_seconds 非 None 时截掉 pad 出去的尾部。"""
         import shutil
@@ -265,7 +268,8 @@ class UVREngine(SeparationEngine):
         except Exception as exc:
             logger.warning(
                 "Failed to trim separated stem %s: %s; copying untrimmed",
-                src, exc,
+                src,
+                exc,
             )
             shutil.copy2(src, dst)
 
@@ -273,7 +277,7 @@ class UVREngine(SeparationEngine):
         self,
         input_path: Path,
         output_dir: Path,
-        progress_callback: Optional[Callable] = None,
+        progress_callback: Callable | None = None,
         **kwargs,
     ) -> SeparationResult:
         """执行人声分离
@@ -301,7 +305,7 @@ class UVREngine(SeparationEngine):
 
         # 短音频防护：pad 后分离，完成后再截回原始时长
         separation_input, pad_seconds = self._pad_short_input(input_path)
-        keep_seconds: Optional[float] = None
+        keep_seconds: float | None = None
         if pad_seconds > 0.0:
             import soundfile as sf
 
@@ -339,11 +343,15 @@ class UVREngine(SeparationEngine):
 
                 if vocals_src and vocals_src.exists():
                     self._trim_audio_to_length(
-                        vocals_src, vocals_path, keep_seconds,
+                        vocals_src,
+                        vocals_path,
+                        keep_seconds,
                     )
                 if accomp_src and accomp_src.exists():
                     self._trim_audio_to_length(
-                        accomp_src, accompaniment_path, keep_seconds,
+                        accomp_src,
+                        accompaniment_path,
+                        keep_seconds,
                     )
             else:
                 # 单个输出文件（可能是人声），复制到 vocals_path
@@ -362,9 +370,7 @@ class UVREngine(SeparationEngine):
                 if src and src.exists():
                     self._trim_audio_to_length(src, vocals_path, keep_seconds)
                 else:
-                    logger.warning(
-                        "UVR output file not found at %s", src
-                    )
+                    logger.warning("UVR output file not found at %s", src)
 
         except Exception as e:
             logger.error("UVR separation failed: %s", e)

@@ -43,9 +43,10 @@ def test_classify_maps_known_and_unknown_exceptions():
     )
     assert classify_exception(FileNotFoundError("in.wav")) == "input_not_found"
     assert classify_exception(ValueError("weird")) == "execution_failed"
-    assert classify_exception(
-        DependencyUnavailableError("whisperx missing")
-    ) == "dependency_unavailable"
+    assert (
+        classify_exception(DependencyUnavailableError("whisperx missing"))
+        == "dependency_unavailable"
+    )
     assert classify_exception(RuntimeError("faster-whisper is not installed")) == (
         "dependency_unavailable"
     )

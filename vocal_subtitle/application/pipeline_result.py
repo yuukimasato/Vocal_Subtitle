@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -15,14 +15,14 @@ class PipelineStats:
     duration_seconds: float
     run_id: str = ""
     task_id: str = ""
-    stage_timings: Dict[str, float] = field(default_factory=dict)
+    stage_timings: dict[str, float] = field(default_factory=dict)
     total_time: float = 0.0
     segment_count: int = 0
     subtitle_count: int = 0
     speaker_count: int = 0
-    diarization_silhouette: Optional[float] = None
-    diagnostic_report: Optional[Dict] = None
-    quality_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    diarization_silhouette: float | None = None
+    diagnostic_report: dict | None = None
+    quality_diagnostics: dict[str, Any] = field(default_factory=dict)
     quality_status: str = "pass"
     status: str = "completed"
     error_category: str = ""
@@ -39,14 +39,14 @@ class PipelineStats:
     global_attempted: bool = False
     fallback_category: str = ""
     fallback_reason: str = ""
-    global_diagnostics: Dict = field(default_factory=dict)
+    global_diagnostics: dict = field(default_factory=dict)
     production_path: str = ""
     review_status: str = ""
     decision_count: int = 0
 
     raw_diarization_speaker_count: int = 0
     canonical_speaker_count: int = 0
-    speaker_merge_map: Dict = field(default_factory=dict)
+    speaker_merge_map: dict = field(default_factory=dict)
     canonicalization_status: str = ""
 
     diarization_backend: str = ""
@@ -98,8 +98,12 @@ class PipelineStats:
             "language_probability": self.language_probability,
             "asr_route_version": self.asr_route_version,
             "quality_gate_version": self.quality_gate_version,
-            "hallucination_filter_version": getattr(self, "hallucination_filter_version", ""),
-            "hallucination_dropped_count": getattr(self, "hallucination_dropped_count", 0),
+            "hallucination_filter_version": getattr(
+                self, "hallucination_filter_version", ""
+            ),
+            "hallucination_dropped_count": getattr(
+                self, "hallucination_dropped_count", 0
+            ),
         }
         if self.speaker_count:
             result["speaker_count"] = self.speaker_count
@@ -112,7 +116,7 @@ class PipelineStats:
     @classmethod
     def from_dict(
         cls, input_path: Path, payload: dict, duration_seconds: float = 0.0
-    ) -> "PipelineStats":
+    ) -> PipelineStats:
         stats = cls(input_path=input_path, duration_seconds=duration_seconds)
         stats.run_id = payload.get("run_id", "")
         stats.task_id = payload.get("task_id", "")
@@ -127,7 +131,9 @@ class PipelineStats:
         stats.production_path = payload.get("production_path", "")
         stats.review_status = payload.get("review_status", "")
         stats.decision_count = payload.get("decision_count", 0)
-        stats.raw_diarization_speaker_count = payload.get("raw_diarization_speaker_count", 0)
+        stats.raw_diarization_speaker_count = payload.get(
+            "raw_diarization_speaker_count", 0
+        )
         stats.canonical_speaker_count = payload.get("canonical_speaker_count", 0)
         stats.speaker_merge_map = payload.get("speaker_merge_map", {})
         stats.canonicalization_status = payload.get("canonicalization_status", "")

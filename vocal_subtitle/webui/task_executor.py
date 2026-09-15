@@ -9,8 +9,9 @@ start → completion / failure / cancelled 事件;进度与降级事件由任务
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 from .task_events import TaskEventPublisher
 
@@ -20,7 +21,7 @@ class TaskExecutor:
 
     def __init__(
         self,
-        publisher: Optional[TaskEventPublisher] = None,
+        publisher: TaskEventPublisher | None = None,
         *,
         max_workers: int = 2,
     ) -> None:
@@ -29,20 +30,26 @@ class TaskExecutor:
             max_workers=max(1, int(max_workers)),
             thread_name_prefix="webui-task",
         )
-        self._futures: Dict[str, Future] = {}
+        self._futures: dict[str, Future] = {}
         self._lock = threading.Lock()
 
-    def submit(self, task_id: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Future:
+    def submit(
+        self, task_id: str, fn: Callable[..., Any], *args: Any, **kwargs: Any
+    ) -> Future:
         """提交一个任务;start 事件同步发布,结果/失败在线程内发布。"""
 
         def _wrapped() -> Any:
             try:
                 result = fn(*args, **kwargs)
             except Exception as exc:
-                self.publisher.publish(task_id, "failure", {
-                    "error": str(exc),
-                    "error_type": type(exc).__name__,
-                })
+                self.publisher.publish(
+                    task_id,
+                    "failure",
+                    {
+                        "error": str(exc),
+                        "error_type": type(exc).__name__,
+                    },
+                )
                 raise
             self.publisher.publish(task_id, "completion", {"result": result})
             return result

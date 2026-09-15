@@ -10,11 +10,10 @@ import hashlib
 import json
 import logging
 import sqlite3
-import struct
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -50,8 +49,8 @@ class AudioFingerprint:
     # 频谱特征
     spectral_centroid_mean: float = 0.0
     spectral_bandwidth_mean: float = 0.0
-    spectral_contrast_mean: List[float] = field(default_factory=lambda: [0.0] * 7)
-    mfcc_means: List[float] = field(default_factory=lambda: [0.0] * 13)
+    spectral_contrast_mean: list[float] = field(default_factory=lambda: [0.0] * 7)
+    mfcc_means: list[float] = field(default_factory=lambda: [0.0] * 13)
 
     # 时域特征
     rms_mean: float = 0.0
@@ -143,10 +142,10 @@ class MahalanobisMatcher:
     """
 
     def __init__(self):
-        self._cov_matrix: Optional[np.ndarray] = None
-        self._cov_inv: Optional[np.ndarray] = None
-        self._mean: Optional[np.ndarray] = None
-        self._std: Optional[np.ndarray] = None
+        self._cov_matrix: np.ndarray | None = None
+        self._cov_inv: np.ndarray | None = None
+        self._mean: np.ndarray | None = None
+        self._std: np.ndarray | None = None
         self._dim: int = 48
 
     @property
@@ -160,7 +159,9 @@ class MahalanobisMatcher:
             fingerprint_vectors: shape (N, 48) 的指纹向量矩阵
         """
         if len(fingerprint_vectors) < 2:
-            logger.warning("Too few fingerprints to fit Mahalanobis matcher (need >= 2)")
+            logger.warning(
+                "Too few fingerprints to fit Mahalanobis matcher (need >= 2)"
+            )
             return
 
         self._mean = np.mean(fingerprint_vectors, axis=0)
@@ -176,7 +177,8 @@ class MahalanobisMatcher:
             self._cov_inv = np.linalg.inv(reg)
             logger.info(
                 "MahalanobisMatcher fitted: %d vectors, dim=%d, cond=%.1f",
-                len(fingerprint_vectors), self._dim,
+                len(fingerprint_vectors),
+                self._dim,
                 np.linalg.cond(reg),
             )
         except np.linalg.LinAlgError as e:
@@ -236,7 +238,7 @@ class AudioFingerprinter:
 
     def __init__(
         self,
-        db_path: Optional[Path] = None,
+        db_path: Path | None = None,
         distance_method: str = "mahalanobis",
         knn_k: int = 3,
         min_absolute_similarity: float = 0.70,
@@ -319,7 +321,7 @@ class AudioFingerprinter:
     # 特征提取
     # ------------------------------------------------------------------
 
-    def extract(self, audio_path: Path) -> Optional[AudioFingerprint]:
+    def extract(self, audio_path: Path) -> AudioFingerprint | None:
         """提取音频的 48 维声学特征向量
 
         Args:
@@ -365,7 +367,9 @@ class AudioFingerprinter:
             # ---- 时域特征 ----
             fp.rms_mean = float(np.mean(librosa.feature.rms(y=y)))
             fp.rms_std = float(np.std(librosa.feature.rms(y=y)))
-            fp.zero_crossing_rate = float(np.mean(librosa.feature.zero_crossing_rate(y)))
+            fp.zero_crossing_rate = float(
+                np.mean(librosa.feature.zero_crossing_rate(y))
+            )
 
             # ---- 语音特征 ----
             # 语音占比：RMS > 20% 均值的帧视为语音
@@ -380,14 +384,18 @@ class AudioFingerprinter:
 
             # SNR 估计
             signal_rms = np.percentile(rms, 90)
-            fp.snr_estimate = float(20 * np.log10(max(signal_rms / max(noise_rms, 1e-10), 1)))
+            fp.snr_estimate = float(
+                20 * np.log10(max(signal_rms / max(noise_rms, 1e-10), 1))
+            )
 
             # ---- 音频签名 ----
             fp.audio_signature = self._describe(fp)
 
             logger.info(
                 "Fingerprint extracted: %s (duration=%.1fs, snr=%.1fdB)",
-                audio_path.name, fp.duration_seconds, fp.snr_estimate,
+                audio_path.name,
+                fp.duration_seconds,
+                fp.snr_estimate,
             )
             return fp
 
@@ -395,10 +403,11 @@ class AudioFingerprinter:
             logger.warning("Fingerprint extraction failed for %s: %s", audio_path, e)
             return self._extract_minimal(audio_path)
 
-    def _extract_minimal(self, audio_path: Path) -> Optional[AudioFingerprint]:
+    def _extract_minimal(self, audio_path: Path) -> AudioFingerprint | None:
         """无 librosa 时的最小指纹提取（使用 soundfile）"""
         try:
             import soundfile as sf
+
             y, sr = sf.read(str(audio_path), dtype="float32")
             if y.ndim > 1:
                 y = np.mean(y, axis=1)
@@ -407,11 +416,26 @@ class AudioFingerprinter:
             fp = AudioFingerprint(
                 duration_seconds=round(duration, 2),
                 sample_rate=sr,
-                rms_mean=float(np.sqrt(np.mean(y ** 2))),
-                rms_std=float(np.std(np.sqrt(np.mean(
-                    np.array([y[i:i+1024] for i in range(0, len(y), 1024) if i+1024 <= len(y)]) ** 2,
-                    axis=1,
-                )))) if len(y) >= 1024 else 0.0,
+                rms_mean=float(np.sqrt(np.mean(y**2))),
+                rms_std=float(
+                    np.std(
+                        np.sqrt(
+                            np.mean(
+                                np.array(
+                                    [
+                                        y[i : i + 1024]
+                                        for i in range(0, len(y), 1024)
+                                        if i + 1024 <= len(y)
+                                    ]
+                                )
+                                ** 2,
+                                axis=1,
+                            )
+                        )
+                    )
+                )
+                if len(y) >= 1024
+                else 0.0,
                 zero_crossing_rate=float(np.mean(np.abs(np.diff(np.sign(y))))) / 2,
                 speech_ratio=float(np.mean(np.abs(y) > np.mean(np.abs(y)) * 0.2)),
             )
@@ -474,7 +498,7 @@ class AudioFingerprinter:
         profile_id: str,
         fingerprint: AudioFingerprint,
         audio_hash: str,
-        config_snapshot: Optional[Dict[str, Any]] = None,
+        config_snapshot: dict[str, Any] | None = None,
     ) -> int:
         """存储指纹到数据库
 
@@ -504,7 +528,11 @@ class AudioFingerprinter:
                     (vector_blob, config_json, new_count, now, existing[0]),
                 )
                 conn.commit()
-                logger.info("Fingerprint updated: id=%d, feedback_count=%d", existing[0], new_count)
+                logger.info(
+                    "Fingerprint updated: id=%d, feedback_count=%d",
+                    existing[0],
+                    new_count,
+                )
                 return existing[0]
             else:
                 cursor = conn.execute(
@@ -513,16 +541,20 @@ class AudioFingerprinter:
                         config_snapshot, feedback_count, created_at, updated_at)
                        VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
                     (
-                        profile_id, vector_blob, audio_hash,
-                        fingerprint.audio_signature, config_json,
-                        now, now,
+                        profile_id,
+                        vector_blob,
+                        audio_hash,
+                        fingerprint.audio_signature,
+                        config_json,
+                        now,
+                        now,
                     ),
                 )
                 conn.commit()
                 logger.info("Fingerprint stored: id=%d", cursor.lastrowid)
                 return cursor.lastrowid
 
-    def load_all_vectors(self) -> Tuple[List[np.ndarray], List[Dict[str, Any]]]:
+    def load_all_vectors(self) -> tuple[list[np.ndarray], list[dict[str, Any]]]:
         """加载所有指纹向量及其元数据"""
         vectors = []
         metadata = []
@@ -536,20 +568,22 @@ class AudioFingerprinter:
             vec = np.frombuffer(row[1], dtype=np.float32)
             if len(vec) == 48:
                 vectors.append(vec)
-                metadata.append({
-                    "id": row[0],
-                    "profile_id": row[2],
-                    "audio_hash": row[3],
-                    "audio_signature": row[4],
-                    "config_snapshot": json.loads(row[5]) if row[5] else {},
-                    "feedback_count": row[6],
-                })
+                metadata.append(
+                    {
+                        "id": row[0],
+                        "profile_id": row[2],
+                        "audio_hash": row[3],
+                        "audio_signature": row[4],
+                        "config_snapshot": json.loads(row[5]) if row[5] else {},
+                        "feedback_count": row[6],
+                    }
+                )
 
         return vectors, metadata
 
     def get_by_audio_hash(
         self, audio_hash: str, profile_id: str = "user_default"
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """按音频哈希查找指纹"""
         with self._get_conn() as conn:
             row = conn.execute(
@@ -575,7 +609,9 @@ class AudioFingerprinter:
     def delete_by_id(self, fingerprint_id: int) -> bool:
         """删除指定指纹"""
         with self._get_conn() as conn:
-            cursor = conn.execute("DELETE FROM fingerprints WHERE id = ?", (fingerprint_id,))
+            cursor = conn.execute(
+                "DELETE FROM fingerprints WHERE id = ?", (fingerprint_id,)
+            )
             conn.commit()
             return cursor.rowcount > 0
 
@@ -585,7 +621,7 @@ class AudioFingerprinter:
             row = conn.execute("SELECT COUNT(*) FROM fingerprints").fetchone()
             return row[0] if row else 0
 
-    def list_all(self) -> List[Dict[str, Any]]:
+    def list_all(self) -> list[dict[str, Any]]:
         """列出所有指纹"""
         with self._get_conn() as conn:
             rows = conn.execute(
@@ -612,7 +648,7 @@ class AudioFingerprinter:
     def find_similar(
         self,
         fingerprint: AudioFingerprint,
-    ) -> Optional[Tuple[str, float]]:
+    ) -> tuple[str, float] | None:
         """在指纹库中查找最近邻（动态阈值）
 
         Args:
@@ -648,7 +684,7 @@ class AudioFingerprinter:
             return None
 
         # KNN 动态阈值
-        top_k = indexed[:self._knn_k]
+        top_k = indexed[: self._knn_k]
         top1_idx, top1_sim = top_k[0]
         baseline = float(np.mean([s for _, s in top_k]))
 
@@ -656,14 +692,16 @@ class AudioFingerprinter:
         if top1_sim < self._min_absolute_similarity:
             logger.debug(
                 "Fingerprint match failed: top1_sim=%.3f < min=%.2f",
-                top1_sim, self._min_absolute_similarity,
+                top1_sim,
+                self._min_absolute_similarity,
             )
             return None
 
         if top1_sim < baseline + self._relative_margin:
             logger.debug(
                 "Fingerprint match failed: top1_sim=%.3f < baseline+margin=%.3f",
-                top1_sim, baseline + self._relative_margin,
+                top1_sim,
+                baseline + self._relative_margin,
             )
             return None
 
@@ -673,14 +711,17 @@ class AudioFingerprinter:
             if top1_sim - top2_sim < 0.05:
                 logger.debug(
                     "Fingerprint match ambiguous: top1=%.3f vs top2=%.3f (gap=%.3f)",
-                    top1_sim, top2_sim, top1_sim - top2_sim,
+                    top1_sim,
+                    top2_sim,
+                    top1_sim - top2_sim,
                 )
                 return None
 
         profile_id = metadata[top1_idx]["profile_id"]
         logger.info(
             "Fingerprint matched: profile=%s, confidence=%.3f",
-            profile_id, top1_sim,
+            profile_id,
+            top1_sim,
         )
         return (profile_id, top1_sim)
 
@@ -703,12 +744,12 @@ class AudioFingerprinter:
         audio_hash: str,
         alignment_coverage: float,
         diff_summary: str,
-        adjustments: Dict[str, Any],
-        health_before: Optional[float] = None,
-        health_after: Optional[float] = None,
-        health_detail: Optional[Dict[str, float]] = None,
+        adjustments: dict[str, Any],
+        health_before: float | None = None,
+        health_after: float | None = None,
+        health_detail: dict[str, float] | None = None,
         shadow_mode: bool = False,
-        asr_low_confidence_zones: Optional[List[Dict]] = None,
+        asr_low_confidence_zones: list[dict] | None = None,
     ) -> int:
         """记录反馈历史到数据库"""
         now = datetime.now().isoformat()
@@ -721,7 +762,9 @@ class AudioFingerprinter:
                     asr_low_confidence_zones)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    profile_id, now, audio_hash,
+                    profile_id,
+                    now,
+                    audio_hash,
                     round(alignment_coverage, 4) if alignment_coverage else None,
                     diff_summary,
                     json.dumps(adjustments),
@@ -729,7 +772,9 @@ class AudioFingerprinter:
                     round(health_after, 2) if health_after is not None else None,
                     json.dumps(health_detail) if health_detail else None,
                     1 if shadow_mode else 0,
-                    json.dumps(asr_low_confidence_zones) if asr_low_confidence_zones else None,
+                    json.dumps(asr_low_confidence_zones)
+                    if asr_low_confidence_zones
+                    else None,
                 ),
             )
             conn.commit()
@@ -739,7 +784,7 @@ class AudioFingerprinter:
         self,
         profile_id: str = "user_default",
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取反馈历史"""
         with self._get_conn() as conn:
             rows = conn.execute(
@@ -769,7 +814,7 @@ class AudioFingerprinter:
 
     def get_health_trend(
         self, profile_id: str = "user_default", limit: int = 20
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取健康度趋势数据（用于前端趋势图）"""
         with self._get_conn() as conn:
             rows = conn.execute(

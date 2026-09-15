@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unicodedata
-from typing import Iterable
+from collections.abc import Iterable
 
 
 def _is_cjk_char(char: str) -> bool:

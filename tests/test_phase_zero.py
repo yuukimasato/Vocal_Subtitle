@@ -19,9 +19,16 @@ from vocal_subtitle.vad.base import SpeechSegment
 
 def test_single_event_uses_physical_boundaries_when_asr_is_early():
     events = TimeMapper().map(
-        [[TranscriptionSegment(
-            "测试", 0.1, 0.3, [WordTimestamp("测试", 0.12, 0.2)],
-        )]],
+        [
+            [
+                TranscriptionSegment(
+                    "测试",
+                    0.1,
+                    0.3,
+                    [WordTimestamp("测试", 0.12, 0.2)],
+                )
+            ]
+        ],
         [SpeechSegment(4.0, 5.0)],
     )
 
@@ -32,10 +39,12 @@ def test_single_event_uses_physical_boundaries_when_asr_is_early():
 
 def test_multiple_events_keep_physical_outer_envelope():
     events = TimeMapper().map(
-        [[
-            TranscriptionSegment("甲", 0.1, 0.4),
-            TranscriptionSegment("乙", 0.5, 0.7),
-        ]],
+        [
+            [
+                TranscriptionSegment("甲", 0.1, 0.4),
+                TranscriptionSegment("乙", 0.5, 0.7),
+            ]
+        ],
         [SpeechSegment(4.0, 5.0)],
     )
 
@@ -69,9 +78,9 @@ def test_canonicalizer_caps_speakers_without_inventing_missing_ids():
 
 
 def test_expected_speakers_is_loaded_and_partitions_cache():
-    config = ConfigLoader._parse_config({
-        "pipeline": {"diarization": {"expected_speakers": 2}}
-    })
+    config = ConfigLoader._parse_config(
+        {"pipeline": {"diarization": {"expected_speakers": 2}}}
+    )
     assert config.diarization.expected_speakers == 2
 
     first = CacheManager.make_key(Path("audio.wav"), expected_speakers=2)
@@ -81,14 +90,31 @@ def test_expected_speakers_is_loaded_and_partitions_cache():
 
 def test_faster_whisper_preserves_quality_metadata():
     engine = FasterWhisperEngine(device="cpu")
-    engine._model = SimpleNamespace(transcribe=lambda *args, **kwargs: (
-        iter([SimpleNamespace(
-            text=" test ", start=0.0, end=1.0, words=[SimpleNamespace(
-                word="test", start=0.1, end=0.8, probability=0.9,
-            )], avg_logprob=-0.2, no_speech_prob=0.1, compression_ratio=1.2,
-        )]),
-        SimpleNamespace(language="en", language_probability=0.99),
-    ))
+    engine._model = SimpleNamespace(
+        transcribe=lambda *args, **kwargs: (
+            iter(
+                [
+                    SimpleNamespace(
+                        text=" test ",
+                        start=0.0,
+                        end=1.0,
+                        words=[
+                            SimpleNamespace(
+                                word="test",
+                                start=0.1,
+                                end=0.8,
+                                probability=0.9,
+                            )
+                        ],
+                        avg_logprob=-0.2,
+                        no_speech_prob=0.1,
+                        compression_ratio=1.2,
+                    )
+                ]
+            ),
+            SimpleNamespace(language="en", language_probability=0.99),
+        )
+    )
 
     results = engine.transcribe(np.zeros(16000, dtype=np.float32), language="en")
 

@@ -1,7 +1,5 @@
 """合并塌缩场景的说话人补偿(_multi_speaker_spans/_relabel_multi_speaker_cues)。"""
 
-from typing import Optional
-
 from vocal_subtitle.application.pipeline_result import PipelineStats
 from vocal_subtitle.diarization.base import SpeakerTurn
 from vocal_subtitle.diarization.early_turns import EarlyTurnsState
@@ -21,7 +19,7 @@ class _Pipeline(PipelineMappingMixin):
         )
         self._resolved_language = "zh"
 
-    def _resolved_language_or_config(self) -> Optional[str]:
+    def _resolved_language_or_config(self) -> str | None:
         return self._resolved_language
 
 
@@ -50,7 +48,11 @@ def test_multi_speaker_merged_event_is_detected_and_cues_relabeled():
     mixin = _Pipeline(_Config(), turns)
 
     # 合并塌缩的单一事件:横跨 A/B 两个 turn
-    events = [SubtitleEvent(1, 0.5, 9.5, "整段文本" * 12, speaker_id=0, speaker_label="说话人A")]
+    events = [
+        SubtitleEvent(
+            1, 0.5, 9.5, "整段文本" * 12, speaker_id=0, speaker_label="说话人A"
+        )
+    ]
     spans, state = mixin._multi_speaker_spans(events)
     assert spans == [(0.5, 9.5)]
     assert state is mixin._early_turns_state
@@ -71,7 +73,11 @@ def test_multi_speaker_merged_event_is_detected_and_cues_relabeled():
 def test_finalize_pipeline_end_to_end_bumps_speaker_count():
     turns = _turns((0.0, 5.0, 0), (5.0, 10.0, 1))
     mixin = _Pipeline(_Config(), turns)
-    events = [SubtitleEvent(1, 0.5, 9.5, "整段文本" * 12, speaker_id=0, speaker_label="说话人A")]
+    events = [
+        SubtitleEvent(
+            1, 0.5, 9.5, "整段文本" * 12, speaker_id=0, speaker_label="说话人A"
+        )
+    ]
 
     stats = PipelineStats(input_path="x.wav", duration_seconds=10.0)
     stats.speaker_count = 1
@@ -101,7 +107,9 @@ def test_disabled_diarization_keeps_labels_untouched():
             self.diarization = _OffConfig()
 
     mixin = _Pipeline(_OffCfg(), _turns((0.0, 5.0, 0), (5.0, 10.0, 1)))
-    events = [SubtitleEvent(1, 0.0, 10.0, "合并事件", speaker_id=0, speaker_label="说话人A")]
+    events = [
+        SubtitleEvent(1, 0.0, 10.0, "合并事件", speaker_id=0, speaker_label="说话人A")
+    ]
 
     stats = PipelineStats(input_path="x.wav", duration_seconds=10.0)
     stats.speaker_count = 1

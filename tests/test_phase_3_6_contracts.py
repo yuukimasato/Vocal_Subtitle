@@ -1,18 +1,22 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from vocal_subtitle.asr.evidence import CandidateEvidence, EvidenceDecision, EvidenceWord
+from vocal_subtitle.asr.evidence import (
+    CandidateEvidence,
+    EvidenceDecision,
+    EvidenceWord,
+)
+from vocal_subtitle.asr.trace_contract import attach_event_trace
+from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 from vocal_subtitle.quality.golden_gate import evaluate_golden_set
 from vocal_subtitle.quality.provenance import (
     attribute_case_misses,
+    normalize_trace_context,
     trace_context_for,
 )
 from vocal_subtitle.reporting.capability_maturity import build_capability_maturity
 from vocal_subtitle.reporting.feedback_profile import inspect_feedback_profile
 from vocal_subtitle.reporting.noise_shadow import build_noise_shadow
-from vocal_subtitle.asr.trace_contract import attach_event_trace
-from vocal_subtitle.mapping.time_mapper import SubtitleEvent
-from vocal_subtitle.quality.provenance import normalize_trace_context
 
 
 def _expected():
@@ -20,20 +24,26 @@ def _expected():
 
 
 def test_normalize_trace_context_recovers_ids_from_span_payload_dicts():
-    normalized = normalize_trace_context({
-        "physical_span_ids": [
-            "clip-000001",
-            {
-                "physical_clip_id": "clip-000002",
-                "start": 0.0,
-                "end": 1.0,
-                "evidence_ids": ["evidence:ffmpeg_skeleton:000000:000016"],
-                "source": "ffmpeg_skeleton",
-            },
-            {"evidence_ids": ["evidence:rms:000000:000004"], "start": 2.0, "end": 3.0},
-            None,
-        ],
-    })
+    normalized = normalize_trace_context(
+        {
+            "physical_span_ids": [
+                "clip-000001",
+                {
+                    "physical_clip_id": "clip-000002",
+                    "start": 0.0,
+                    "end": 1.0,
+                    "evidence_ids": ["evidence:ffmpeg_skeleton:000000:000016"],
+                    "source": "ffmpeg_skeleton",
+                },
+                {
+                    "evidence_ids": ["evidence:rms:000000:000004"],
+                    "start": 2.0,
+                    "end": 3.0,
+                },
+                None,
+            ],
+        }
+    )
     assert normalized["physical_span_ids"] == [
         "clip-000001",
         "clip-000002",
@@ -42,22 +52,26 @@ def test_normalize_trace_context_recovers_ids_from_span_payload_dicts():
 
 
 def test_attribution_tolerates_span_payload_dicts_in_final_event_traces():
-    predicted = [{
-        "id": "final:event:000001",
-        "start": 0.0,
-        "end": 1.007,
-        "text": "这是我朋友的店我",
-        "trace_context": {
-            "final_event_ids": ["final:event:000001"],
-            "physical_span_ids": [{
-                "physical_clip_id": "clip-000001",
-                "start": 0.0,
-                "end": 1.007,
-                "evidence_ids": ["evidence:ffmpeg_skeleton:000000:000016"],
-                "source": "ffmpeg_skeleton",
-            }],
-        },
-    }]
+    predicted = [
+        {
+            "id": "final:event:000001",
+            "start": 0.0,
+            "end": 1.007,
+            "text": "这是我朋友的店我",
+            "trace_context": {
+                "final_event_ids": ["final:event:000001"],
+                "physical_span_ids": [
+                    {
+                        "physical_clip_id": "clip-000001",
+                        "start": 0.0,
+                        "end": 1.007,
+                        "evidence_ids": ["evidence:ffmpeg_skeleton:000000:000016"],
+                        "source": "ffmpeg_skeleton",
+                    }
+                ],
+            },
+        }
+    ]
     misses = attribute_case_misses(
         [_expected()],
         predicted,
@@ -117,21 +131,25 @@ def test_candidate_decision_and_final_trace_ids_are_serializable_and_stable():
 
 
 def test_global_role_statistics_are_reported_without_replacing_legacy_metrics():
-    report = evaluate_golden_set([{
-        "expected_events": [],
-        "predicted_events": [],
-        "diagnostics": {
-            "physical_violation_count": 0,
-            "cross_silence_count": 0,
-            "raw_event_bypass_count": 0,
-            "global_evidence": {
-                "signal_count": 2,
-                "considered_alternative_count": 1,
-                "accepted_alternative_count": 1,
-                "selected_global_count": 0,
-            },
-        },
-    }])
+    report = evaluate_golden_set(
+        [
+            {
+                "expected_events": [],
+                "predicted_events": [],
+                "diagnostics": {
+                    "physical_violation_count": 0,
+                    "cross_silence_count": 0,
+                    "raw_event_bypass_count": 0,
+                    "global_evidence": {
+                        "signal_count": 2,
+                        "considered_alternative_count": 1,
+                        "accepted_alternative_count": 1,
+                        "selected_global_count": 0,
+                    },
+                },
+            }
+        ]
+    )
     assert report["metrics"]["global_evidence"] == {
         "signal_count": 2,
         "considered_alternative_count": 1,
@@ -155,7 +173,10 @@ def test_phase_six_shadow_outputs_do_not_apply_configuration(tmp_path: Path):
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
     profile = profile_dir / "demo.yaml"
-    profile.write_text("profile_id: demo\noverrides:\n  vad.threshold: 0.4\nupdated_at: v1\n", encoding="utf-8")
+    profile.write_text(
+        "profile_id: demo\noverrides:\n  vad.threshold: 0.4\nupdated_at: v1\n",
+        encoding="utf-8",
+    )
     config = SimpleNamespace(
         feedback=SimpleNamespace(
             enabled=True,
@@ -173,9 +194,13 @@ def test_capability_maturity_is_independent_from_release_status():
     maturity = build_capability_maturity(
         evidence={"status": "ok", "candidate_count": 3, "optional_engines": {}},
         quality={},
-        config=SimpleNamespace(feedback=SimpleNamespace(enabled=False, active_profile="user_default")),
+        config=SimpleNamespace(
+            feedback=SimpleNamespace(enabled=False, active_profile="user_default")
+        ),
     )
-    assert maturity["release_status_semantics"] == "independent_from_capability_maturity"
+    assert (
+        maturity["release_status_semantics"] == "independent_from_capability_maturity"
+    )
     assert maturity["capabilities"]["segmented_primary"]["release_default"] is True
     assert maturity["capabilities"]["qwen_review"]["release_default"] is False
 

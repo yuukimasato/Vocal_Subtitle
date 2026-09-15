@@ -2,11 +2,9 @@
 
 from pathlib import Path
 
-from vocal_subtitle.webui import api
-from vocal_subtitle.webui import pipeline_tasks
+from vocal_subtitle.webui import api, pipeline_tasks
 from vocal_subtitle.webui.routes_history import _storage
 from vocal_subtitle.webui.storage_services import WebUIStorageService
-
 
 LEGACY_API_NAMES = (
     "get_subtitles",

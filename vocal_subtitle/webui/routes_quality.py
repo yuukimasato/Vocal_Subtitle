@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -13,7 +13,7 @@ from .runtime_state import state
 router = APIRouter()
 
 
-def _load_json(path: Path) -> Optional[Dict[str, Any]]:
+def _load_json(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
@@ -21,7 +21,7 @@ def _load_json(path: Path) -> Optional[Dict[str, Any]]:
     return payload if isinstance(payload, dict) else None
 
 
-def _result_payload(task: Dict[str, Any]) -> Dict[str, Any]:
+def _result_payload(task: dict[str, Any]) -> dict[str, Any]:
     raw = task.get("result")
     if isinstance(raw, dict):
         return raw
@@ -35,26 +35,33 @@ def _result_payload(task: Dict[str, Any]) -> Dict[str, Any]:
     return result if isinstance(result, dict) else {}
 
 
-def _stats_payload(result: Dict[str, Any]) -> Dict[str, Any]:
+def _stats_payload(result: dict[str, Any]) -> dict[str, Any]:
     stats = result.get("stats") or {}
     return stats if isinstance(stats, dict) else {}
 
 
-def _safe_run_id(task: Dict[str, Any], result: Dict[str, Any], stats: Dict[str, Any]) -> str:
+def _safe_run_id(
+    task: dict[str, Any], result: dict[str, Any], stats: dict[str, Any]
+) -> str:
     run_id = str(
-        stats.get("run_id")
-        or result.get("run_id")
-        or task.get("run_id")
-        or ""
+        stats.get("run_id") or result.get("run_id") or task.get("run_id") or ""
     )
     return run_id if run_id and Path(run_id).name == run_id else ""
 
 
 def _report_path(run_id: str) -> Path:
-    return Path(__file__).parent.parent.parent / "cache" / "reports" / run_id / "run_report.json"
+    return (
+        Path(__file__).parent.parent.parent
+        / "cache"
+        / "reports"
+        / run_id
+        / "run_report.json"
+    )
 
 
-def _history_summary(task: Dict[str, Any], result: Dict[str, Any], stats: Dict[str, Any]) -> Dict[str, Any]:
+def _history_summary(
+    task: dict[str, Any], result: dict[str, Any], stats: dict[str, Any]
+) -> dict[str, Any]:
     run_id = _safe_run_id(task, result, stats)
     stage_timings = stats.get("stage_timings") or {}
     diagnostics = stats.get("quality_diagnostics") or stats.get("diagnostics") or {}
@@ -83,17 +90,23 @@ def _history_summary(task: Dict[str, Any], result: Dict[str, Any], stats: Dict[s
             "category": stats.get("fallback_category", ""),
             "reason": stats.get("fallback_reason", ""),
         },
-        "errors": ([
-            {
-                "stage": "pipeline",
-                "message": task.get("error", ""),
-                "category": task.get("error_category", ""),
-            }
-        ] if task.get("error") else []),
+        "errors": (
+            [
+                {
+                    "stage": "pipeline",
+                    "message": task.get("error", ""),
+                    "category": task.get("error_category", ""),
+                }
+            ]
+            if task.get("error")
+            else []
+        ),
         "warnings": [],
         "output": {
             "subtitle_path": result.get("subtitle_path"),
-            "subtitle_count": result.get("subtitle_count", stats.get("subtitle_count", 0)),
+            "subtitle_count": result.get(
+                "subtitle_count", stats.get("subtitle_count", 0)
+            ),
         },
         "diagnostics": {
             "asr": stats.get("global_diagnostics", {}),

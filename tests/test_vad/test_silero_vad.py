@@ -1,7 +1,5 @@
 """测试 Silero VAD 引擎"""
 
-import numpy as np
-
 from vocal_subtitle.vad.base import SpeechSegment
 from vocal_subtitle.vad.silero_vad import SileroVAD
 

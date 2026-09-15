@@ -76,7 +76,11 @@ def test_pipeline_adapter_maps_legacy_result(tmp_path):
             return {
                 "subtitle_path": tmp_path / "out.srt",
                 "events": [{"start": 0.0, "end": 1.0, "text": "hello"}],
-                "stats": type("Stats", (), {"status": "completed", "run_id": "run-1", "task_id": "task-1"})(),
+                "stats": type(
+                    "Stats",
+                    (),
+                    {"status": "completed", "run_id": "run-1", "task_id": "task-1"},
+                )(),
                 "from_cache": True,
             }
 
@@ -135,9 +139,13 @@ def test_asr_engine_adapter_normalizes_success_and_failure():
 
 
 def test_external_adapters_keep_frameworks_out_of_contracts():
-    request = CLIAdapter.request("input.wav", output_path="out.srt", skip_separation=True)
+    request = CLIAdapter.request(
+        "input.wav", output_path="out.srt", skip_separation=True
+    )
     assert request.overrides["skip_separation"] is True
-    web_request = WebUIAdapter.request({"input_path": "input.wav", "profile": "podcast"})
+    web_request = WebUIAdapter.request(
+        {"input_path": "input.wav", "profile": "podcast"}
+    )
     assert web_request.profile == "podcast"
 
 
@@ -148,8 +156,12 @@ def test_report_adapter_round_trip_and_persistence(tmp_path):
             self.task_id = task_id
 
         def build(self, config_snapshot=None):
-            return {"$schema": "run-report-v1", "run_id": self.run_id, "task_id": self.task_id,
-                    "config_snapshot": config_snapshot or {}}
+            return {
+                "$schema": "run-report-v1",
+                "run_id": self.run_id,
+                "task_id": self.task_id,
+                "config_snapshot": config_snapshot or {},
+            }
 
         def persist(self, report, config=None):
             path = tmp_path / "persisted.json"
@@ -159,7 +171,9 @@ def test_report_adapter_round_trip_and_persistence(tmp_path):
     from vocal_subtitle.contracts.adapters import RunReportAdapter
 
     adapter = RunReportAdapter(FakeBuilder)
-    result = RunResult(task=TaskSnapshot("task-1", run_id="run-1", state=TaskState.COMPLETED))
+    result = RunResult(
+        task=TaskSnapshot("task-1", run_id="run-1", state=TaskState.COMPLETED)
+    )
     report = adapter.build(result, config_snapshot={"profile": "default"})
     assert isinstance(report, RunReport)
     assert report.to_dict()["$schema"] == "run-report-v1"
@@ -206,7 +220,9 @@ def test_coordinator_preserves_result_when_reporting_fails():
         reports=FailingReports(),
         artifacts=artifacts,
     )
-    result = coordinator.run(RunRequest(task=TaskRequest(input_path="input.wav", task_id="task-1")))
+    result = coordinator.run(
+        RunRequest(task=TaskRequest(input_path="input.wav", task_id="task-1"))
+    )
     assert result.status == "completed"
     assert result.diagnostics["report_error"]["category"] == "output_failed"
     assert artifacts.get("subtitle") == Path("out.srt")

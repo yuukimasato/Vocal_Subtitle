@@ -5,15 +5,12 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from .pyannote_engine import PyannoteDiarizationEngine
 from .speaker_embedding import (
     DEFAULT_CACHE_DIR,
-    PyannoteEmbeddingEngine,
     is_huggingface_model_cached,
 )
-
 
 MODEL_CATALOG: dict[str, dict[str, Any]] = {
     "speechbrain-ecapa": {
@@ -63,20 +60,18 @@ MODEL_CATALOG: dict[str, dict[str, Any]] = {
 }
 
 
-def _cache_root(cache_dir: Optional[Path | str] = None) -> Path:
+def _cache_root(cache_dir: Path | str | None = None) -> Path:
     return Path(cache_dir).expanduser() if cache_dir else DEFAULT_CACHE_DIR
 
 
 def _speechbrain_cached(model_ref: str, cache_dir: Path) -> bool:
     savedir = cache_dir / model_ref.replace("/", "_")
     return (savedir / "hyperparams.yaml").is_file() and any(
-        item.stat().st_size > 200
-        for item in savedir.glob("*.ckpt")
-        if item.is_file()
+        item.stat().st_size > 200 for item in savedir.glob("*.ckpt") if item.is_file()
     )
 
 
-def is_model_cached(model_id: str, cache_dir: Optional[Path | str] = None) -> bool:
+def is_model_cached(model_id: str, cache_dir: Path | str | None = None) -> bool:
     spec = MODEL_CATALOG.get(model_id)
     if spec is None:
         raise KeyError(f"Unknown speaker model: {model_id}")
@@ -86,23 +81,25 @@ def is_model_cached(model_id: str, cache_dir: Optional[Path | str] = None) -> bo
     return is_huggingface_model_cached(spec["model_ref"], root)
 
 
-def model_status(model_id: str, cache_dir: Optional[Path | str] = None) -> dict[str, Any]:
+def model_status(model_id: str, cache_dir: Path | str | None = None) -> dict[str, Any]:
     spec = MODEL_CATALOG.get(model_id)
     if spec is None:
         raise KeyError(f"Unknown speaker model: {model_id}")
     root = _cache_root(cache_dir)
     cached = is_model_cached(model_id, root)
     result = dict(spec)
-    result.update({
-        "cached": cached,
-        "status": "ready" if cached else "not_cached",
-        "cache_integrity": "complete" if cached else "incomplete_or_missing",
-        "cache_dir": str(root),
-    })
+    result.update(
+        {
+            "cached": cached,
+            "status": "ready" if cached else "not_cached",
+            "cache_integrity": "complete" if cached else "incomplete_or_missing",
+            "cache_dir": str(root),
+        }
+    )
     return result
 
 
-def list_model_status(cache_dir: Optional[Path | str] = None) -> list[dict[str, Any]]:
+def list_model_status(cache_dir: Path | str | None = None) -> list[dict[str, Any]]:
     return [model_status(model_id, cache_dir) for model_id in MODEL_CATALOG]
 
 
@@ -170,8 +167,8 @@ def _download_snapshot(**kwargs):
 def download_model(
     model_id: str,
     *,
-    token: Optional[str] = None,
-    cache_dir: Optional[Path | str] = None,
+    token: str | None = None,
+    cache_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     """Download one model using the Hugging Face cache used by the engines."""
     spec = MODEL_CATALOG.get(model_id)
@@ -185,8 +182,10 @@ def download_model(
     normalized_token = (token or "").strip()
     if normalized_token == "***":
         normalized_token = ""
-    resolved_token = normalized_token or os.environ.get("HF_TOKEN") or os.environ.get(
-        "HUGGING_FACE_HUB_TOKEN"
+    resolved_token = (
+        normalized_token
+        or os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     )
     if not resolved_token:
         try:
@@ -219,7 +218,7 @@ def download_model(
     return result
 
 
-def resolve_global_model_ref(selection: str) -> Optional[str]:
+def resolve_global_model_ref(selection: str) -> str | None:
     if not selection or selection in ("none", "disabled"):
         return None
     if selection == "community-1":

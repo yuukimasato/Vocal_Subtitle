@@ -12,20 +12,33 @@
 """
 
 from .base import ClusteredSegment, DiarizationEngine, SpeakerRole
+from .canonicalizer import SpeakerTurn, canonicalize_diarization_result
+from .model_registry import (
+    download_model,
+    is_model_cached,
+    list_model_status,
+    model_status,
+)
+from .pyannote_engine import PyannoteDiarizationEngine
 from .role_labeler import RoleLabeler
+from .speaker_change import (
+    SpeakerChangeConfig,
+    SpeakerChangeResult,
+    detect_speaker_change_from_features,
+)
 from .speaker_clusterer import SpeakerDiarizer
-from .speaker_fusion import SpeakerFusionResult, run_speaker_fusion
 from .speaker_embedding import (
     DummyEmbeddingEngine,
     PyannoteEmbeddingEngine,
     SpeakerEmbeddingEngine,
     create_embedding_engine,
 )
-from .speaker_change import SpeakerChangeConfig, SpeakerChangeResult, detect_speaker_change_from_features
-from .canonicalizer import SpeakerTurn, canonicalize_diarization_result
-from .turn_reconciler import AtomicSpeechSpan, reconcile_regions, merge_same_speaker_spans
-from .model_registry import download_model, is_model_cached, list_model_status, model_status
-from .pyannote_engine import PyannoteDiarizationEngine
+from .speaker_fusion import SpeakerFusionResult, run_speaker_fusion
+from .turn_reconciler import (
+    AtomicSpeechSpan,
+    merge_same_speaker_spans,
+    reconcile_regions,
+)
 
 __all__ = [
     "ClusteredSegment",

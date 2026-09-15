@@ -13,20 +13,20 @@
 """
 
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 
 from ..merging.merge_engine import _physical_owner_compatible_for_events
-from ..utils.audio_utils import AudioUtils
-from .export import export_skeleton_segments
 from . import arbitration as arbitration_policy
 from . import boundary as boundary_policy
-from .diagnostics import generate_diagnostic_report as build_diagnostic_report
 from . import event_checks
 from . import skeleton as skeleton_queries
+from .diagnostics import generate_diagnostic_report as build_diagnostic_report
+from .export import export_skeleton_segments  # noqa: F401 (re-export)
 
 logger = logging.getLogger(__name__)
 
@@ -36,28 +36,28 @@ class AcousticValidationConfig:
     """声学标尺校验配置"""
 
     enabled: bool = True
-    skeleton_noise_db: float = -40.0       # 骨架提取阈值（敏感模式）
-    skeleton_min_silence: float = 0.1      # 最小静音段（秒）
-    skeleton_min_speech: float = 0.05      # 最小语音爆发（秒）
+    skeleton_noise_db: float = -40.0  # 骨架提取阈值（敏感模式）
+    skeleton_min_silence: float = 0.1  # 最小静音段（秒）
+    skeleton_min_speech: float = 0.05  # 最小语音爆发（秒）
 
     # 吸附参数
-    max_snap_distance: float = 0.25        # 最多吸附 250ms（覆盖更多边界偏差）
-    snap_start_margin: float = 0.03        # start 吸附后保留 30ms 前导余量
-    snap_end_margin: float = 0.01          # end 吸附后保留 10ms 尾随余量
+    max_snap_distance: float = 0.25  # 最多吸附 250ms（覆盖更多边界偏差）
+    snap_start_margin: float = 0.03  # start 吸附后保留 30ms 前导余量
+    snap_end_margin: float = 0.01  # end 吸附后保留 10ms 尾随余量
 
     # 冲突仲裁
-    confidence_threshold: float = 0.6      # 低于此置信度不强制吸附
-    rms_override_threshold: float = 0.15   # RMS vs ffmpeg 冲突时的阈值
+    confidence_threshold: float = 0.6  # 低于此置信度不强制吸附
+    rms_override_threshold: float = 0.15  # RMS vs ffmpeg 冲突时的阈值
 
     # 诊断
     generate_report: bool = True
-    flag_threshold_ms: float = 200         # 偏差超过此值标记为"需复核"
+    flag_threshold_ms: float = 200  # 偏差超过此值标记为"需复核"
 
     # 统一调用
-    unified_ffmpeg_pass: bool = True       # 与方案一共用 ffmpeg 调用
+    unified_ffmpeg_pass: bool = True  # 与方案一共用 ffmpeg 调用
 
     # 双向修正
-    allow_end_shorten: bool = True         # ★ 允许声学标尺缩短结束时间（默认开启）
+    allow_end_shorten: bool = True  # ★ 允许声学标尺缩短结束时间（默认开启）
     allow_start_pull_earlier: bool = True  # ★ 允许声学标尺将 start 向前吸附
     # ★ 截尾修复：end 落在连续语音骨架段内部时延长到该段语音终点
     #   （钳制到下一事件 start 之前，绝不跨静音/吞下一句）
@@ -81,18 +81,18 @@ class AcousticValidator:
         )
     """
 
-    def __init__(self, config: Optional[AcousticValidationConfig] = None):
+    def __init__(self, config: AcousticValidationConfig | None = None):
         self.config = config or AcousticValidationConfig()
 
     def validate(
         self,
-        events: List,
-        audio_path: Optional[Path] = None,
-        audio: Optional[np.ndarray] = None,
+        events: list,
+        audio_path: Path | None = None,
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-        ffmpeg_unified_result: Optional[Dict] = None,
-        evidence_candidates: Optional[Sequence] = None,
-    ) -> Tuple[List, Dict]:
+        ffmpeg_unified_result: dict | None = None,
+        evidence_candidates: Sequence | None = None,
+    ) -> tuple[list, dict]:
         """校验并修正字幕时间轴
 
         Args:
@@ -117,8 +117,10 @@ class AcousticValidator:
 
         # Step 1: 获取声学骨架
         speech_skeleton = self._get_skeleton(
-            audio_path, ffmpeg_unified_result,
-            audio=audio, sample_rate=sample_rate,
+            audio_path,
+            ffmpeg_unified_result,
+            audio=audio,
+            sample_rate=sample_rate,
         )
 
         if not speech_skeleton:
@@ -128,7 +130,9 @@ class AcousticValidator:
         # Step 1.5: 时间轴仲裁层（2026-09-11 定案,层2）
         # timeline_arbitration=False 时返回 None,吸附行为与现状完全一致。
         arbitration = self._build_arbitration(
-            events, speech_skeleton, evidence_candidates,
+            events,
+            speech_skeleton,
+            evidence_candidates,
         )
 
         # Step 2: 吸附修正
@@ -136,11 +140,15 @@ class AcousticValidator:
             # 骨架优先模式（优化方案 §10）：TTS/干净单人场景,骨架段即
             # cue 的硬物理范围,不走 ASR 词驱动吸附。
             validated, report = self._apply_skeleton_priority(
-                events, speech_skeleton,
+                events,
+                speech_skeleton,
             )
         else:
             validated, report = self._physical_snap_validation(
-                events, speech_skeleton, audio, sample_rate,
+                events,
+                speech_skeleton,
+                audio,
+                sample_rate,
                 arbitration=arbitration,
             )
 
@@ -149,7 +157,8 @@ class AcousticValidator:
         if gap_merged > 0:
             report["gap_merged"] = gap_merged
             report["merge_trace"] = [
-                item for event in validated
+                item
+                for event in validated
                 for item in (getattr(event, "revision_trace", ()) or ())
                 if item.get("stage") == "acoustic_micro_gap_merge"
             ]
@@ -181,14 +190,15 @@ class AcousticValidator:
     @staticmethod
     def _dominant_skeleton_segment(
         event: object,
-        speech_skeleton: List[Tuple[float, float]],
-    ) -> Optional[Tuple[float, float]]:
+        speech_skeleton: list[tuple[float, float]],
+    ) -> tuple[float, float] | None:
         """返回与事件重叠最长的骨架段;无重叠为 None。"""
-        best: Optional[Tuple[float, float]] = None
+        best: tuple[float, float] | None = None
         best_overlap = 0.0
         for segment in speech_skeleton:
             overlap = min(float(event.end), segment[1]) - max(
-                float(event.start), segment[0],
+                float(event.start),
+                segment[0],
             )
             if overlap > best_overlap:
                 best, best_overlap = segment, overlap
@@ -196,9 +206,9 @@ class AcousticValidator:
 
     def _apply_skeleton_priority(
         self,
-        events: List,
-        speech_skeleton: List[Tuple[float, float]],
-    ) -> Tuple[List, Dict]:
+        events: list,
+        speech_skeleton: list[tuple[float, float]],
+    ) -> tuple[list, dict]:
         """骨架段决定 cue 的合法 start/end;词级只做段内细化。
 
         - cue start 取主骨架段起点(允许把 ASR 偏晚的起点拉回真实起音);
@@ -218,7 +228,7 @@ class AcousticValidator:
             ),
         )
 
-        report: Dict[str, Any] = {
+        report: dict[str, Any] = {
             "skeleton_priority": True,
             "skeleton_start_delta_ms": 0.0,
             "skeleton_end_delta_ms": 0.0,
@@ -231,14 +241,14 @@ class AcousticValidator:
         }
 
         # 骨架间静音是硬边界:统计相邻骨架段之间的静音间隙。
-        hard_gaps: List[Tuple[float, float]] = [
+        hard_gaps: list[tuple[float, float]] = [
             (speech_skeleton[i][1], speech_skeleton[i + 1][0])
             for i in range(len(speech_skeleton) - 1)
             if speech_skeleton[i + 1][0] > speech_skeleton[i][1]
         ]
 
         # Pass 1: 主骨架段归属与基础边界。
-        bounds: List[Optional[Tuple[float, float, object]]] = []
+        bounds: list[tuple[float, float, object] | None] = []
         for event in ordered:
             segment = self._dominant_skeleton_segment(event, speech_skeleton)
             if segment is None:
@@ -246,7 +256,8 @@ class AcousticValidator:
                 bounds.append(None)
                 continue
             crossed_gap = any(
-                min(float(event.end), gap_end) - max(float(event.start), gap_start) > 1e-9
+                min(float(event.end), gap_end) - max(float(event.start), gap_start)
+                > 1e-9
                 for gap_start, gap_end in hard_gaps
             )
             if crossed_gap:
@@ -266,15 +277,17 @@ class AcousticValidator:
             bounds.append((base_start, base_end, segment))
 
         # Pass 2/3: 同段内多 cue 保持原顺序且互不重叠。
-        adjusted: List[Optional[Tuple[float, float]]] = [None] * len(ordered)
-        previous_end: Optional[float] = None
+        adjusted: list[tuple[float, float] | None] = [None] * len(ordered)
+        previous_end: float | None = None
         for index, bound in enumerate(bounds):
             if bound is None:
                 continue
-            new_start = max(bound[0], previous_end) if previous_end is not None else bound[0]
+            new_start = (
+                max(bound[0], previous_end) if previous_end is not None else bound[0]
+            )
             adjusted[index] = (new_start, bound[1])
             previous_end = bound[1]
-        next_start: Optional[float] = None
+        next_start: float | None = None
         for index in range(len(ordered) - 1, -1, -1):
             if adjusted[index] is None:
                 continue
@@ -289,9 +302,7 @@ class AcousticValidator:
             seg_end - seg_start for seg_start, seg_end in speech_skeleton
         )
         covered_skeleton = sum(
-            bound[2][1] - bound[2][0]
-            for bound in bounds
-            if bound is not None
+            bound[2][1] - bound[2][0] for bound in bounds if bound is not None
         )
         report["skeleton_coverage_rate"] = (
             round(covered_skeleton / total_skeleton, 6) if total_skeleton > 0 else None
@@ -314,12 +325,14 @@ class AcousticValidator:
                 report["snapped_ends"] += 1
             trace = getattr(event, "revision_trace", None)
             if hasattr(trace, "append"):
-                trace.append({
-                    "stage": "skeleton_priority",
-                    "segment": list(bound[2]),
-                    "applied_start": round(new_start, 6),
-                    "applied_end": round(new_end, 6),
-                })
+                trace.append(
+                    {
+                        "stage": "skeleton_priority",
+                        "segment": list(bound[2]),
+                        "applied_start": round(new_start, 6),
+                        "applied_end": round(new_end, 6),
+                    }
+                )
             event.start = new_start
             event.end = new_end
             if getattr(event, "physical_start", None) is not None:
@@ -335,11 +348,11 @@ class AcousticValidator:
 
     def _get_skeleton(
         self,
-        audio_path: Optional[Path],
-        ffmpeg_unified_result: Optional[Dict],
-        audio: Optional[np.ndarray] = None,
+        audio_path: Path | None,
+        ffmpeg_unified_result: dict | None,
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> List[Tuple[float, float]]:
+    ) -> list[tuple[float, float]]:
         """获取声学骨架（优先复用统一 ffmpeg 调用结果）"""
         if (
             self.config.unified_ffmpeg_pass
@@ -371,7 +384,8 @@ class AcousticValidator:
         )
         total_duration = FFmpegSilenceVAD._get_duration(audio_path)
         return FFmpegSilenceVAD._invert_intervals(
-            silence_intervals, total_duration,
+            silence_intervals,
+            total_duration,
             min_speech_duration=cfg.skeleton_min_speech,
         )
 
@@ -381,10 +395,10 @@ class AcousticValidator:
 
     def _build_arbitration(
         self,
-        events: List,
-        speech_skeleton: List[Tuple[float, float]],
-        evidence_candidates: Optional[Sequence],
-    ) -> Optional[Dict]:
+        events: list,
+        speech_skeleton: list[tuple[float, float]],
+        evidence_candidates: Sequence | None,
+    ) -> dict | None:
         """构建时间轴仲裁上下文；timeline_arbitration 关闭时返回 None。
 
         R1 在此完成区域级判定（吸附/校验环节之前）：分段基线文本与全程
@@ -404,17 +418,13 @@ class AcousticValidator:
         decisions = arbitration_policy.r1_consensus_decisions(
             events,
             regions,
-            min_overlap_chars=int(
-                getattr(cfg, "arbitration_r1_min_overlap_chars", 6)
-            ),
-            min_similarity=float(
-                getattr(cfg, "arbitration_r1_min_similarity", 0.85)
-            ),
+            min_overlap_chars=int(getattr(cfg, "arbitration_r1_min_overlap_chars", 6)),
+            min_similarity=float(getattr(cfg, "arbitration_r1_min_similarity", 0.85)),
         )
 
         # 为共识事件指派目标骨架成员段（最大重叠段）,并按组分配钳制角色。
-        groups: Dict[Tuple[float, float], List] = {}
-        targets: Dict[int, Tuple[Tuple[float, float], bool, bool]] = {}
+        groups: dict[tuple[float, float], list] = {}
+        targets: dict[int, tuple[tuple[float, float], bool, bool]] = {}
         for event in events:
             decision = decisions.get(id(event))
             if decision is None:
@@ -442,18 +452,16 @@ class AcousticValidator:
         return {
             "decisions": decisions,
             "targets": targets,
-            "r2_local_noise": bool(
-                getattr(cfg, "arbitration_r2_local_noise", True)
-            ),
+            "r2_local_noise": bool(getattr(cfg, "arbitration_r2_local_noise", True)),
         }
 
     def _apply_r1_clamp(
         self,
         event,
-        target: Tuple[Tuple[float, float], bool, bool],
-        events: List,
-        report: Dict,
-        arbitration: Dict,
+        target: tuple[tuple[float, float], bool, bool],
+        events: list,
+        report: dict,
+        arbitration: dict,
     ) -> None:
         """R1 共识应用：事件边界解除 max_snap_distance 限幅,直接钳到
         骨架成员段端点（越过 reliable-boundary 跳过逻辑——R1 信任级别
@@ -466,7 +474,7 @@ class AcousticValidator:
         decision = arbitration["decisions"].get(id(event)) or {}
         original_start = float(getattr(event, "start", 0.0))
         original_end = float(getattr(event, "end", 0.0))
-        adjusted: Dict[str, float] = {}
+        adjusted: dict[str, float] = {}
 
         # 领地保护：前一个事件的终点 / 后一个事件的起点
         previous_end = max(
@@ -499,7 +507,10 @@ class AcousticValidator:
                 event.start = candidate_start
                 adjusted["start"] = candidate_start
                 _record_boundary_diagnostic(
-                    report, event, "start", "snapped",
+                    report,
+                    event,
+                    "start",
+                    "snapped",
                     reason="r1_consensus_skeleton_start",
                     original_time=original_start,
                     candidate_time=candidate_start,
@@ -517,7 +528,10 @@ class AcousticValidator:
                 event.end = candidate_end
                 adjusted["end"] = candidate_end
                 _record_boundary_diagnostic(
-                    report, event, "end", "snapped",
+                    report,
+                    event,
+                    "end",
+                    "snapped",
                     reason="r1_consensus_skeleton_end",
                     original_time=original_end,
                     candidate_time=candidate_end,
@@ -526,25 +540,27 @@ class AcousticValidator:
 
         if adjusted:
             report["r1_applied"] = report.get("r1_applied", 0) + 1
-        report.setdefault("r1_regions", []).append({
-            "event_id": f"event:index:{int(getattr(event, 'index', 0) or 0):06d}",
-            "similarity": getattr(decision, "similarity", None),
-            "overlap_chars": getattr(decision, "overlap_chars", None),
-            "member_segment": [round(segment[0], 6), round(segment[1], 6)],
-            "original_start": round(original_start, 6),
-            "original_end": round(original_end, 6),
-            "adjusted": {key: round(value, 6) for key, value in adjusted.items()},
-        })
+        report.setdefault("r1_regions", []).append(
+            {
+                "event_id": f"event:index:{int(getattr(event, 'index', 0) or 0):06d}",
+                "similarity": getattr(decision, "similarity", None),
+                "overlap_chars": getattr(decision, "overlap_chars", None),
+                "member_segment": [round(segment[0], 6), round(segment[1], 6)],
+                "original_start": round(original_start, 6),
+                "original_end": round(original_end, 6),
+                "adjusted": {key: round(value, 6) for key, value in adjusted.items()},
+            }
+        )
 
     def _r2_evaluate_blind_words(
         self,
         event,
         boundary: float,
         side: str,
-        audio: Optional[np.ndarray],
+        audio: np.ndarray | None,
         sample_rate: int,
-        report: Dict,
-        arbitration: Dict,
+        report: dict,
+        arbitration: dict,
         *,
         distance: float,
     ) -> str:
@@ -568,7 +584,9 @@ class AcousticValidator:
 
         confirmed = any(
             arbitration_policy.word_speech_confirmed(
-                audio, sample_rate, word_span,
+                audio,
+                sample_rate,
+                word_span,
                 local_noise=arbitration["r2_local_noise"],
             )
             for word_span in cut_words
@@ -578,19 +596,25 @@ class AcousticValidator:
             word_end = max(span[1] for span in cut_words)
             report["r2_blind_kept"] = report.get("r2_blind_kept", 0) + 1
             report["skeleton_blind"] = report.get("skeleton_blind", 0) + 1
-            report["events_flagged"].append({
-                "id": getattr(event, "index", 0),
-                "issue": "skeleton_blind",
-                "boundary": side,
-                "word_start": round(word_start, 6),
-                "word_end": round(word_end, 6),
-                "text_preview": str(getattr(event, "text", ""))[:50],
-            })
+            report["events_flagged"].append(
+                {
+                    "id": getattr(event, "index", 0),
+                    "issue": "skeleton_blind",
+                    "boundary": side,
+                    "word_start": round(word_start, 6),
+                    "word_end": round(word_end, 6),
+                    "text_preview": str(getattr(event, "text", ""))[:50],
+                }
+            )
             _record_boundary_diagnostic(
-                report, event, side, "skipped",
+                report,
+                event,
+                side,
+                "skipped",
                 reason="r2_blind_kept",
                 original_time=(
-                    float(getattr(event, "end", 0.0)) if side == "end"
+                    float(getattr(event, "end", 0.0))
+                    if side == "end"
                     else float(getattr(event, "start", 0.0))
                 ),
                 candidate_time=boundary,
@@ -600,15 +624,17 @@ class AcousticValidator:
         return "trimmed"
 
     @staticmethod
-    def _count_r2_trimmed(report: Dict, event, side: str) -> None:
+    def _count_r2_trimmed(report: dict, event, side: str) -> None:
         """R2 幻觉裁剪计数与复核标记（词能量无法确认为真语音被裁掉）。"""
         report["r2_trimmed"] = report.get("r2_trimmed", 0) + 1
-        report["events_flagged"].append({
-            "id": getattr(event, "index", 0),
-            "issue": "r2_hallucination_trim",
-            "boundary": side,
-            "text_preview": str(getattr(event, "text", ""))[:50],
-        })
+        report["events_flagged"].append(
+            {
+                "id": getattr(event, "index", 0),
+                "issue": "r2_hallucination_trim",
+                "boundary": side,
+                "text_preview": str(getattr(event, "text", ""))[:50],
+            }
+        )
 
     # ------------------------------------------------------------------
     # 物理吸附
@@ -616,12 +642,12 @@ class AcousticValidator:
 
     def _physical_snap_validation(
         self,
-        events: List,
-        speech_skeleton: List[Tuple[float, float]],
-        audio: Optional[np.ndarray] = None,
+        events: list,
+        speech_skeleton: list[tuple[float, float]],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-        arbitration: Optional[Dict] = None,
-    ) -> Tuple[List, Dict]:
+        arbitration: dict | None = None,
+    ) -> tuple[list, dict]:
         """字幕时间轴向物理声学骨架吸附"""
         cfg = self.config
         report = {
@@ -643,9 +669,7 @@ class AcousticValidator:
 
         # 邻居索引（按 start 排序）：end 延长需要钳制到下一事件 start 之前
         ordered = sorted(events, key=lambda e: float(getattr(e, "start", 0.0)))
-        next_of = {
-            id(ordered[i]): ordered[i + 1] for i in range(len(ordered) - 1)
-        }
+        next_of = {id(ordered[i]): ordered[i + 1] for i in range(len(ordered) - 1)}
 
         for event in events:
             # ---- R1 共识（层2）：整段信骨架,跳过常规吸附 ----
@@ -657,7 +681,9 @@ class AcousticValidator:
 
             # ---- Start 校验（后向吸附：裁掉 start 吞并的前导静音） ----
             is_start_in_speech, next_start, _ = _find_directional_boundary(
-                event.start, speech_skeleton, "start",
+                event.start,
+                speech_skeleton,
+                "start",
             )
             # 吸附目标 = 下一个真实语音起点。骨架包含判断对帧级无缝衔接
             # 产生的共享边界会误判（上一句尾巴把 start 顶进了语音段），
@@ -670,12 +696,15 @@ class AcousticValidator:
                     # 在骨架上没有边界（<min_silence 的停顿被并进同一
                     # 语音段），只有能量能定位；无能量命中再退回骨架。
                     anchor = _next_energy_onset_after(
-                        audio, sample_rate, event.start,
+                        audio,
+                        sample_rate,
+                        event.start,
                         cfg.max_start_snap_distance,
                     )
                     if anchor is None:
                         anchor = _next_speech_onset_after(
-                            event.start, speech_skeleton,
+                            event.start,
+                            speech_skeleton,
                         )
                 else:
                     anchor = None
@@ -686,14 +715,15 @@ class AcousticValidator:
                 # 能量确认为真语音则禁吸附保留 ASR 词时间。
                 r2_status = "no_blind"
                 start_kept = False
-                if (
-                    arbitration is not None
-                    and distance <= cfg.max_start_snap_distance
-                ):
+                if arbitration is not None and distance <= cfg.max_start_snap_distance:
                     r2_status = self._r2_evaluate_blind_words(
                         event,
-                        anchor + cfg.snap_start_margin, "start",
-                        audio, sample_rate, report, arbitration,
+                        anchor + cfg.snap_start_margin,
+                        "start",
+                        audio,
+                        sample_rate,
+                        report,
+                        arbitration,
                         distance=distance,
                     )
                     # start_kept 只豁免 start 校验,end 校验照常进行。
@@ -712,8 +742,11 @@ class AcousticValidator:
                             rms_confirmed = distance <= 0.03
                         elif distance > 0.03:
                             rms_confirmed = _rms_energy_check(
-                                audio, sample_rate, anchor,
-                                window_ms=50, threshold_ratio=2.0,
+                                audio,
+                                sample_rate,
+                                anchor,
+                                window_ms=50,
+                                threshold_ratio=2.0,
                             )
                         if rms_confirmed:
                             original_time = event.start
@@ -722,7 +755,10 @@ class AcousticValidator:
                             if r2_status == "trimmed":
                                 self._count_r2_trimmed(report, event, "start")
                             _record_boundary_diagnostic(
-                                report, event, "start", "snapped",
+                                report,
+                                event,
+                                "start",
+                                "snapped",
                                 reason="next_speech_start",
                                 original_time=original_time,
                                 candidate_time=candidate_start,
@@ -731,7 +767,10 @@ class AcousticValidator:
                         else:
                             report["rms_overrides"] += 1
                             _record_boundary_diagnostic(
-                                report, event, "start", "skipped",
+                                report,
+                                event,
+                                "start",
+                                "skipped",
                                 reason="rms_not_confirmed",
                                 original_time=event.start,
                                 candidate_time=candidate_start,
@@ -739,18 +778,23 @@ class AcousticValidator:
                             )
                     else:
                         _record_boundary_diagnostic(
-                            report, event, "start", "skipped",
+                            report,
+                            event,
+                            "start",
+                            "skipped",
                             reason="candidate_would_invalidate_event",
                             original_time=event.start,
                             candidate_time=candidate_start,
                             distance=distance,
                         )
                 elif not start_kept and distance <= 0.5:
-                    report["events_flagged"].append({
-                        "id": getattr(event, "index", 0),
-                        "issue": "start_deviation",
-                        "deviation_ms": round(distance * 1000),
-                    })
+                    report["events_flagged"].append(
+                        {
+                            "id": getattr(event, "index", 0),
+                            "issue": "start_deviation",
+                            "deviation_ms": round(distance * 1000),
+                        }
+                    )
 
             # ---- End 校验（只向前寻找上一个语音终点） ----
             (
@@ -769,48 +813,51 @@ class AcousticValidator:
                     if remaining > 0.02:
                         candidate_end = speech_end - cfg.snap_end_margin
                         next_event = next_of.get(id(event))
-                        if (
-                            next_event is not None
-                            and next_event.start > event.end
-                        ):
+                        if next_event is not None:
+                            # 让界钳制必须无条件生效：上游校验会把重叠
+                            # 裁成相等边界（next.start == event.end），若
+                            # 仅在 next.start > event.end 时让界，该钳制
+                            # 恰好在相等边界上被跳过，end 延长便直接越过
+                            # 下一事件起点（相邻字幕重叠的直接成因）。
                             candidate_end = min(
-                                candidate_end, next_event.start - 0.02,
+                                candidate_end,
+                                next_event.start - 0.02,
                             )
                         extended = False
-                        if (
-                            cfg.allow_end_extend
-                            and candidate_end > event.end + 0.02
-                        ):
+                        if cfg.allow_end_extend and candidate_end > event.end + 0.02:
                             original_time = event.end
                             event.end = candidate_end
-                            report["ends_extended"] = (
-                                report.get("ends_extended", 0) + 1
-                            )
+                            report["ends_extended"] = report.get("ends_extended", 0) + 1
                             extended = True
                             _record_boundary_diagnostic(
-                                report, event, "end", "snapped",
+                                report,
+                                event,
+                                "end",
+                                "snapped",
                                 reason="containing_speech_end",
                                 original_time=original_time,
                                 candidate_time=candidate_end,
                                 distance=remaining,
                             )
-                        if (
-                            not extended
-                            and 0.02 < remaining <= cfg.max_snap_distance
-                        ):
+                        if not extended and 0.02 < remaining <= cfg.max_snap_distance:
                             _record_boundary_diagnostic(
-                                report, event, "end", "flagged",
+                                report,
+                                event,
+                                "end",
+                                "flagged",
                                 reason="possible_truncation_inside_speech",
                                 original_time=event.end,
                                 candidate_time=speech_end,
                                 distance=remaining,
                             )
-                            report["events_flagged"].append({
-                                "id": getattr(event, "index", 0),
-                                "issue": "possible_truncation",
-                                "deviation_ms": round(remaining * 1000),
-                                "text_preview": getattr(event, "text", "")[:50],
-                            })
+                            report["events_flagged"].append(
+                                {
+                                    "id": getattr(event, "index", 0),
+                                    "issue": "possible_truncation",
+                                    "deviation_ms": round(remaining * 1000),
+                                    "text_preview": getattr(event, "text", "")[:50],
+                                }
+                            )
                 continue
 
             if previous_end is not None:
@@ -822,24 +869,31 @@ class AcousticValidator:
                 # skeleton_blind;无法确认则交给现行路径(reliable 跳过或
                 # 回缩=按幻觉裁剪)。
                 r2_status = "no_blind"
-                if (
-                    arbitration is not None
-                    and distance <= cfg.max_snap_distance
-                ):
+                if arbitration is not None and distance <= cfg.max_snap_distance:
                     r2_status = self._r2_evaluate_blind_words(
-                        event, candidate_end, "end",
-                        audio, sample_rate, report, arbitration,
+                        event,
+                        candidate_end,
+                        "end",
+                        audio,
+                        sample_rate,
+                        report,
+                        arbitration,
                         distance=distance,
                     )
                     if r2_status == "kept":
                         continue
 
                 if _preserve_reliable_asr_boundary(
-                    event, "end", self.config,
+                    event,
+                    "end",
+                    self.config,
                 ):
                     report["skipped_high_confidence"] += 1
                     _record_boundary_diagnostic(
-                        report, event, "end", "skipped",
+                        report,
+                        event,
+                        "end",
+                        "skipped",
                         reason="reliable_word_boundary",
                         original_time=event.end,
                         candidate_time=candidate_end,
@@ -870,7 +924,10 @@ class AcousticValidator:
                             if r2_status == "trimmed":
                                 self._count_r2_trimmed(report, event, "end")
                             _record_boundary_diagnostic(
-                                report, event, "end", "snapped",
+                                report,
+                                event,
+                                "end",
+                                "snapped",
                                 reason="previous_speech_end",
                                 original_time=original_time,
                                 candidate_time=candidate_end,
@@ -879,7 +936,10 @@ class AcousticValidator:
                         else:
                             report["rms_overrides"] += 1
                             _record_boundary_diagnostic(
-                                report, event, "end", "skipped",
+                                report,
+                                event,
+                                "end",
+                                "skipped",
                                 reason="silence_not_confirmed",
                                 original_time=event.end,
                                 candidate_time=candidate_end,
@@ -887,22 +947,28 @@ class AcousticValidator:
                             )
                     else:
                         _record_boundary_diagnostic(
-                            report, event, "end", "skipped",
+                            report,
+                            event,
+                            "end",
+                            "skipped",
                             reason="end_extension_forbidden",
                             original_time=event.end,
                             candidate_time=candidate_end,
                             distance=distance,
                         )
                 elif distance <= 0.5:
-                    report["events_flagged"].append({
-                        "id": getattr(event, "index", 0),
-                        "issue": "end_deviation",
-                        "deviation_ms": round(distance * 1000),
-                        "text_preview": (
-                            getattr(event, "text", "")[:50]
-                            if hasattr(event, "text") else ""
-                        ),
-                    })
+                    report["events_flagged"].append(
+                        {
+                            "id": getattr(event, "index", 0),
+                            "issue": "end_deviation",
+                            "deviation_ms": round(distance * 1000),
+                            "text_preview": (
+                                getattr(event, "text", "")[:50]
+                                if hasattr(event, "text")
+                                else ""
+                            ),
+                        }
+                    )
 
         return events, report
 
@@ -912,7 +978,7 @@ class AcousticValidator:
 
     @staticmethod
     def _merge_micro_gaps(
-        events: List,
+        events: list,
         max_gap: float = 0.05,
     ) -> tuple:
         """合并同说话人的极近邻事件（gap < max_gap）。
@@ -958,10 +1024,14 @@ class AcousticValidator:
                 prev.end = event.end
                 prev.text = f"{prev.text} {event.text}".strip()
                 # Merge provenance: source_word_ids and physical_spans
-                prev.source_word_ids = list(dict.fromkeys(
-                    (prev.source_word_ids or []) + (event.source_word_ids or [])
-                ))
-                prev.physical_spans = list((prev.physical_spans or []) + (event.physical_spans or []))
+                prev.source_word_ids = list(
+                    dict.fromkeys(
+                        (prev.source_word_ids or []) + (event.source_word_ids or [])
+                    )
+                )
+                prev.physical_spans = list(
+                    (prev.physical_spans or []) + (event.physical_spans or [])
+                )
                 merge_trace = {
                     "op": "merge",
                     "stage": "acoustic_micro_gap_merge",
@@ -972,29 +1042,38 @@ class AcousticValidator:
                     ],
                     "merge_count": 1,
                     "physical_owner": {
-                        "region_ids": list(dict.fromkeys(
-                            item for item in (
-                                getattr(prev, "physical_region_id", None),
-                                getattr(event, "physical_region_id", None),
-                            ) if item is not None
-                        )),
-                        "bin_ids": list(dict.fromkeys(
-                            item for item in (
-                                getattr(prev, "physical_bin_id", None),
-                                getattr(event, "physical_bin_id", None),
-                            ) if item is not None
-                        )),
+                        "region_ids": list(
+                            dict.fromkeys(
+                                item
+                                for item in (
+                                    getattr(prev, "physical_region_id", None),
+                                    getattr(event, "physical_region_id", None),
+                                )
+                                if item is not None
+                            )
+                        ),
+                        "bin_ids": list(
+                            dict.fromkeys(
+                                item
+                                for item in (
+                                    getattr(prev, "physical_bin_id", None),
+                                    getattr(event, "physical_bin_id", None),
+                                )
+                                if item is not None
+                            )
+                        ),
                         "speaker_ids": [prev.speaker_id],
                     },
                     "gap_ms": round(gap * 1000.0, 3),
                 }
-                prev.revision_trace = list(getattr(prev, "revision_trace", []) or []) + [merge_trace]
+                prev.revision_trace = list(
+                    getattr(prev, "revision_trace", []) or []
+                ) + [merge_trace]
                 # Keep the report local to the validator result; callers that
                 # need this trace receive it through the event revision trace.
                 num_merged += 1
                 logger.debug(
-                    "Micro-gap merge: %.0fms gap, same speaker → "
-                    "merged events",
+                    "Micro-gap merge: %.0fms gap, same speaker → merged events",
                     gap * 1000,
                 )
             else:
@@ -1007,7 +1086,10 @@ class AcousticValidator:
         if num_merged > 0:
             logger.info(
                 "Micro-gap merge: %d → %d events (%d merged, gap < %.0fms)",
-                len(events), len(merged), num_merged, max_gap * 1000,
+                len(events),
+                len(merged),
+                num_merged,
+                max_gap * 1000,
             )
 
         return merged, num_merged
@@ -1018,9 +1100,9 @@ class AcousticValidator:
 
     def generate_diagnostic_report(
         self,
-        events: List,
-        speech_skeleton: List[Tuple[float, float]],
-    ) -> Dict:
+        events: list,
+        speech_skeleton: list[tuple[float, float]],
+    ) -> dict:
         """生成物理校验诊断报告，保留旧实例方法入口。"""
         return build_diagnostic_report(
             events,
@@ -1032,346 +1114,6 @@ class AcousticValidator:
 # ------------------------------------------------------------------
 # 辅助函数
 # ------------------------------------------------------------------
-
-
-def _find_boundary_in_skeleton(
-    t: float, skeleton: List[Tuple[float, float]],
-) -> Tuple[bool, float]:
-    """判断时间点 t 是否在语音段内，并返回最近的边界
-
-    Returns:
-        (is_in_speech, nearest_boundary)
-    """
-    for s_start, s_end in skeleton:
-        if s_start <= t <= s_end:
-            return True, t
-        if t < s_start:
-            return False, s_start
-
-    # t 在所有语音段之后
-    return False, skeleton[-1][1] if skeleton else t
-
-
-def _find_directional_boundary(
-    t: float,
-    skeleton: List[Tuple[float, float]],
-    boundary_type: str,
-) -> Tuple[bool, Optional[float], Optional[Tuple[float, float]]]:
-    """Find the boundary appropriate for a start or end endpoint.
-
-    The legacy helper above returns the next boundary in a gap for both
-    endpoint types. That is valid for a start, but an end must use the
-    previous speech end or it can be extended across an entire silence gap.
-
-    Returns ``(inside_speech, candidate_boundary, containing_speech)``.
-    ``candidate_boundary`` is ``None`` when no boundary exists in the
-    direction that is safe for this endpoint.
-    """
-    if boundary_type not in {"start", "end"}:
-        raise ValueError("boundary_type must be 'start' or 'end'")
-
-    previous_end: Optional[float] = None
-    for speech_start, speech_end in skeleton:
-        if speech_start <= t <= speech_end:
-            return True, t, (speech_start, speech_end)
-        if t < speech_start:
-            if boundary_type == "start":
-                return False, speech_start, None
-            return False, previous_end, None
-        previous_end = speech_end
-
-    if boundary_type == "end":
-        return False, previous_end, None
-    return False, None, None
-
-
-def _next_speech_onset_after(
-    t: float, skeleton: List[Tuple[float, float]],
-) -> Optional[float]:
-    """返回严格晚于 t 的下一个骨架段起点（跨过当前所在语音段）。"""
-    best: Optional[float] = None
-    for s_start, _s_end in skeleton:
-        if s_start > t + 1e-6 and (best is None or s_start < best):
-            best = s_start
-    return best
-
-
-def _next_energy_onset_after(
-    audio: np.ndarray,
-    sample_rate: int,
-    t: float,
-    horizon: float,
-) -> Optional[float]:
-    """在 [t, t+horizon] 内扫描第一段持续语音爆发（≥2 帧超噪声底）。
-
-    骨架段会把 <min_silence 的停顿并进同一段连续语音，句内停顿后的
-    重新开口在骨架上没有边界；这里直接看能量，找到局部真实起点。
-    """
-    mask = _speech_frame_mask(audio, sample_rate, t, t + horizon)
-    if mask is None or mask.size < 2:
-        return None
-    for i in range(len(mask) - 1):
-        if mask[i] and mask[i + 1]:
-            return t + i * 0.02
-    return None
-
-
-def _speech_frame_mask(
-    audio: np.ndarray,
-    sample_rate: int,
-    t0: float,
-    t1: float,
-) -> Optional[np.ndarray]:
-    """返回 [t0,t1] 内 20ms 帧是否含语音能量的布尔掩码。
-
-    判据 = 帧峰值 > max(4% 全局峰值, 2× 底噪 RMS)。只用底噪倍数会把
-    TTS/录音残留噪声（底噪的 2~2.5 倍）误判为语音；4% 峰值门限与
-    噪声影子线一致，在干净素材上能干净地区分句内停顿与语音。
-    """
-    win = max(1, int(0.02 * sample_rate))
-    i0 = int(t0 * sample_rate)
-    i1 = min(len(audio), int(t1 * sample_rate))
-    seg = audio[i0:i1].astype(np.float32)
-    if seg.size < win:
-        return None
-    frames = seg[: seg.size // win * win].reshape(-1, win)
-    frame_peak = np.abs(frames).max(axis=1)
-    threshold = max(
-        0.04 * float(np.abs(audio).max()) + 1e-9,
-        2.0 * AudioUtils.estimate_silence_rms(audio, sample_rate),
-    )
-    return frame_peak > threshold
-
-
-def _leading_silence_ahead(
-    audio: Optional[np.ndarray],
-    sample_rate: int,
-    t: float,
-    window_sec: float = 0.12,
-    speech_frame_ratio: float = 0.2,
-) -> bool:
-    """判断 [t, t+window] 是否基本无语音能量（用于 start 后向吸附）。
-
-    skeleton 的"点是否在语音段内"对帧级无缝衔接产生的共享边界会误判
-    （上一句尾巴把下一句 start 顶进了语音段里），这里直接看能量：
-    窗口内含语音帧占比 ≤ 阈值视为静音。
-    """
-    if audio is None:
-        return False
-    mask = _speech_frame_mask(audio, sample_rate, t, t + window_sec)
-    if mask is None:
-        return True
-    return float(mask.mean()) <= speech_frame_ratio
-
-
-def _boundary_confidence(event: object, boundary_type: str) -> Optional[float]:
-    """Return confidence for the word anchoring one event endpoint."""
-    words = list(getattr(event, "words", []) or [])
-    if words:
-        word = words[0] if boundary_type == "start" else words[-1]
-        value = getattr(word, "confidence", None)
-        if value is not None:
-            try:
-                return max(0.0, min(1.0, float(value)))
-            except (TypeError, ValueError):
-                pass
-
-    for name in (f"{boundary_type}_confidence", "boundary_confidence"):
-        value = getattr(event, name, None)
-        if value is not None:
-            try:
-                return max(0.0, min(1.0, float(value)))
-            except (TypeError, ValueError):
-                pass
-    return None
-
-
-def _preserve_reliable_asr_boundary(
-    event: object,
-    boundary_type: str,
-    config: AcousticValidationConfig,
-) -> bool:
-    """Keep a reliable word-level endpoint ahead of physical snapping."""
-    words = list(getattr(event, "words", []) or [])
-    confidence = _boundary_confidence(event, boundary_type)
-    return bool(
-        words
-        and confidence is not None
-        and confidence >= config.confidence_threshold
-    )
-
-
-def _silence_confirmed(
-    audio: Optional[np.ndarray],
-    sample_rate: int,
-    time_point: float,
-    *,
-    distance: float,
-) -> bool:
-    """Confirm a gap is silent, with a conservative no-audio fallback."""
-    if audio is None:
-        # Without samples, only a tiny structural correction is safe.
-        return distance <= 0.03
-    return not _rms_energy_check(
-        audio, sample_rate, time_point,
-        window_ms=50, threshold_ratio=2.0,
-    )
-
-
-def _record_boundary_diagnostic(
-    report: Dict,
-    event: object,
-    boundary_type: str,
-    action: str,
-    *,
-    reason: str,
-    original_time: float,
-    candidate_time: Optional[float],
-    distance: Optional[float],
-) -> None:
-    """Append a compact, auditable endpoint decision."""
-    report.setdefault("boundary_diagnostics", []).append({
-        "stage": "acoustic_boundary",
-        "event_id": f"event:index:{int(getattr(event, 'index', 0) or 0):06d}",
-        "boundary": boundary_type,
-        "action": action,
-        "reason": reason,
-        "physical_region_id": getattr(event, "physical_region_id", None),
-        "physical_bin_id": getattr(event, "physical_bin_id", None),
-        "speaker_id": getattr(event, "speaker_id", None),
-        "original_time": round(float(original_time), 6),
-        "candidate_time": (
-            round(float(candidate_time), 6)
-            if candidate_time is not None else None
-        ),
-        "distance_ms": (
-            round(float(distance) * 1000, 3)
-            if distance is not None else None
-        ),
-    })
-def _is_time_in_speech(
-    t: float, skeleton: List[Tuple[float, float]],
-) -> bool:
-    """判断时间点是否在语音段内"""
-    for s_start, s_end in skeleton:
-        if s_start <= t <= s_end:
-            return True
-    return False
-
-
-def _has_speech_in_range(
-    t1: float, t2: float, skeleton: List[Tuple[float, float]],
-) -> bool:
-    """判断 [t1, t2] 区间内是否有语音"""
-    for s_start, s_end in skeleton:
-        if s_start < t2 and s_end > t1:
-            return True
-    return False
-
-
-def _rms_energy_check(
-    audio: np.ndarray,
-    sample_rate: int,
-    time_point: float,
-    window_ms: int = 50,
-    threshold_ratio: float = 2.0,
-) -> bool:
-    """在时间点附近做 RMS 能量确认
-
-    Returns:
-        True 如果检测到语音能量
-    """
-    from ..utils.audio_utils import AudioUtils
-
-    silence_rms = AudioUtils.estimate_silence_rms(audio, sample_rate)
-    half_window = window_ms / 2000.0  # 转秒再折半
-
-    t1 = max(0, time_point - half_window)
-    t2 = min(len(audio) / sample_rate, time_point + half_window)
-
-    gap_rms = AudioUtils.get_segment_rms(audio, t1, t2, sample_rate)
-    return gap_rms > silence_rms * threshold_ratio
-
-
-# ------------------------------------------------------------------
-# 5.12.3 非人声高能事件仲裁
-# ------------------------------------------------------------------
-
-
-def _compute_vad_overlap(
-    start: float,
-    end: float,
-    vad_segments: List,
-) -> float:
-    """计算区间与 VAD 检测结果的重叠比例
-
-    Returns:
-        0.0 ~ 1.0，重叠比例
-    """
-    duration = end - start
-    if duration <= 0:
-        return 0.0
-
-    overlap_total = 0.0
-    for seg in vad_segments:
-        seg_start = seg.start if hasattr(seg, "start") else seg[0]
-        seg_end = seg.end if hasattr(seg, "end") else seg[1]
-        overlap_start = max(start, seg_start)
-        overlap_end = min(end, seg_end)
-        if overlap_start < overlap_end:
-            overlap_total += overlap_end - overlap_start
-
-    return min(1.0, overlap_total / duration)
-
-
-def _classify_energy_type(
-    audio: np.ndarray,
-    sample_rate: int,
-    start: float,
-    end: float,
-) -> str:
-    """基于频谱特征区分噪音类型
-
-    使用自相关法检测谐波结构：
-    - 有谐波结构 → "music_or_tonal"（音乐、警报等）
-    - 无谐波结构 → "transient_noise"（拍桌子、关门等）
-
-    Returns:
-        "transient_noise" | "music_or_tonal" | "unknown"
-    """
-    start_sample = int(start * sample_rate)
-    end_sample = int(end * sample_rate)
-    segment = audio[start_sample:end_sample]
-
-    if len(segment) < 256:
-        return "unknown"
-
-    try:
-        # 自相关
-        autocorr = np.correlate(segment, segment, mode="full")
-        autocorr = autocorr[len(autocorr) // 2:]
-        autocorr = autocorr / (autocorr[0] + 1e-8)
-
-        # 找前几个峰值（基频和谐波）
-        peaks = []
-        for i in range(1, min(len(autocorr) - 1, sample_rate // 50)):  # 50Hz 下限
-            if autocorr[i] > autocorr[i - 1] and autocorr[i] > autocorr[i + 1]:
-                if autocorr[i] > 0.15:  # 显著的峰值
-                    peaks.append((i, autocorr[i]))
-
-        if not peaks:
-            return "transient_noise"  # 无谐波结构 → 瞬态噪音
-
-        # 谐波比 = 峰值平均
-        peak_vals = [p[1] for p in peaks[:10]]
-        harmonics_ratio = sum(peak_vals) / len(peak_vals)
-
-        if harmonics_ratio > 0.3:
-            return "music_or_tonal"
-        else:
-            return "transient_noise"
-    except Exception:
-        return "unknown"
 
 
 # Route all helper consumers through the isolated policies.  The private names
@@ -1386,5 +1128,9 @@ _has_speech_in_range = skeleton_queries.has_speech_in_range
 _rms_energy_check = skeleton_queries.rms_energy_check
 _silence_confirmed = skeleton_queries.silence_confirmed
 _compute_vad_overlap = skeleton_queries.compute_vad_overlap
+_next_speech_onset_after = skeleton_queries.next_speech_onset_after
+_next_energy_onset_after = skeleton_queries.next_energy_onset_after
+_speech_frame_mask = skeleton_queries.speech_frame_mask
+_leading_silence_ahead = skeleton_queries.leading_silence_ahead
 _classify_energy_type = event_checks.classify_energy_type
 classify_acoustic_events = event_checks.classify_acoustic_events

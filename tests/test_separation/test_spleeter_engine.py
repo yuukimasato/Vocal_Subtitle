@@ -1,8 +1,6 @@
 """测试 Spleeter 人声分离引擎"""
 
-import pytest
-
-from vocal_subtitle.separation.base import LicenseInfo, SeparationResult
+from vocal_subtitle.separation.base import LicenseInfo
 from vocal_subtitle.separation.spleeter_engine import SpleeterEngine
 
 

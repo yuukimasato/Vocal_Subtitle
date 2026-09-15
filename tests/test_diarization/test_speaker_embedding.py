@@ -64,9 +64,7 @@ def test_huggingface_pipeline_cache_requires_complete_snapshot(tmp_path):
     assert is_huggingface_model_cached(model_ref, tmp_path)
 
 
-def test_pyannote_4_loader_authenticates_model_before_inference(
-    monkeypatch, tmp_path
-):
+def test_pyannote_4_loader_authenticates_model_before_inference(monkeypatch, tmp_path):
     captured = {}
 
     fake_torch = types.ModuleType("torch")

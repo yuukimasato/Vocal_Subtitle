@@ -9,14 +9,16 @@
 - run_id 关联
 """
 
+import builtins
 import json
 import logging
 import os
 import sqlite3
 import threading
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,32 +30,36 @@ DEFAULT_DB_PATH = DEFAULT_DB_DIR / "task_history.db"
 # 任务状态枚举 (TASK_STATE_MACHINE.md)
 # ------------------------------------------------------------------
 
-VALID_TASK_STATUSES = frozenset({
-    "pending",
-    "preflight",
-    "running",
-    "completed",
-    "degraded_completed",
-    "failed",
-    "cancelled",
-})
+VALID_TASK_STATUSES = frozenset(
+    {
+        "pending",
+        "preflight",
+        "running",
+        "completed",
+        "degraded_completed",
+        "failed",
+        "cancelled",
+    }
+)
 
-TERMINAL_STATUSES = frozenset({
-    "completed",
-    "degraded_completed",
-    "failed",
-    "cancelled",
-})
+TERMINAL_STATUSES = frozenset(
+    {
+        "completed",
+        "degraded_completed",
+        "failed",
+        "cancelled",
+    }
+)
 
 # 允许的状态转换 (TASK_STATE_MACHINE.md §转换规则)
 ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
-    "pending":             frozenset({"preflight", "cancelled"}),
-    "preflight":           frozenset({"running", "failed", "cancelled"}),
-    "running":             frozenset({"completed", "degraded_completed", "failed", "cancelled"}),
-    "completed":           frozenset(),
-    "degraded_completed":  frozenset(),
-    "failed":              frozenset(),
-    "cancelled":           frozenset(),
+    "pending": frozenset({"preflight", "cancelled"}),
+    "preflight": frozenset({"running", "failed", "cancelled"}),
+    "running": frozenset({"completed", "degraded_completed", "failed", "cancelled"}),
+    "completed": frozenset(),
+    "degraded_completed": frozenset(),
+    "failed": frozenset(),
+    "cancelled": frozenset(),
 }
 
 # ------------------------------------------------------------------
@@ -122,7 +128,7 @@ class TaskHistoryManager:
         tasks = history.list(limit=20)
     """
 
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Path | None = None):
         """
         Args:
             db_path: SQLite 数据库路径，默认 cache/task_history.db
@@ -166,13 +172,23 @@ class TaskHistoryManager:
                     )
                 """)
                 # Schema 迁移：添加旧表缺失的列
-                self._migrate_add_column(conn, "task_history", "run_id", "TEXT NOT NULL DEFAULT ''")
-                self._migrate_add_column(conn, "task_history", "error_category", "TEXT NOT NULL DEFAULT ''")
+                self._migrate_add_column(
+                    conn, "task_history", "run_id", "TEXT NOT NULL DEFAULT ''"
+                )
+                self._migrate_add_column(
+                    conn, "task_history", "error_category", "TEXT NOT NULL DEFAULT ''"
+                )
                 # 内部学习任务标记与场景标签（冷重跑异步化，D28/D27）：空串=普通管线任务
-                self._migrate_add_column(conn, "task_history", "task_type", "TEXT NOT NULL DEFAULT ''")
-                self._migrate_add_column(conn, "task_history", "scenario", "TEXT NOT NULL DEFAULT ''")
+                self._migrate_add_column(
+                    conn, "task_history", "task_type", "TEXT NOT NULL DEFAULT ''"
+                )
+                self._migrate_add_column(
+                    conn, "task_history", "scenario", "TEXT NOT NULL DEFAULT ''"
+                )
                 # 任务归属进程：CLI 与 WebUI 共享本库，fixup 需按存活进程区分孤儿任务
-                self._migrate_add_column(conn, "task_history", "owner_pid", "INTEGER NOT NULL DEFAULT 0")
+                self._migrate_add_column(
+                    conn, "task_history", "owner_pid", "INTEGER NOT NULL DEFAULT 0"
+                )
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_history_status
                         ON task_history(status)
@@ -257,9 +273,18 @@ class TaskHistoryManager:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
                     """,
                     (
-                        task_id, run_id, file_name, file_hash, file_size,
-                        profile, config_json, config_hash,
-                        task_type, scenario, os.getpid(), now,
+                        task_id,
+                        run_id,
+                        file_name,
+                        file_hash,
+                        file_size,
+                        profile,
+                        config_json,
+                        config_hash,
+                        task_type,
+                        scenario,
+                        os.getpid(),
+                        now,
                     ),
                 )
                 conn.commit()
@@ -279,9 +304,16 @@ class TaskHistoryManager:
             return
 
         allowed = {
-            "status", "run_id", "progress_json", "result_json", "error",
-            "error_category", "total_duration_seconds", "completed_at",
-            "input_file_hash", "owner_pid",
+            "status",
+            "run_id",
+            "progress_json",
+            "result_json",
+            "error",
+            "error_category",
+            "total_duration_seconds",
+            "completed_at",
+            "input_file_hash",
+            "owner_pid",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
@@ -298,10 +330,16 @@ class TaskHistoryManager:
             if current is not None:
                 current_status = current.get("status", "pending")
                 allowed_next = ALLOWED_TRANSITIONS.get(current_status, frozenset())
-                if new_status != current_status and allowed_next and new_status not in allowed_next:
+                if (
+                    new_status != current_status
+                    and allowed_next
+                    and new_status not in allowed_next
+                ):
                     logger.warning(
                         "Status transition %s → %s not in allowed set %s",
-                        current_status, new_status, sorted(allowed_next),
+                        current_status,
+                        new_status,
+                        sorted(allowed_next),
                     )
 
             # 终态自动记录完成时间
@@ -385,24 +423,26 @@ class TaskHistoryManager:
     ) -> None:
         """running → degraded_completed"""
         self.transition_status(
-            task_id, "degraded_completed",
-            error=reason, error_category=category or ErrorCategory.RECOVERABLE_DEGRADATION,
+            task_id,
+            "degraded_completed",
+            error=reason,
+            error_category=category or ErrorCategory.RECOVERABLE_DEGRADATION,
         )
 
-    def set_failed(
-        self, task_id: str, *, reason: str, category: str = ""
-    ) -> None:
+    def set_failed(self, task_id: str, *, reason: str, category: str = "") -> None:
         """running → failed"""
         self.transition_status(
-            task_id, "failed",
-            error=reason, error_category=category or ErrorCategory.UNRECOVERABLE_FAILURE,
+            task_id,
+            "failed",
+            error=reason,
+            error_category=category or ErrorCategory.UNRECOVERABLE_FAILURE,
         )
 
     def set_cancelled(self, task_id: str) -> None:
         """pending/preflight/running → cancelled"""
         self.transition_status(task_id, "cancelled", error="用户取消")
 
-    def get(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, task_id: str) -> dict[str, Any] | None:
         """获取单个任务记录"""
         conn = self._get_conn()
         try:
@@ -417,8 +457,8 @@ class TaskHistoryManager:
         self,
         limit: int = 50,
         offset: int = 0,
-        status: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
         """分页列出任务历史
 
         Args:
@@ -473,8 +513,8 @@ class TaskHistoryManager:
 
     def clear(
         self,
-        older_than_days: Optional[int] = None,
-        exclude_ids: Optional[Iterable[str]] = None,
+        older_than_days: int | None = None,
+        exclude_ids: Iterable[str] | None = None,
     ) -> int:
         """清除历史记录
 
@@ -489,7 +529,9 @@ class TaskHistoryManager:
             conn = self._get_conn()
             try:
                 if older_than_days is not None:
-                    cutoff = (datetime.now() - timedelta(days=older_than_days)).isoformat()
+                    cutoff = (
+                        datetime.now() - timedelta(days=older_than_days)
+                    ).isoformat()
                     cursor = conn.execute(
                         "DELETE FROM task_history WHERE created_at < ?",
                         (cutoff,),
@@ -510,7 +552,7 @@ class TaskHistoryManager:
             finally:
                 conn.close()
 
-    def count(self, status: Optional[str] = None) -> int:
+    def count(self, status: str | None = None) -> int:
         """获取记录总数
 
         Args:
@@ -539,8 +581,8 @@ class TaskHistoryManager:
         self,
         file_hash: str,
         config_hash: str,
-        task_type: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+        task_type: str | None = None,
+    ) -> dict[str, Any] | None:
         """通过文件哈希 + 配置哈希查找已完成的任务（缓存命中）
 
         只返回最近一次成功的记录。
@@ -592,7 +634,7 @@ class TaskHistoryManager:
         self,
         file_hash: str,
         limit: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         """通过输入文件哈希查找已完成的任务（V2 上传学习绑定来源任务，D26）
 
         仅字节级同文件命中：input_file_hash 为管线的实际输入 sha256
@@ -624,7 +666,7 @@ class TaskHistoryManager:
         finally:
             conn.close()
 
-    def find_by_run_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def find_by_run_id(self, run_id: str) -> dict[str, Any] | None:
         """通过 run_id 查找任务。
 
         Args:

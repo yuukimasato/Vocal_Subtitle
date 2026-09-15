@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 import numpy as np
 
@@ -39,7 +38,7 @@ class WordTimestamp:
     start: float
     end: float
     confidence: float = 1.0
-    speaker_id: Optional[int] = None
+    speaker_id: int | None = None
 
     def __repr__(self) -> str:
         return (
@@ -98,13 +97,13 @@ class TranscriptionSegment:
     text: str
     start: float
     end: float
-    words: List[WordTimestamp] = field(default_factory=list)
+    words: list[WordTimestamp] = field(default_factory=list)
     avg_logprob: float = 0.0
-    language: Optional[str] = None
-    language_probability: Optional[float] = None
-    no_speech_prob: Optional[float] = None
-    compression_ratio: Optional[float] = None
-    speaker_id: Optional[int] = None
+    language: str | None = None
+    language_probability: float | None = None
+    no_speech_prob: float | None = None
+    compression_ratio: float | None = None
+    speaker_id: int | None = None
 
     @property
     def duration(self) -> float:
@@ -133,9 +132,9 @@ class ASREngine(ABC):
         self,
         audio: np.ndarray,
         sample_rate: int = 16000,
-        language: Optional[str] = None,
+        language: str | None = None,
         **kwargs,
-    ) -> List[TranscriptionSegment]:
+    ) -> list[TranscriptionSegment]:
         """识别音频片段
 
         Args:
@@ -152,7 +151,7 @@ class ASREngine(ABC):
         self,
         audio: np.ndarray,
         sample_rate: int = 16000,
-    ) -> Optional[str]:
+    ) -> str | None:
         """检测音频语言（默认实现：返回 None，即不检测）
 
         子类可覆盖此方法，利用底层模型的音频编码器做语言检测，
@@ -185,7 +184,4 @@ class ASREngine(ABC):
         ...
 
     def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}(name={self.name}, "
-            f"model={self.model_name})"
-        )
+        return f"{self.__class__.__name__}(name={self.name}, model={self.model_name})"

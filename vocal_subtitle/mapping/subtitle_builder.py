@@ -7,18 +7,17 @@
 - 中文每行最多 20 字，英文每行最多 42 字符
 - 单条字幕最多 2 行
 """
-import copy
-import math
 
+import copy
 import logging
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
 
-from .time_mapper import SubtitleEvent
-from .event_ops import can_merge_events, merge_event_group
 from ..utils.text_utils import smart_join_texts
+from .event_ops import can_merge_events, merge_event_group
+from .time_mapper import SubtitleEvent
 
 logger = logging.getLogger(__name__)
 
@@ -46,19 +45,35 @@ class SubtitleBuilder:
     """
 
     # CJK 字符范围
-    _CJK_PATTERN = re.compile(
-        r"[一-鿿぀-ゟ゠-ヿ가-힯]"
-    )
+    _CJK_PATTERN = re.compile(r"[一-鿿぀-ゟ゠-ヿ가-힯]")
 
     # 句子结束标点（自然断句边界）
     _SENTENCE_END = re.compile(r"[.!?！？。]+")
 
     # 常见缩写（不应断句）
-    _ABBREVIATIONS = frozenset({
-        "dr", "mr", "mrs", "ms", "prof", "st", "jr", "sr",
-        "etc", "vs", "inc", "ltd", "co", "dept", "est",
-        "approx", "esp", "eg", "ie",
-    })
+    _ABBREVIATIONS = frozenset(
+        {
+            "dr",
+            "mr",
+            "mrs",
+            "ms",
+            "prof",
+            "st",
+            "jr",
+            "sr",
+            "etc",
+            "vs",
+            "inc",
+            "ltd",
+            "co",
+            "dept",
+            "est",
+            "approx",
+            "esp",
+            "eg",
+            "ie",
+        }
+    )
 
     # 弱分隔符（逗号、分号、空格等 — 仅在强制拆分时使用）
     _WEAK_SPLIT = re.compile(r"[,，;；\s—…]+")
@@ -74,12 +89,12 @@ class SubtitleBuilder:
     def _collapse_cjk_spaces(cls, text: str) -> str:
         return cls._CJK_INNER_SPACE.sub("", text) if text else text
 
-    def __init__(self, rule: Optional[SubtitleRule] = None):
+    def __init__(self, rule: SubtitleRule | None = None):
         self.rule = rule or SubtitleRule()
 
     def build(
         self,
-        events: List[SubtitleEvent],
+        events: list[SubtitleEvent],
         output_path: Path,
         fmt: str = "srt",
     ) -> Path:
@@ -116,7 +131,7 @@ class SubtitleBuilder:
 
     def build_to_string(
         self,
-        events: List[SubtitleEvent],
+        events: list[SubtitleEvent],
         fmt: str = "srt",
     ) -> str:
         """构建字幕并返回字符串
@@ -135,9 +150,7 @@ class SubtitleBuilder:
         subs = self._to_ssa(wrapped, fmt=fmt)
         return subs.to_string(fmt)
 
-    def _merge_short_events(
-        self, events: List[SubtitleEvent]
-    ) -> List[SubtitleEvent]:
+    def _merge_short_events(self, events: list[SubtitleEvent]) -> list[SubtitleEvent]:
         """合并过短的相邻字幕（时长 < min_duration 且中间无大间隙）"""
         if not events:
             return []
@@ -150,7 +163,10 @@ class SubtitleBuilder:
             gap = event.start - prev.end
 
             should_merge = (
-                (prev.duration < rule.min_duration or event.duration < rule.min_duration)
+                (
+                    prev.duration < rule.min_duration
+                    or event.duration < rule.min_duration
+                )
                 and gap < 0.3
                 and _same_speaker(prev, event)
             )
@@ -177,9 +193,7 @@ class SubtitleBuilder:
 
         return merged
 
-    def _split_long_events(
-        self, events: List[SubtitleEvent]
-    ) -> List[SubtitleEvent]:
+    def _split_long_events(self, events: list[SubtitleEvent]) -> list[SubtitleEvent]:
         """拆分超长字幕行（时长 > max_duration 或字符数超标）"""
         rule = self.rule
         result = []
@@ -187,7 +201,10 @@ class SubtitleBuilder:
         for event in events:
             char_count = self._count_display_chars(event.text)
 
-            if event.duration <= rule.max_duration and char_count <= self._max_chars_for_text(event.text):
+            if (
+                event.duration <= rule.max_duration
+                and char_count <= self._max_chars_for_text(event.text)
+            ):
                 result.append(event)
                 continue
 
@@ -205,9 +222,7 @@ class SubtitleBuilder:
     # 自然断句拆分
     # ------------------------------------------------------------------
 
-    def _split_event(
-        self, event: SubtitleEvent
-    ) -> List[SubtitleEvent]:
+    def _split_event(self, event: SubtitleEvent) -> list[SubtitleEvent]:
         """按说话人自然短句拆分过长的字幕事件。
 
         策略:
@@ -236,7 +251,7 @@ class SubtitleBuilder:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _split_into_utterances(cls, text: str) -> List[str]:
+    def _split_into_utterances(cls, text: str) -> list[str]:
         """在句子结束标点处拆分文本，返回句子列表。
 
         保留标点：每个 utterance 末尾包含其结束标点。
@@ -260,7 +275,11 @@ class SubtitleBuilder:
             if merged:
                 prev = merged[-1]
                 # 提取最后一个"词"（不含标点）
-                last_word = re.sub(r"[.!?！？。]+$", "", prev.split()[-1]) if prev.split() else ""
+                last_word = (
+                    re.sub(r"[.!?！？。]+$", "", prev.split()[-1])
+                    if prev.split()
+                    else ""
+                )
                 if last_word.lower() in cls._ABBREVIATIONS:
                     merged[-1] = prev + " " + part
                     continue
@@ -274,11 +293,11 @@ class SubtitleBuilder:
 
     @staticmethod
     def _time_utterances(
-        utterances: List[str],
+        utterances: list[str],
         event: SubtitleEvent,
         total_duration: float,
         total_chars: int,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """为每个 utterance 计算 start/end 时间。
 
         优先使用 word 时间戳精确定时，无数据时按字符比例估算。
@@ -302,20 +321,34 @@ class SubtitleBuilder:
             )
 
             if utt_words:
-                # 使用第一个和最后一个词的时间
-                precise_start = event.start + utt_words[0].start
-                precise_end = event.start + utt_words[-1].end
+                # 使用第一个和最后一个词的时间。与 fallback 同口径
+                # 钳制到事件包络：合并事件的词表跨句边界时词时间戳
+                # 可能非单调，裸用会让子句 start 倒置进上一子句
+                # （相邻字幕重叠的源头）。
+                precise_start = max(event.start, event.start + utt_words[0].start)
+                precise_end = min(event.end, event.start + utt_words[-1].end)
             else:
                 precise_start = max(event.start, est_start)
                 precise_end = min(event.end, est_end)
+            # 子句时序必须与文本顺序一致：start 不早于上一子句 end
+            if result:
+                precise_start = max(precise_start, result[-1]["end"])
+            if precise_end <= precise_start:
+                # 词时间戳退化（倒置/越界钳制后不可用）→ 退回字符比例估算
+                precise_start = max(event.start, est_start)
+                if result:
+                    precise_start = max(precise_start, result[-1]["end"])
+                precise_end = max(min(event.end, est_end), precise_start + 0.01)
 
-            result.append({
-                "text": utt_text,
-                "start": precise_start,
-                "end": precise_end,
-                "words": utt_words,
-                "chars": utt_chars,
-            })
+            result.append(
+                {
+                    "text": utt_text,
+                    "start": precise_start,
+                    "end": precise_end,
+                    "words": utt_words,
+                    "chars": utt_chars,
+                }
+            )
             char_offset += utt_chars
 
         return result
@@ -325,8 +358,8 @@ class SubtitleBuilder:
     # ------------------------------------------------------------------
 
     def _group_utterances(
-        self, timed: List[dict], event: SubtitleEvent
-    ) -> List[SubtitleEvent]:
+        self, timed: list[dict], event: SubtitleEvent
+    ) -> list[SubtitleEvent]:
         """将时间化的 utterance 分组为字幕事件。
 
         核心原则：每个自然句子独立为一条字幕，仅在以下情况合并：
@@ -376,23 +409,35 @@ class SubtitleBuilder:
                     if merged_end - merged_start >= rule.min_duration:
                         break  # 合并到满足最小时长为止
 
-                sub_events.append(self._make_sub_event(
-                    merged_texts, merged_words, merged_start, merged_end, event,
-                ))
+                sub_events.append(
+                    self._make_sub_event(
+                        merged_texts,
+                        merged_words,
+                        merged_start,
+                        merged_end,
+                        event,
+                    )
+                )
                 i = j
                 continue
 
             # ---- 情况 3：正常单句 → 独立字幕 ----
-            sub_events.append(self._make_sub_event(
-                [utt["text"]], utt["words"], utt["start"], utt["end"], event,
-            ))
+            sub_events.append(
+                self._make_sub_event(
+                    [utt["text"]],
+                    utt["words"],
+                    utt["start"],
+                    utt["end"],
+                    event,
+                )
+            )
             i += 1
 
         return sub_events
 
     @staticmethod
     def _make_sub_event(
-        texts: List[str],
+        texts: list[str],
         words: list,
         start: float,
         end: float,
@@ -411,9 +456,7 @@ class SubtitleBuilder:
     # 降级路径：强制拆分（在逗号/空格处），用于无句子边界或单句过长
     # ------------------------------------------------------------------
 
-    def _split_event_forced(
-        self, event: SubtitleEvent
-    ) -> List[SubtitleEvent]:
+    def _split_event_forced(self, event: SubtitleEvent) -> list[SubtitleEvent]:
         """在弱分隔符处按字符数阈值强制拆分（降级路径）。"""
         text = event.text
         total_duration = event.duration
@@ -430,7 +473,7 @@ class SubtitleBuilder:
         # Work on text chunks directly so a single unpunctuated CJK token is
         # still split. Prefer a weak separator near the target; otherwise
         # force a character boundary as the last-resort safety net.
-        chunks: List[str] = []
+        chunks: list[str] = []
         remaining = text.strip()
         while remaining:
             if self._count_display_chars(remaining) <= target_chars:
@@ -458,14 +501,20 @@ class SubtitleBuilder:
             sub_start = event.start + start_prop * total_duration
             sub_end = event.start + end_prop * total_duration
             sub_words = [
-                w for w in event.words
+                w
+                for w in event.words
                 if w.start >= sub_start - event.start
                 and w.end <= sub_end - event.start + 0.001
             ]
-            sub_events.append(self._make_sub_event(
-                [chunk], sub_words, max(event.start, sub_start),
-                min(event.end, sub_end), event,
-            ))
+            sub_events.append(
+                self._make_sub_event(
+                    [chunk],
+                    sub_words,
+                    max(event.start, sub_start),
+                    min(event.end, sub_end),
+                    event,
+                )
+            )
             char_pos += chunk_chars
 
         return sub_events if sub_events else [event]
@@ -498,8 +547,7 @@ class SubtitleBuilder:
         # 在预估时间窗口内筛选候选词
         margin = (t_end - t_start) * 0.5
         candidates = [
-            w for w in words
-            if w.start >= t_start - margin and w.end <= t_end + margin
+            w for w in words if w.start >= t_start - margin and w.end <= t_end + margin
         ]
         if not candidates:
             return []
@@ -528,11 +576,8 @@ class SubtitleBuilder:
 
         return matched
 
-    def _apply_line_wrapping(
-        self, events: List[SubtitleEvent]
-    ) -> List[SubtitleEvent]:
+    def _apply_line_wrapping(self, events: list[SubtitleEvent]) -> list[SubtitleEvent]:
         """应用自动换行规则"""
-        rule = self.rule
         for event in events:
             text = event.text
             if "\n" in text:
@@ -573,7 +618,7 @@ class SubtitleBuilder:
         # 没找到合适的断点，在中间强制换行
         return text[:mid] + "\n" + text[mid:]
 
-    def _to_ssa(self, events: List[SubtitleEvent], fmt: str = "srt"):
+    def _to_ssa(self, events: list[SubtitleEvent], fmt: str = "srt"):
         """转换为 pysubs2 内部格式
 
         Args:
@@ -610,7 +655,9 @@ class SubtitleBuilder:
                 text = self._format_speaker_label(event)
 
             sub_event = pysubs2.SSAEvent(
-                start=max(1, int(math.floor(event.start * 1000 + 0.5))),  # SRT uses ms, never 0
+                start=max(
+                    1, int(math.floor(event.start * 1000 + 0.5))
+                ),  # SRT uses ms, never 0
                 end=max(1, int(math.floor(event.end * 1000 + 0.5))),
                 text=text,
                 name=name,
@@ -640,8 +687,8 @@ class SubtitleBuilder:
     @staticmethod
     def merge_formats(
         srt_path: Path,
-        vtt_path: Optional[Path] = None,
-        ass_path: Optional[Path] = None,
+        vtt_path: Path | None = None,
+        ass_path: Path | None = None,
     ) -> dict:
         """同时输出多种格式
 

@@ -18,18 +18,18 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class ReleaseStatus(str, Enum):
     """发布状态分类 (§1)"""
+
     DEVELOPMENT = "development"
     PRODUCTION_USABLE = "production-usable"
     QUALITY_IMPROVING = "quality-improving"
@@ -37,6 +37,7 @@ class ReleaseStatus(str, Enum):
 
 class RollbackStrategy(str, Enum):
     """回滚策略优先级 (§5): 配置优先于代码回滚"""
+
     CONFIG = "config"
     ENGINE_DISABLE = "engine_disable"
     CODE_REVERT = "code_revert"
@@ -65,13 +66,13 @@ class KnownLimitation:
 class ObservabilityMetrics:
     """发布后观测指标 (§4)"""
 
-    crash_rate: float = 0.0               # 崩溃/失败率
-    avg_duration_seconds: float = 0.0     # 任务平均耗时
-    degradation_rate: float = 0.0         # 降级率
-    export_failure_rate: float = 0.0      # 导出失败
-    user_revision_rate: Optional[float] = None    # 用户修订率
-    high_severity_count: int = 0          # 高严重度问题数
-    previous_avg_duration_seconds: Optional[float] = None  # 上一版本耗时
+    crash_rate: float = 0.0  # 崩溃/失败率
+    avg_duration_seconds: float = 0.0  # 任务平均耗时
+    degradation_rate: float = 0.0  # 降级率
+    export_failure_rate: float = 0.0  # 导出失败
+    user_revision_rate: float | None = None  # 用户修订率
+    high_severity_count: int = 0  # 高严重度问题数
+    previous_avg_duration_seconds: float | None = None  # 上一版本耗时
 
     def to_dict(self) -> dict:
         return {
@@ -184,30 +185,68 @@ class ReleaseManager:
 
     # 已知限制 (§6 表格)
     KNOWN_LIMITATIONS: list[KnownLimitation] = [
-        KnownLimitation("LIM-001", "多人重叠场景 (>3人)", "说话人标注可能不准确", "启用 pyannote 全局聚类改善"),
-        KnownLimitation("LIM-002", "高背景噪声", "ASR 准确率下降", "启用噪声抑制预处理"),
-        KnownLimitation("LIM-003", "中英频繁切换", "语言检测可能出错", "手动指定 --language mixed"),
-        KnownLimitation("LIM-004", "长音频 (>2h)", "处理时间线性增长，可能触发超时", "启用宏观切块分治"),
+        KnownLimitation(
+            "LIM-001",
+            "多人重叠场景 (>3人)",
+            "说话人标注可能不准确",
+            "启用 pyannote 全局聚类改善",
+        ),
+        KnownLimitation(
+            "LIM-002", "高背景噪声", "ASR 准确率下降", "启用噪声抑制预处理"
+        ),
+        KnownLimitation(
+            "LIM-003", "中英频繁切换", "语言检测可能出错", "手动指定 --language mixed"
+        ),
+        KnownLimitation(
+            "LIM-004",
+            "长音频 (>2h)",
+            "处理时间线性增长，可能触发超时",
+            "启用宏观切块分治",
+        ),
         KnownLimitation("LIM-005", "专业词汇", "可能识别错误", "考虑启用 LLM 后处理"),
-        KnownLimitation("LIM-006", "远场录音", "VAD 可能漏检远距离语音", "降低 VAD 阈值"),
-        KnownLimitation("LIM-007", "无 GPU 设备", "CPU 推理速度慢 5-10x", "使用 whisper.cpp 引擎"),
-        KnownLimitation("LIM-008", "1GB 以下显存", "大模型无法加载", "使用 tiny/small 模型或 CPU"),
+        KnownLimitation(
+            "LIM-006", "远场录音", "VAD 可能漏检远距离语音", "降低 VAD 阈值"
+        ),
+        KnownLimitation(
+            "LIM-007", "无 GPU 设备", "CPU 推理速度慢 5-10x", "使用 whisper.cpp 引擎"
+        ),
+        KnownLimitation(
+            "LIM-008", "1GB 以下显存", "大模型无法加载", "使用 tiny/small 模型或 CPU"
+        ),
     ]
 
     # 支持手册常见问题 (§8)
     SUPPORT_FAQ: list[dict] = [
-        {"issue": "模型未找到", "diagnosis": "检查 ~/.cache/vocal-subtitle/",
-         "resolution": "vocal-subtitle download-models --all"},
-        {"issue": "CUDA out of memory", "diagnosis": "检查 nvidia-smi",
-         "resolution": "--device cpu 或 --model small"},
-        {"issue": "ffmpeg not found", "diagnosis": "which ffmpeg",
-         "resolution": "sudo apt install ffmpeg"},
-        {"issue": "端口被占用 (WebUI)", "diagnosis": "lsof -i :7860",
-         "resolution": "vocal-subtitle-gui --port 8080"},
-        {"issue": "处理超时", "diagnosis": "检查音频长度和可用内存",
-         "resolution": "启用 macro_chunking 分治"},
-        {"issue": "字幕时间偏移", "diagnosis": "对比参考字幕",
-         "resolution": "检查 acoustic_validation.report"},
+        {
+            "issue": "模型未找到",
+            "diagnosis": "检查 ~/.cache/vocal-subtitle/",
+            "resolution": "vocal-subtitle download-models --all",
+        },
+        {
+            "issue": "CUDA out of memory",
+            "diagnosis": "检查 nvidia-smi",
+            "resolution": "--device cpu 或 --model small",
+        },
+        {
+            "issue": "ffmpeg not found",
+            "diagnosis": "which ffmpeg",
+            "resolution": "sudo apt install ffmpeg",
+        },
+        {
+            "issue": "端口被占用 (WebUI)",
+            "diagnosis": "lsof -i :7860",
+            "resolution": "vocal-subtitle-gui --port 8080",
+        },
+        {
+            "issue": "处理超时",
+            "diagnosis": "检查音频长度和可用内存",
+            "resolution": "启用 macro_chunking 分治",
+        },
+        {
+            "issue": "字幕时间偏移",
+            "diagnosis": "对比参考字幕",
+            "resolution": "检查 acoustic_validation.report",
+        },
     ]
 
     # 日志位置 (§8)
@@ -219,10 +258,13 @@ class ReleaseManager:
         "声学校验": "cache/reports/{run_id}/diagnostics/acoustic_report.json",
     }
 
-    def __init__(self, storage_dir: Optional[Path] = None):
-        self._storage_dir = Path(storage_dir or (
-            Path(__file__).parent.parent.parent / "cache" / "governance" / "release"
-        ))
+    def __init__(self, storage_dir: Path | None = None):
+        self._storage_dir = Path(
+            storage_dir
+            or (
+                Path(__file__).parent.parent.parent / "cache" / "governance" / "release"
+            )
+        )
         self._storage_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- §1 状态分类 ----
@@ -230,7 +272,7 @@ class ReleaseManager:
     @classmethod
     def classify(
         cls,
-        criteria: Optional[dict[str, bool]] = None,
+        criteria: dict[str, bool] | None = None,
     ) -> tuple[ReleaseStatus, list[str]]:
         """根据 production 标准评估发布状态。
 
@@ -243,10 +285,7 @@ class ReleaseManager:
         if criteria is None:
             criteria = {key: checked for key, _, checked in cls.PRODUCTION_CRITERIA}
 
-        blockers = [
-            key for key, passed in criteria.items()
-            if not passed
-        ]
+        blockers = [key for key, passed in criteria.items() if not passed]
 
         if blockers:
             return ReleaseStatus.DEVELOPMENT, blockers
@@ -265,44 +304,174 @@ class ReleaseManager:
         """
         sections = {
             "dependencies": [
-                {"key": "lock_files", "description": "pyproject.toml 依赖版本已锁定 + uv.lock 已更新", "passed": None, "note": ""},
-                {"key": "fresh_install", "description": "bash install.sh --production --cpu 全新安装成功", "passed": None, "note": ""},
-                {"key": "pip_install", "description": "pip install -e '.[all]' 无冲突", "passed": None, "note": ""},
+                {
+                    "key": "lock_files",
+                    "description": "pyproject.toml 依赖版本已锁定 + uv.lock 已更新",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "fresh_install",
+                    "description": "bash install.sh --production --cpu 全新安装成功",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "pip_install",
+                    "description": "pip install -e '.[all]' 无冲突",
+                    "passed": None,
+                    "note": "",
+                },
             ],
             "models": [
-                {"key": "fw_model", "description": "faster-whisper large-v3 可正常运行", "passed": None, "note": ""},
-                {"key": "silero_vad", "description": "Silero VAD 模型可正常加载", "passed": None, "note": ""},
-                {"key": "funasr_model", "description": "FunASR 模型路径配置正确（可选）", "passed": None, "note": ""},
-                {"key": "qwen_model", "description": "Qwen3-ASR 模型路径配置正确（可选）", "passed": None, "note": ""},
+                {
+                    "key": "fw_model",
+                    "description": "faster-whisper large-v3 可正常运行",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "silero_vad",
+                    "description": "Silero VAD 模型可正常加载",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "funasr_model",
+                    "description": "FunASR 模型路径配置正确（可选）",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "qwen_model",
+                    "description": "Qwen3-ASR 模型路径配置正确（可选）",
+                    "passed": None,
+                    "note": "",
+                },
             ],
             "tests": [
-                {"key": "pytest_all", "description": "pytest tests/ -x --tb=short 全部通过", "passed": None, "note": ""},
-                {"key": "pytest_physical", "description": "pytest tests/test_physical/ -v 物理层测试通过", "passed": None, "note": ""},
-                {"key": "pytest_router", "description": "pytest tests/test_asr/test_router.py -v 路由测试通过", "passed": None, "note": ""},
-                {"key": "pytest_cli", "description": "pytest tests/test_cli.py -v CLI 测试通过", "passed": None, "note": ""},
+                {
+                    "key": "pytest_all",
+                    "description": "pytest tests/ -x --tb=short 全部通过",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "pytest_physical",
+                    "description": "pytest tests/test_physical/ -v 物理层测试通过",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "pytest_router",
+                    "description": "pytest tests/test_asr/test_router.py -v 路由测试通过",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "pytest_cli",
+                    "description": "pytest tests/test_cli.py -v CLI 测试通过",
+                    "passed": None,
+                    "note": "",
+                },
             ],
             "d0_regression": [
-                {"key": "quality_benchmark", "description": "python scripts/run_quality_benchmark.py 无可检测回归", "passed": None, "note": ""},
-                {"key": "coverage", "description": "D0 样本无覆盖率下降 > 5%", "passed": None, "note": ""},
-                {"key": "hallucination", "description": "D0 样本无新增幻觉", "passed": None, "note": ""},
+                {
+                    "key": "quality_benchmark",
+                    "description": "python scripts/run_quality_benchmark.py 无可检测回归",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "coverage",
+                    "description": "D0 样本无覆盖率下降 > 5%",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "hallucination",
+                    "description": "D0 样本无新增幻觉",
+                    "passed": None,
+                    "note": "",
+                },
             ],
             "smoke": [
-                {"key": "cli_run", "description": "CLI: vocal-subtitle run test/中文多人员测试音频.wav -o /tmp/test.srt", "passed": None, "note": ""},
-                {"key": "cli_info", "description": "CLI: vocal-subtitle info 无异常", "passed": None, "note": ""},
-                {"key": "webui_flow", "description": "WebUI: 启动 → 上传 → 处理 → 下载 完整流程", "passed": None, "note": ""},
-                {"key": "webui_edit", "description": "WebUI: 字幕编辑功能可用", "passed": None, "note": ""},
-                {"key": "webui_feedback", "description": "WebUI: 反馈上传功能可用", "passed": None, "note": ""},
+                {
+                    "key": "cli_run",
+                    "description": "CLI: vocal-subtitle run test/中文多人员测试音频.wav -o /tmp/test.srt",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "cli_info",
+                    "description": "CLI: vocal-subtitle info 无异常",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "webui_flow",
+                    "description": "WebUI: 启动 → 上传 → 处理 → 下载 完整流程",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "webui_edit",
+                    "description": "WebUI: 字幕编辑功能可用",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "webui_feedback",
+                    "description": "WebUI: 反馈上传功能可用",
+                    "passed": None,
+                    "note": "",
+                },
             ],
             "export": [
-                {"key": "srt", "description": "SRT 格式可用标准播放器打开", "passed": None, "note": ""},
-                {"key": "vtt", "description": "VTT 格式可用浏览器打开", "passed": None, "note": ""},
-                {"key": "ass", "description": "ASS 格式可用 Aegisub 打开", "passed": None, "note": ""},
+                {
+                    "key": "srt",
+                    "description": "SRT 格式可用标准播放器打开",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "vtt",
+                    "description": "VTT 格式可用浏览器打开",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "ass",
+                    "description": "ASS 格式可用 Aegisub 打开",
+                    "passed": None,
+                    "note": "",
+                },
             ],
             "docs": [
-                {"key": "readme", "description": "README 示例命令可执行", "passed": None, "note": ""},
-                {"key": "architecture", "description": "ARCHITECTURE_STATE.md 已更新", "passed": None, "note": ""},
-                {"key": "doc_index", "description": "DOCUMENT_INDEX.md 已更新", "passed": None, "note": ""},
-                {"key": "version", "description": "版本号 pyproject.toml version 已更新", "passed": None, "note": ""},
+                {
+                    "key": "readme",
+                    "description": "README 示例命令可执行",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "architecture",
+                    "description": "ARCHITECTURE_STATE.md 已更新",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "doc_index",
+                    "description": "DOCUMENT_INDEX.md 已更新",
+                    "passed": None,
+                    "note": "",
+                },
+                {
+                    "key": "version",
+                    "description": "版本号 pyproject.toml version 已更新",
+                    "passed": None,
+                    "note": "",
+                },
             ],
         }
 
@@ -368,49 +537,63 @@ class ReleaseManager:
         alerts: list[dict] = []
 
         if metrics.crash_rate > cls.ALERT_THRESHOLDS["crash_rate"]:
-            alerts.append({
-                "metric": "crash_rate",
-                "observed": metrics.crash_rate,
-                "threshold": cls.ALERT_THRESHOLDS["crash_rate"],
-                "condition": f"> {cls.ALERT_THRESHOLDS['crash_rate']}",
-            })
+            alerts.append(
+                {
+                    "metric": "crash_rate",
+                    "observed": metrics.crash_rate,
+                    "threshold": cls.ALERT_THRESHOLDS["crash_rate"],
+                    "condition": f"> {cls.ALERT_THRESHOLDS['crash_rate']}",
+                }
+            )
 
-        if metrics.previous_avg_duration_seconds and metrics.previous_avg_duration_seconds > 0:
+        if (
+            metrics.previous_avg_duration_seconds
+            and metrics.previous_avg_duration_seconds > 0
+        ):
             change_pct = (
                 (metrics.avg_duration_seconds - metrics.previous_avg_duration_seconds)
-                / metrics.previous_avg_duration_seconds * 100
+                / metrics.previous_avg_duration_seconds
+                * 100
             )
             if change_pct > cls.ALERT_THRESHOLDS["avg_duration_change_pct"]:
-                alerts.append({
-                    "metric": "avg_duration_change_pct",
-                    "observed": round(change_pct, 1),
-                    "threshold": cls.ALERT_THRESHOLDS["avg_duration_change_pct"],
-                    "condition": f"> +{cls.ALERT_THRESHOLDS['avg_duration_change_pct']}%",
-                })
+                alerts.append(
+                    {
+                        "metric": "avg_duration_change_pct",
+                        "observed": round(change_pct, 1),
+                        "threshold": cls.ALERT_THRESHOLDS["avg_duration_change_pct"],
+                        "condition": f"> +{cls.ALERT_THRESHOLDS['avg_duration_change_pct']}%",
+                    }
+                )
 
         if metrics.degradation_rate > cls.ALERT_THRESHOLDS["degradation_rate"]:
-            alerts.append({
-                "metric": "degradation_rate",
-                "observed": metrics.degradation_rate,
-                "threshold": cls.ALERT_THRESHOLDS["degradation_rate"],
-                "condition": f"> {cls.ALERT_THRESHOLDS['degradation_rate']}",
-            })
+            alerts.append(
+                {
+                    "metric": "degradation_rate",
+                    "observed": metrics.degradation_rate,
+                    "threshold": cls.ALERT_THRESHOLDS["degradation_rate"],
+                    "condition": f"> {cls.ALERT_THRESHOLDS['degradation_rate']}",
+                }
+            )
 
         if metrics.export_failure_rate > cls.ALERT_THRESHOLDS["export_failure_rate"]:
-            alerts.append({
-                "metric": "export_failure_rate",
-                "observed": metrics.export_failure_rate,
-                "threshold": cls.ALERT_THRESHOLDS["export_failure_rate"],
-                "condition": f"> {cls.ALERT_THRESHOLDS['export_failure_rate']}",
-            })
+            alerts.append(
+                {
+                    "metric": "export_failure_rate",
+                    "observed": metrics.export_failure_rate,
+                    "threshold": cls.ALERT_THRESHOLDS["export_failure_rate"],
+                    "condition": f"> {cls.ALERT_THRESHOLDS['export_failure_rate']}",
+                }
+            )
 
         if metrics.high_severity_count > cls.ALERT_THRESHOLDS["high_severity_count"]:
-            alerts.append({
-                "metric": "high_severity_count",
-                "observed": metrics.high_severity_count,
-                "threshold": cls.ALERT_THRESHOLDS["high_severity_count"],
-                "condition": f"> {cls.ALERT_THRESHOLDS['high_severity_count']}",
-            })
+            alerts.append(
+                {
+                    "metric": "high_severity_count",
+                    "observed": metrics.high_severity_count,
+                    "threshold": cls.ALERT_THRESHOLDS["high_severity_count"],
+                    "condition": f"> {cls.ALERT_THRESHOLDS['high_severity_count']}",
+                }
+            )
 
         return AlertReport(alerts=alerts)
 
@@ -428,7 +611,7 @@ class ReleaseManager:
         """
         return {
             "strategy": RollbackStrategy.CONFIG.value,
-            "command": f"vocal-subtitle feedback rollback",
+            "command": "vocal-subtitle feedback rollback",
             "description": f"回滚 profile '{profile_name}' 到上一个版本",
         }
 
@@ -472,7 +655,7 @@ class ReleaseManager:
         return {
             "strategy": RollbackStrategy.CODE_REVERT.value,
             "command": f"git revert {commit}",
-            "alternative": f"git checkout <previous-tag>",
+            "alternative": "git checkout <previous-tag>",
             "description": f"Revert commit {commit}",
         }
 
@@ -486,7 +669,7 @@ class ReleaseManager:
         Returns:
             操作结果
         """
-        from ..quality.data_version_manager import DataVersionManager, DatasetTier
+        from ..quality.data_version_manager import DatasetTier, DataVersionManager
 
         dvm = DataVersionManager()
         for tier in DatasetTier:
@@ -514,9 +697,9 @@ class ReleaseManager:
         *,
         version: str,
         status: ReleaseStatus,
-        changes: Optional[dict] = None,
-        upgrades: Optional[list[str]] = None,
-        known_issues: Optional[list[str]] = None,
+        changes: dict | None = None,
+        upgrades: list[str] | None = None,
+        known_issues: list[str] | None = None,
     ) -> str:
         """生成 RELEASE_GOVERNANCE.md §7 格式的版本说明（Markdown）。
 
@@ -592,7 +775,7 @@ class ReleaseManager:
         }
 
     @classmethod
-    def get_support_info(cls, issue_key: str) -> Optional[dict]:
+    def get_support_info(cls, issue_key: str) -> dict | None:
         """按关键词查找支持信息。
 
         Args:
@@ -665,7 +848,7 @@ class ReleaseManager:
             encoding="utf-8",
         )
 
-    def _load_checklist(self, version: str) -> Optional[PreReleaseChecklist]:
+    def _load_checklist(self, version: str) -> PreReleaseChecklist | None:
         path = self._checklist_path(version)
         if not path.exists():
             return None
@@ -676,7 +859,7 @@ class ReleaseManager:
                 checked_at=data.get("checked_at", ""),
                 sections=data.get("sections", {}),
             )
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return None
 
     def _releases_path(self) -> Path:
@@ -688,7 +871,7 @@ class ReleaseManager:
             return []
         try:
             return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return []
 
     def _save_release(self, record: ReleaseRecord) -> None:

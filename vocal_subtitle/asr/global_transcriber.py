@@ -143,7 +143,9 @@ class GlobalTranscriber:
                         "end": window.end,
                         "duration": round(window.end - window.start, 6),
                         "physical_clip_id": window.physical_clip_id,
-                        "status": "ok" if transcript.status == "ok" else transcript.status,
+                        "status": "ok"
+                        if transcript.status == "ok"
+                        else transcript.status,
                         "word_count": len(transcript.words),
                         "source": window.metadata.get("bounded_from", window.id),
                     }
@@ -196,7 +198,9 @@ class GlobalTranscriber:
                         end=end,
                         physical_clip_id=window.physical_clip_id,
                         left_context=window.left_context if part else 0.0,
-                        right_context=window.right_context if end >= window.end else 0.0,
+                        right_context=window.right_context
+                        if end >= window.end
+                        else 0.0,
                         metadata={
                             **window.metadata,
                             "bounded_from": window.id,

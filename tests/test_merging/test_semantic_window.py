@@ -1,7 +1,5 @@
 """Tests for constrained LLM semantic sliding window."""
 
-import pytest
-
 from vocal_subtitle.mapping.semantic_fragments import PhysicalFragment
 from vocal_subtitle.merging.semantic_window import (
     SemanticWindowInput,
@@ -50,7 +48,14 @@ class TestBuildWindows:
 
     def test_hard_split_creates_new_window(self):
         f1 = _make_fragment("f-1", ["w1"], 0.0, 1.0)
-        f2 = _make_fragment("f-2", ["w2"], 1.5, 2.5, hard_split_before=True, hard_split_reason="LongPause")
+        f2 = _make_fragment(
+            "f-2",
+            ["w2"],
+            1.5,
+            2.5,
+            hard_split_before=True,
+            hard_split_reason="LongPause",
+        )
         f3 = _make_fragment("f-3", ["w3"], 2.6, 3.6)
 
         windows = build_semantic_windows([f1, f2, f3])
@@ -63,7 +68,10 @@ class TestBuildWindows:
         assert "f-2" in windows[1].fragment_ids
 
     def test_soft_limit_splits(self):
-        frags = [_make_fragment(f"f-{i}", [f"w{i}"], float(i), float(i + 1)) for i in range(15)]
+        frags = [
+            _make_fragment(f"f-{i}", [f"w{i}"], float(i), float(i + 1))
+            for i in range(15)
+        ]
 
         windows = build_semantic_windows(frags, max_fragments_per_window=5)
 
@@ -87,23 +95,24 @@ class TestBuildWindows:
 
 class TestValidateOutput:
     def test_valid_output_passes(self):
-        frag = _make_fragment("f-1", ["w1", "w2"], 0.0, 2.0)
         window = SemanticWindowInput(
             window_id="sw-1",
             fragment_ids=["f-1"],
             word_ids=["w1", "w2"],
-            fragments=[{
-                "fragment_id": "f-1",
-                "word_ids": ["w1", "w2"],
-                "candidate_speaker": None,
-                "speaker_status": "unknown",
-                "speaker_confidence": 0.0,
-                "pause_class": "",
-                "hard_split_before": False,
-                "hard_split_reason": "",
-                "genuine_overlap": False,
-                "language": None,
-            }],
+            fragments=[
+                {
+                    "fragment_id": "f-1",
+                    "word_ids": ["w1", "w2"],
+                    "candidate_speaker": None,
+                    "speaker_status": "unknown",
+                    "speaker_confidence": 0.0,
+                    "pause_class": "",
+                    "hard_split_before": False,
+                    "hard_split_reason": "",
+                    "genuine_overlap": False,
+                    "language": None,
+                }
+            ],
         )
         output = SemanticWindowOutput(
             window_id="sw-1",
@@ -118,7 +127,6 @@ class TestValidateOutput:
         assert len(errors) == 0
 
     def test_unknown_id_rejected(self):
-        frag = _make_fragment("f-1", ["w1"], 0.0, 1.0)
         window = SemanticWindowInput(
             window_id="sw-1",
             fragment_ids=["f-1"],
@@ -136,7 +144,6 @@ class TestValidateOutput:
         assert any("unknown id" in e for e in errors)
 
     def test_duplicate_id_rejected(self):
-        frag = _make_fragment("f-1", ["w1"], 0.0, 1.0)
         window = SemanticWindowInput(
             window_id="sw-1",
             fragment_ids=["f-1"],

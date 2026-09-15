@@ -15,13 +15,19 @@
 
 import logging
 import re
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 
 from ..utils.text_utils import smart_join_texts
 from . import merge_constraints, merge_policy
+from .layout import (  # noqa: F401
+    SUBTITLE_LAYOUT_RULES,
+    apply_frame_seamless_stitching,
+    apply_layout_suggestions,
+    auto_layout_events,
+    auto_line_break_fallback,
+)
 from .llm_decider import LLMMergeDecider
 from .local_decider import LocalMergeDecider
 
@@ -33,30 +39,31 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 
 # 这些模式表示"下一句开启了新的语义段落"，应阻止合并
-_SECTION_START_PATTERNS: List[re.Pattern] = [
+_SECTION_START_PATTERNS: list[re.Pattern] = [
     # 编号列表（英文）
-    re.compile(r'^\d+[\.\)]\s'),
+    re.compile(r"^\d+[\.\)]\s"),
     # 编号列表（英文文字）
-    re.compile(r'^(One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)[,.\s]'),
+    re.compile(r"^(One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)[,.\s]"),
     # 编号列表（中文）
-    re.compile(r'^[一二三四五六七八九十][、，.]'),
+    re.compile(r"^[一二三四五六七八九十][、，.]"),
     # 段落标题关键词
-    re.compile(r'^(Summary\s+(and|&)\s+review)', re.IGNORECASE),
-    re.compile(r'^(Example[:]?)', re.IGNORECASE),
-    re.compile(r'^(Effective\s+Communication)', re.IGNORECASE),
-    re.compile(r'^(Phone\s+Etiquette|Rapid\s+Response)', re.IGNORECASE),
-    re.compile(r'^(Answer|Listen|Hang\s+up|Identify)', re.IGNORECASE),
-    re.compile(r'^(End\s+with\s+courtesy)', re.IGNORECASE),
+    re.compile(r"^(Summary\s+(and|&)\s+review)", re.IGNORECASE),
+    re.compile(r"^(Example[:]?)", re.IGNORECASE),
+    re.compile(r"^(Effective\s+Communication)", re.IGNORECASE),
+    re.compile(r"^(Phone\s+Etiquette|Rapid\s+Response)", re.IGNORECASE),
+    re.compile(r"^(Answer|Listen|Hang\s+up|Identify)", re.IGNORECASE),
+    re.compile(r"^(End\s+with\s+courtesy)", re.IGNORECASE),
 ]
 
 # 当前文本末尾是段落分隔符 → 不向后合并
-_SECTION_END_MARKERS: List[re.Pattern] = [
-    re.compile(r'(^|\s)(and|with)\s+courtesy[.]?\s*$', re.IGNORECASE),
+_SECTION_END_MARKERS: list[re.Pattern] = [
+    re.compile(r"(^|\s)(and|with)\s+courtesy[.]?\s*$", re.IGNORECASE),
 ]
 
 
 def _detect_semantic_boundary(
-    current_text: str, next_text: str,
+    current_text: str,
+    next_text: str,
 ) -> bool:
     """检测两个相邻片段间是否有语义边界。
 
@@ -137,14 +144,8 @@ def _physical_owner_compatible(left: dict, right: dict) -> bool:
     right_spans = right.get("physical_spans", []) or []
     if not left_spans or not right_spans:
         return True  # no physical ownership data — allow merge
-    left_clips = {
-        (s.get("physical_clip_id") or s.get("clip_id"))
-        for s in left_spans
-    }
-    right_clips = {
-        (s.get("physical_clip_id") or s.get("clip_id"))
-        for s in right_spans
-    }
+    left_clips = {(s.get("physical_clip_id") or s.get("clip_id")) for s in left_spans}
+    right_clips = {(s.get("physical_clip_id") or s.get("clip_id")) for s in right_spans}
     # Only allow merge when they share at least one physical clip
     return bool(left_clips & right_clips)
 
@@ -155,10 +156,12 @@ def _physical_owner_compatible_for_events(left, right) -> bool:
     right_spans = list(getattr(right, "physical_spans", []) or [])
     if not left_spans or not right_spans:
         return True
+
     def _clip_id(span):
         if isinstance(span, dict):
             return span.get("physical_clip_id") or span.get("clip_id")
         return getattr(span, "clip_id", None) or getattr(span, "physical_clip_id", None)
+
     left_clips = {_clip_id(s) for s in left_spans}
     right_clips = {_clip_id(s) for s in right_spans}
     return bool(left_clips & right_clips)
@@ -168,38 +171,40 @@ def _physical_owner_compatible_for_events(left, right) -> bool:
 # 配置
 # ------------------------------------------------------------------
 
+
 @dataclass
 class MergeDecisionConfig:
     """合并决策分流配置"""
 
     # Fast-Slow Path 分流阈值
-    fast_merge_max_gap: float = 0.30      # <300ms: 规则强制合并（同说话人+短间隔）
-    llm_decision_min_gap: float = 0.30    # 300-1200ms: LLM裁决
+    fast_merge_max_gap: float = 0.30  # <300ms: 规则强制合并（同说话人+短间隔）
+    llm_decision_min_gap: float = 0.30  # 300-1200ms: LLM裁决
     llm_decision_max_gap: float = 1.20
-    hard_split_min_gap: float = 1.20      # >1200ms: 强制不合并
+    hard_split_min_gap: float = 1.20  # >1200ms: 强制不合并
 
     # 合并约束
-    max_combined_duration: float = 5.0    # 合并后字幕不超过5秒
-    min_fragment_duration: float = 0.15   # 最小片段时长
+    max_combined_duration: float = 5.0  # 合并后字幕不超过5秒
+    min_fragment_duration: float = 0.15  # 最小片段时长
 
     # LLM 降本策略
-    llm_tier: str = "cascading"           # "cascading" | "all_llm" | "rule_only"
-    local_nlp_gap_range: Tuple[float, float] = (0.30, 0.60)  # 本地NLP优先的间隙范围
+    llm_tier: str = "cascading"  # "cascading" | "all_llm" | "rule_only"
+    local_nlp_gap_range: tuple[float, float] = (0.30, 0.60)  # 本地NLP优先的间隙范围
 
     # LLM API 配置
     llm_model: str = "deepseek-v4-pro"
-    llm_base_url: Optional[str] = None
-    llm_api_key: Optional[str] = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
     llm_temperature: float = 0.1
     llm_timeout: float = 15.0
 
     # 降级
-    llm_fallback_to_rules: bool = True    # LLM 失败时回退到规则
+    llm_fallback_to_rules: bool = True  # LLM 失败时回退到规则
 
 
 # ------------------------------------------------------------------
 # LLM 合并引擎
 # ------------------------------------------------------------------
+
 
 class LLMMergeEngine:
     """LLM 语义合并引擎
@@ -209,7 +214,7 @@ class LLMMergeEngine:
         merged_events = engine.merge(fragments, audio, sample_rate)
     """
 
-    def __init__(self, config: Optional[MergeDecisionConfig] = None):
+    def __init__(self, config: MergeDecisionConfig | None = None):
         self.config = config or MergeDecisionConfig()
         self._local_model = None  # legacy compatibility view
         self._local_model_attempted = False
@@ -218,10 +223,10 @@ class LLMMergeEngine:
 
     def merge(
         self,
-        fragments: List[Dict],
-        audio: Optional[np.ndarray] = None,
+        fragments: list[dict],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """合并决策流水线
 
         Args:
@@ -252,13 +257,12 @@ class LLMMergeEngine:
             frag["_hard_split"] = gap > cfg.hard_split_min_gap
 
             # 不同说话人检查
-            next_idx = frag.get("id", 1)  # 简化：位置相邻即检查
             if gap < cfg.hard_split_min_gap and not frag.get("_hard_split"):
                 pass  # 在临界区内，需要进一步判断
 
         # Step 4: 收集候选并按间隙范围分流
-        local_nlp_candidates = []   # local_nlp_gap_range → 本地 NLP 优先
-        cloud_llm_candidates = []   # cloud_llm_gap_range → 云端 LLM
+        local_nlp_candidates = []  # local_nlp_gap_range → 本地 NLP 优先
+        cloud_llm_candidates = []  # cloud_llm_gap_range → 云端 LLM
         rule_decisions = {}
 
         for i, frag in enumerate(fast_merged):
@@ -312,7 +316,7 @@ class LLMMergeEngine:
     # Fast Path
     # ------------------------------------------------------------------
 
-    def _apply_fast_merges(self, fragments: List[Dict]) -> List[Dict]:
+    def _apply_fast_merges(self, fragments: list[dict]) -> list[dict]:
         """快路径：规则强制合并 gap < fast_merge_max_gap 的相邻片段"""
         cfg = self.config
         if len(fragments) <= 1:
@@ -381,7 +385,8 @@ class LLMMergeEngine:
             if len(merged_ids) > 1:
                 frag["start"] = min(
                     fragments[k - (j - i) + (j - i)].get("start", 0)
-                    if k > 0 else frag.get("start", 0)
+                    if k > 0
+                    else frag.get("start", 0)
                     for k, _ in enumerate(merged_ids)
                 )
                 # 取第一个片段的 start
@@ -395,7 +400,9 @@ class LLMMergeEngine:
 
             # 更新间隙信息到下一个片段
             if j < len(fragments):
-                frag["gap_to_next_sec"] = fragments[j].get("start", 0) - frag.get("end", 0)
+                frag["gap_to_next_sec"] = fragments[j].get("start", 0) - frag.get(
+                    "end", 0
+                )
                 frag["gap_is_silent"] = fragments[j - 1].get("gap_is_silent")
 
             result.append(frag)
@@ -404,7 +411,9 @@ class LLMMergeEngine:
         if len(result) != len(fragments):
             logger.info(
                 "Fast-merge: %d → %d fragments (gap < %.0fms)",
-                len(fragments), len(result), cfg.fast_merge_max_gap * 1000,
+                len(fragments),
+                len(result),
+                cfg.fast_merge_max_gap * 1000,
             )
         return result
 
@@ -428,8 +437,8 @@ class LLMMergeEngine:
 
     def _local_merge_decision(
         self,
-        candidates: List[Dict],
-    ) -> Tuple[List[Dict], List[Dict]]:
+        candidates: list[dict],
+    ) -> tuple[list[dict], list[dict]]:
         """Compatibility hook for local rule/model decisions."""
         return self._local_decider.decide(candidates)
 
@@ -438,14 +447,16 @@ class LLMMergeEngine:
     # ------------------------------------------------------------------
 
     def _call_llm_merge_decision(
-        self, candidates: List[Dict],
-    ) -> List[Dict]:
+        self,
+        candidates: list[dict],
+    ) -> list[dict]:
         """Compatibility hook for the cloud decision service."""
         return self._llm_decider.decide_core(candidates)
 
     def _fallback_rule_decisions(
-        self, candidates: List[Dict],
-    ) -> List[Dict]:
+        self,
+        candidates: list[dict],
+    ) -> list[dict]:
         """Compatibility hook for deterministic fallback decisions."""
         return self._llm_decider.fallback_rule_decisions(candidates)
 
@@ -455,10 +466,10 @@ class LLMMergeEngine:
 
     def _apply_all_decisions(
         self,
-        fast_merged: List[Dict],
-        llm_groups: List[Dict],
-        rule_decisions: Dict[int, bool],
-    ) -> List[Dict]:
+        fast_merged: list[dict],
+        llm_groups: list[dict],
+        rule_decisions: dict[int, bool],
+    ) -> list[dict]:
         """应用所有合并决策，产出最终片段列表"""
         if not llm_groups:
             return fast_merged
@@ -496,10 +507,14 @@ class LLMMergeEngine:
                 for left, right in zip(selected, selected[1:])
             ):
                 continue
-            if last.get("end", 0) - first.get("start", 0) > self.config.max_combined_duration:
+            if (
+                last.get("end", 0) - first.get("start", 0)
+                > self.config.max_combined_duration
+            ):
                 logger.debug(
                     "Rejecting merge group %s: duration exceeds %.2fs",
-                    ids, self.config.max_combined_duration,
+                    ids,
+                    self.config.max_combined_duration,
                 )
                 continue
 
@@ -542,15 +557,17 @@ class LLMMergeEngine:
                             merged_speaker = spk
                             break
 
-            merged.append({
-                "id": ids[0],
-                "start": first.get("start", 0),
-                "end": last.get("end", 0),
-                "text": combined_text,
-                "speaker": merged_speaker,
-                "_llm_merged": True,
-                "_merged_ids": ids,
-            })
+            merged.append(
+                {
+                    "id": ids[0],
+                    "start": first.get("start", 0),
+                    "end": last.get("end", 0),
+                    "text": combined_text,
+                    "speaker": merged_speaker,
+                    "_llm_merged": True,
+                    "_merged_ids": ids,
+                }
+            )
             consumed.update(accepted_ids)
 
         # 添加未被 LLM 消费的片段
@@ -566,7 +583,8 @@ class LLMMergeEngine:
 
         logger.info(
             "Merge complete: %d → %d fragments (fast=%d, llm=%d)",
-            len(fast_merged), len(merged),
+            len(fast_merged),
+            len(merged),
             sum(1 for f in merged if f.get("_fast_merged")),
             sum(1 for f in merged if f.get("_llm_merged")),
         )
@@ -578,10 +596,10 @@ class LLMMergeEngine:
 
     def _ensure_gap_info(
         self,
-        fragments: List[Dict],
-        audio: Optional[np.ndarray] = None,
+        fragments: list[dict],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """确保每个片段都有 gap_to_next_sec 和 gap_is_silent 字段"""
         from ..utils.audio_utils import AudioUtils
 
@@ -601,7 +619,10 @@ class LLMMergeEngine:
 
                 if audio is not None and silence_rms is not None and gap > 0.01:
                     gap_rms = AudioUtils.get_segment_rms(
-                        audio, curr_end, next_start, sample_rate,
+                        audio,
+                        curr_end,
+                        next_start,
+                        sample_rate,
                     )
                     fragments[i]["gap_is_silent"] = gap_rms < silence_rms * 2.0
                 else:
@@ -614,10 +635,10 @@ class LLMMergeEngine:
 
     def build_merge_input(
         self,
-        fragments: List[Dict],
-        audio: Optional[np.ndarray] = None,
+        fragments: list[dict],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """构建 LLM 合并决策的输入
 
         每个片段附带精确时间戳、ASR文本、与下一段的间隙信息。
@@ -647,11 +668,14 @@ class LLMMergeEngine:
 
                 if silence_rms is not None and gap > 0.01 and audio is not None:
                     gap_rms = AudioUtils.get_segment_rms(
-                        audio, frag.get("end", 0),
-                        next_frag.get("start", 0), sample_rate,
+                        audio,
+                        frag.get("end", 0),
+                        next_frag.get("start", 0),
+                        sample_rate,
                     )
                     item["gap_energy_ratio"] = round(
-                        gap_rms / max(silence_rms, 1e-8), 1,
+                        gap_rms / max(silence_rms, 1e-8),
+                        1,
                     )
                     item["gap_is_silent"] = gap_rms < silence_rms * 2.0
                 else:
@@ -665,20 +689,10 @@ class LLMMergeEngine:
         return result
 
 
-# ------------------------------------------------------------------
-# 帧级无缝衔接 (3.7)
-# ------------------------------------------------------------------
-
-from .layout import (
-    SUBTITLE_LAYOUT_RULES,
-    apply_frame_seamless_stitching,
-    apply_layout_suggestions,
-    auto_layout_events,
-    auto_line_break_fallback,
-)
-
 # Keep the old private names available while making the active engine use the
 # isolated constraint and policy modules.
 _physical_owner_compatible = merge_constraints.physical_owner_compatible
-_physical_owner_compatible_for_events = merge_constraints.physical_owner_compatible_for_events
+_physical_owner_compatible_for_events = (
+    merge_constraints.physical_owner_compatible_for_events
+)
 _detect_semantic_boundary = merge_policy.detect_semantic_boundary

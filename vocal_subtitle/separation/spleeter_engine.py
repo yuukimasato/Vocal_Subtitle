@@ -9,7 +9,6 @@ Spleeter 代码协议: MIT | 模型权重协议: MIT
 import logging
 import time
 from pathlib import Path
-from typing import Optional
 
 from .base import LicenseInfo, SeparationEngine, SeparationResult
 
@@ -32,7 +31,7 @@ class SpleeterEngine(SeparationEngine):
 
     def __init__(self):
         self._model = None
-        self._model_name: Optional[str] = None
+        self._model_name: str | None = None
 
     @property
     def name(self) -> str:
@@ -46,7 +45,7 @@ class SpleeterEngine(SeparationEngine):
             source_url="https://github.com/deezer/spleeter",
         )
 
-    def load_model(self, model_name: Optional[str] = None) -> None:
+    def load_model(self, model_name: str | None = None) -> None:
         """加载 Spleeter 模型
 
         Args:

@@ -1,6 +1,5 @@
 """SessionManager 单元测试"""
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -121,9 +120,14 @@ class TestSessionManager:
     def test_output_names_coverage(self):
         """测试 OUTPUT_NAMES 包含所有必要键"""
         required = {
-            "vocals", "accompaniment",
-            "asr_srt", "asr_vtt", "asr_ass",
-            "llm_srt", "llm_vtt", "llm_ass",
+            "vocals",
+            "accompaniment",
+            "asr_srt",
+            "asr_vtt",
+            "asr_ass",
+            "llm_srt",
+            "llm_vtt",
+            "llm_ass",
         }
         assert set(OUTPUT_NAMES.keys()) == required
 

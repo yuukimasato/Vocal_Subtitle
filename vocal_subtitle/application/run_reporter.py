@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..application.pipeline_result import PipelineStats
 
 logger = logging.getLogger(__name__)
 
 
-def _runtime_engine_status(stats: PipelineStats, evidence: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _runtime_engine_status(
+    stats: PipelineStats, evidence: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
     """Normalize selected engines and review-window execution for run reports."""
     result: dict[str, dict[str, Any]] = {}
     primary = stats.selected_engine or stats.final_engine or stats.requested_engine
@@ -21,7 +23,9 @@ def _runtime_engine_status(stats: PipelineStats, evidence: dict[str, Any]) -> di
             "enabled": True,
             "selected": True,
             "available": stats.production_path not in {"segmented_fallback", "failed"},
-            "status": "completed" if stats.production_path != "segmented_fallback" else "execution_failed",
+            "status": "completed"
+            if stats.production_path != "segmented_fallback"
+            else "execution_failed",
             "windows_processed": 0,
             "windows_failed": int(stats.production_path == "segmented_fallback"),
             "reason": stats.fallback_reason or None,
@@ -30,7 +34,9 @@ def _runtime_engine_status(stats: PipelineStats, evidence: dict[str, Any]) -> di
         if not isinstance(payload, dict):
             continue
         windows = payload.get("windows") or []
-        failed = sum(1 for item in windows if item.get("status") not in {"ok", "cache_hit"})
+        failed = sum(
+            1 for item in windows if item.get("status") not in {"ok", "cache_hit"}
+        )
         status = str(payload.get("status", "unavailable"))
         result[str(name)] = {
             "lifecycle": "secondary" if name in {"qwen", "secondary"} else "review",
@@ -49,9 +55,9 @@ def generate_run_report(
     pipeline: Any,
     input_path: Path,
     stats: PipelineStats,
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
     sample_rate: int = 0,
-    final_subtitle_path: Optional[Path] = None,
+    final_subtitle_path: Path | None = None,
 ) -> None:
     """Build and persist the unified run report."""
     try:
@@ -104,12 +110,20 @@ def generate_run_report(
             cover_policy=getattr(
                 getattr(pipeline.config, "evidence_review", None),
                 "cover_policy",
-                getattr(getattr(pipeline.config, "evidence_review", None), "review_policy_version", ""),
+                getattr(
+                    getattr(pipeline.config, "evidence_review", None),
+                    "review_policy_version",
+                    "",
+                ),
             ),
             engine_policy=getattr(
                 getattr(pipeline.config, "evidence_review", None),
                 "engine_policy",
-                getattr(getattr(pipeline.config, "evidence_review", None), "review_policy_version", ""),
+                getattr(
+                    getattr(pipeline.config, "evidence_review", None),
+                    "review_policy_version",
+                    "",
+                ),
             ),
             risk_policy_version=getattr(
                 pipeline.config, "risk_policy_version", "risk-policy-v1"
@@ -142,12 +156,18 @@ def generate_run_report(
             quality=quality_diagnostics,
             config=pipeline.config,
         )
-        noise_profile = quality_diagnostics.get("noise_profile") or quality_diagnostics.get(
-            "physical_noise_profile", {}
-        )
+        noise_profile = quality_diagnostics.get(
+            "noise_profile"
+        ) or quality_diagnostics.get("physical_noise_profile", {})
         report_builder.noise_shadow = build_noise_shadow(
-            noise_floor_db=(noise_profile.get("noise_floor_db") if isinstance(noise_profile, dict) else None),
-            current_vad_threshold=getattr(getattr(pipeline.config, "vad", None), "threshold", None),
+            noise_floor_db=(
+                noise_profile.get("noise_floor_db")
+                if isinstance(noise_profile, dict)
+                else None
+            ),
+            current_vad_threshold=getattr(
+                getattr(pipeline.config, "vad", None), "threshold", None
+            ),
             current_skeleton_noise_db=getattr(
                 getattr(pipeline.config, "acoustic_validation", None),
                 "skeleton_noise_db",

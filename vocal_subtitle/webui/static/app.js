@@ -305,7 +305,13 @@ const App = {
       subs: origin + '/api/tasks/' + taskId + '/subtitle-file?version=clean',
       manifest: origin + '/api/tasks/' + taskId + '/manifest'
     });
-    window.open(App.editorBase() + '?' + qs.toString(), '_blank');
+    var base = App.editorBase();
+    // 先探测编辑器是否在线，避免直接跳到一个浏览器错误页
+    fetch(base, { mode: 'no-cors', cache: 'no-store' })
+      .then(() => { window.open(base + '?' + qs.toString(), '_blank'); })
+      .catch(() => {
+        toast('字幕打轴工作台（' + base + '）未启动：请在 tools/subtitle-editor 目录运行 python3 -m http.server 8631 后重试', 'error');
+      });
   },
 
   showTaskDetail() {

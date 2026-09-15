@@ -18,11 +18,16 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 
-from .base import ASRDependencyError, ASREngine, ASRModelError, TranscriptionSegment, WordTimestamp
+from .base import (
+    ASRDependencyError,
+    ASREngine,
+    ASRModelError,
+    TranscriptionSegment,
+    WordTimestamp,
+)
 
 logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -51,10 +56,10 @@ class WhisperCppEngine(ASREngine):
     def __init__(
         self,
         model: str = "medium",
-        whisper_cpp_bin: Optional[str] = None,
+        whisper_cpp_bin: str | None = None,
         n_threads: int = 4,
-        language: Optional[str] = None,
-        model_path: Optional[str] = None,
+        language: str | None = None,
+        model_path: str | None = None,
     ):
         """
         Args:
@@ -73,7 +78,7 @@ class WhisperCppEngine(ASREngine):
         )
         self._n_threads = n_threads
         self._language = language
-        self._model_path: Optional[Path] = Path(model_path) if model_path else None
+        self._model_path: Path | None = Path(model_path) if model_path else None
 
     @property
     def name(self) -> str:
@@ -83,7 +88,7 @@ class WhisperCppEngine(ASREngine):
     def model_name(self) -> str:
         return self._model_size
 
-    def load_model(self, model_path: Optional[str] = None) -> None:
+    def load_model(self, model_path: str | None = None) -> None:
         """配置模型路径
 
         Args:
@@ -139,9 +144,9 @@ class WhisperCppEngine(ASREngine):
         self,
         audio: np.ndarray,
         sample_rate: int = 16000,
-        language: Optional[str] = None,
+        language: str | None = None,
         **kwargs,
-    ) -> List[TranscriptionSegment]:
+    ) -> list[TranscriptionSegment]:
         """使用 whisper.cpp CLI 进行识别
 
         将音频写入临时 WAV 文件，调用 whisper.cpp 可执行文件，
@@ -151,9 +156,7 @@ class WhisperCppEngine(ASREngine):
         model_path = str(self._model_path) if self._model_path else self._model_size
 
         # 写入临时 WAV 文件
-        with tempfile.NamedTemporaryFile(
-            suffix=".wav", delete=False
-        ) as tmp_file:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
             tmp_path = Path(tmp_file.name)
             from ..utils.audio_utils import AudioUtils
 
@@ -193,9 +196,7 @@ class WhisperCppEngine(ASREngine):
 
             if result.returncode != 0:
                 logger.error("whisper.cpp stderr: %s", result.stderr)
-                raise RuntimeError(
-                    f"whisper.cpp failed with code {result.returncode}"
-                )
+                raise RuntimeError(f"whisper.cpp failed with code {result.returncode}")
 
             # 解析 JSON 输出
             segments = self._parse_output(output_json)
@@ -208,7 +209,7 @@ class WhisperCppEngine(ASREngine):
 
         return segments
 
-    def _parse_output(self, json_path: Path) -> List[TranscriptionSegment]:
+    def _parse_output(self, json_path: Path) -> list[TranscriptionSegment]:
         """解析 whisper.cpp JSON 输出"""
         import json
 
@@ -216,7 +217,7 @@ class WhisperCppEngine(ASREngine):
             logger.warning("Output JSON not found: %s", json_path)
             return []
 
-        with open(json_path, "r", encoding="utf-8") as f:
+        with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
 
         results = []

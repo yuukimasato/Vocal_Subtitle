@@ -39,7 +39,11 @@ def test_repository_schema_is_present():
     assert schema_path().is_file()
     schema = json.loads(schema_path().read_text(encoding="utf-8"))
     assert schema["$defs"]["word"]["required"] == [
-        "id", "text", "speaker", "onset", "offset"
+        "id",
+        "text",
+        "speaker",
+        "onset",
+        "offset",
     ]
 
 

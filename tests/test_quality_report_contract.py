@@ -30,9 +30,7 @@ def stage_report():
 
 
 def test_stats_defaults_capture_to_clean_report(stage_report):
-    report = stage_report(
-        PipelineStats(input_path="in.wav", duration_seconds=1.0)
-    )
+    report = stage_report(PipelineStats(input_path="in.wav", duration_seconds=1.0))
 
     assert report["stage_timings"] == {}
     assert report["fallback_category"] == ""

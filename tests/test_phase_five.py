@@ -20,9 +20,7 @@ def test_offline_default_prefers_segmented_path_with_global_evidence():
 
 
 def test_explicit_segmented_path_is_legacy():
-    config = ConfigLoader().merge_with_overrides(
-        PipelineConfig(), asr_path="segmented"
-    )
+    config = ConfigLoader().merge_with_overrides(PipelineConfig(), asr_path="segmented")
     pipeline = Pipeline(config)
 
     assert pipeline._resolve_asr_path() == "segmented"
@@ -34,13 +32,16 @@ def test_streaming_path_does_not_select_global():
 
 
 def test_global_failure_categories_are_stable():
-    assert Pipeline._classify_global_failure(ImportError("WhisperX is not installed")) == (
-        "dependency_unavailable"
-    )
-    assert Pipeline._classify_global_failure(MemoryError()) == "resource_unavailable"
     assert Pipeline._classify_global_failure(
-        RuntimeError("global ASR produced a degraded transcript")
-    ) == "invalid_result"
+        ImportError("WhisperX is not installed")
+    ) == ("dependency_unavailable")
+    assert Pipeline._classify_global_failure(MemoryError()) == "resource_unavailable"
+    assert (
+        Pipeline._classify_global_failure(
+            RuntimeError("global ASR produced a degraded transcript")
+        )
+        == "invalid_result"
+    )
     assert Pipeline._classify_global_failure(RuntimeError("model crashed")) == (
         "execution_failed"
     )
@@ -109,9 +110,7 @@ def test_pipeline_stats_round_trip_keeps_path_diagnostics(tmp_path):
     assert restored.global_attempted is True
     assert restored.fallback_category == "dependency_unavailable"
     assert restored.global_diagnostics == {"fallback": True}
-    assert restored.quality_diagnostics == {
-        "finalization": {"output_event_count": 2}
-    }
+    assert restored.quality_diagnostics == {"finalization": {"output_event_count": 2}}
 
 
 def test_full_pipeline_cache_requires_compatible_path():
@@ -120,13 +119,15 @@ def test_full_pipeline_cache_requires_compatible_path():
     current_route = pipeline.config.asr.auto_routing.route_version
     current_quality = pipeline.config.asr.auto_routing.quality_gate_version
     assert pipeline._is_usable_full_pipeline_cache(
-        {"stats": {
-            "asr_path": "global_evidence",
-            "requested_engine": "auto",
-            "selected_engine": "funasr",
-            "asr_route_version": current_route,
-            "quality_gate_version": current_quality,
-        }}
+        {
+            "stats": {
+                "asr_path": "global_evidence",
+                "requested_engine": "auto",
+                "selected_engine": "funasr",
+                "asr_route_version": current_route,
+                "quality_gate_version": current_quality,
+            }
+        }
     )
     assert not pipeline._is_usable_full_pipeline_cache(
         {"stats": {"asr_path": "legacy"}}

@@ -63,17 +63,13 @@ class TestTranscriptionSegment:
             WordTimestamp(word="Hello", start=0.0, end=0.5, confidence=0.95),
             WordTimestamp(word="World", start=0.6, end=1.0, confidence=0.92),
         ]
-        seg = TranscriptionSegment(
-            text="Hello World", start=0.0, end=1.0, words=words
-        )
+        seg = TranscriptionSegment(text="Hello World", start=0.0, end=1.0, words=words)
         assert len(seg.words) == 2
         assert seg.words[0].word == "Hello"
         assert seg.words[0].confidence == 0.95
 
     def test_repr(self):
-        seg = TranscriptionSegment(
-            text="这是一段测试文本用于验证", start=1.0, end=3.0
-        )
+        seg = TranscriptionSegment(text="这是一段测试文本用于验证", start=1.0, end=3.0)
         rep = repr(seg)
         assert "TranscriptionSegment" in rep
         assert "1.000" in rep

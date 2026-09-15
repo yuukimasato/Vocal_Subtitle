@@ -14,7 +14,6 @@
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -29,12 +28,14 @@ class BoundaryRefinementConfig:
     """边界精修配置"""
 
     enabled: bool = True
-    max_shrink_ms: float = 200       # 最多向内收缩 200ms
-    max_extend_ms: float = 100       # 最多向外扩展 100ms
-    check_frames: int = 3            # 三帧能量斜率校验
-    frame_ms: int = 10               # 每帧 10ms
+    max_shrink_ms: float = 200  # 最多向内收缩 200ms
+    max_extend_ms: float = 100  # 最多向外扩展 100ms
+    check_frames: int = 3  # 三帧能量斜率校验
+    frame_ms: int = 10  # 每帧 10ms
     min_boundary_confidence: float = 0.3  # ASR 词级时间戳最低置信度
-    shrink_end_enabled: bool = False  # 能量扫描对语尾低能量（鼻韵尾、气声）不可靠，默认关闭
+    shrink_end_enabled: bool = (
+        False  # 能量扫描对语尾低能量（鼻韵尾、气声）不可靠，默认关闭
+    )
 
 
 class BoundaryRefiner:
@@ -47,16 +48,16 @@ class BoundaryRefiner:
         )
     """
 
-    def __init__(self, config: Optional[BoundaryRefinementConfig] = None):
+    def __init__(self, config: BoundaryRefinementConfig | None = None):
         self.config = config or BoundaryRefinementConfig()
 
     def refine_all(
         self,
-        segments: List[SpeechSegment],
-        asr_results: List[List[TranscriptionSegment]],
+        segments: list[SpeechSegment],
+        asr_results: list[list[TranscriptionSegment]],
         audio: np.ndarray,
         sample_rate: int,
-    ) -> Tuple[List[SpeechSegment], List[List[TranscriptionSegment]]]:
+    ) -> tuple[list[SpeechSegment], list[list[TranscriptionSegment]]]:
         """对所有段执行边界精修
 
         Returns:
@@ -69,7 +70,10 @@ class BoundaryRefiner:
         refined_segments = []
         for seg, asr_segs in zip(segments, asr_results):
             refined = self._refine_single_segment(
-                seg, asr_segs, audio, sample_rate,
+                seg,
+                asr_segs,
+                audio,
+                sample_rate,
             )
             refined_segments.append(refined)
 
@@ -78,7 +82,7 @@ class BoundaryRefiner:
     def _refine_single_segment(
         self,
         seg: SpeechSegment,
-        asr_segs: List[TranscriptionSegment],
+        asr_segs: list[TranscriptionSegment],
         audio: np.ndarray,
         sample_rate: int,
     ) -> SpeechSegment:
@@ -94,15 +98,22 @@ class BoundaryRefiner:
         # 统一边界裁决(高精度方案 Task 4):来源为 segment_boundary 的
         # 伪造词时间不得驱动段首收缩;无来源标记的原始 ASR 词照常参与。
         from ..physical.boundary_decision import has_authoritative_word_time
+
         all_words = [w for w in all_words if has_authoritative_word_time(w)]
 
         if not all_words:
             # 无词级时间戳 → 仅用三帧能量斜率
             seg_start = self.refine_boundary_bidirectional(
-                audio, sample_rate, seg.start, "onset",
+                audio,
+                sample_rate,
+                seg.start,
+                "onset",
             )
             seg_end = self.refine_boundary_bidirectional(
-                audio, sample_rate, seg.end, "offset",
+                audio,
+                sample_rate,
+                seg.end,
+                "offset",
             )
             seg.start = seg_start
             seg.end = seg_end
@@ -114,7 +125,10 @@ class BoundaryRefiner:
             first_word_start = first_word.start  # 段内偏移
             first_word_conf = getattr(first_word, "confidence", 1.0)
 
-            if first_word_start > 0.05 and first_word_conf >= cfg.min_boundary_confidence:
+            if (
+                first_word_start > 0.05
+                and first_word_conf >= cfg.min_boundary_confidence
+            ):
                 # 段首有 >50ms 静音，适当收缩
                 # 区分 "padding 前导" 和 "真实前导静音"（同段尾策略）
                 if first_word_start > 0.10:
@@ -126,7 +140,10 @@ class BoundaryRefiner:
         # 改为从 seg.end 向段内反向扫描，找到能量下降到 silence 水平的精确点。
         if cfg.shrink_end_enabled:
             energy_end = self._find_energy_end(
-                audio, seg.start, seg.end, sample_rate,
+                audio,
+                seg.start,
+                seg.end,
+                sample_rate,
                 frame_ms=5,
             )
             if energy_end is not None and energy_end < seg.end:
@@ -138,10 +155,16 @@ class BoundaryRefiner:
 
         # ---- 双向三帧能量斜率精修 ----
         seg.start = self.refine_boundary_bidirectional(
-            audio, sample_rate, seg.start, "onset",
+            audio,
+            sample_rate,
+            seg.start,
+            "onset",
         )
         seg.end = self.refine_boundary_bidirectional(
-            audio, sample_rate, seg.end, "offset",
+            audio,
+            sample_rate,
+            seg.end,
+            "offset",
         )
 
         return seg
@@ -181,7 +204,7 @@ class BoundaryRefiner:
             frame_end = frame_start + frame_size
             if 0 <= frame_start < len(audio) and frame_end <= len(audio):
                 frame = audio[frame_start:frame_end]
-                energies.append(float(np.sqrt(np.mean(frame ** 2))))
+                energies.append(float(np.sqrt(np.mean(frame**2))))
             else:
                 energies.append(0.0)
 
@@ -228,7 +251,7 @@ class BoundaryRefiner:
         seg_end: float,
         sample_rate: int,
         frame_ms: int = 5,
-    ) -> Optional[float]:
+    ) -> float | None:
         """反向 RMS 能量扫描：从 seg_end 向段内扫描，找语音→静音的转折点。
 
         与 TimeMapper._find_speech_end_backward 不同，此方法在段内部扫描
@@ -258,9 +281,9 @@ class BoundaryRefiner:
         tail_audio = audio[tail_start_sample:seg_end_sample]
 
         if len(tail_audio) > 0:
-            tail_rms = float(np.sqrt(np.mean(
-                np.asarray(tail_audio, dtype=np.float64) ** 2
-            )))
+            tail_rms = float(
+                np.sqrt(np.mean(np.asarray(tail_audio, dtype=np.float64) ** 2))
+            )
         else:
             tail_rms = 0.0
 
@@ -269,16 +292,14 @@ class BoundaryRefiner:
         scan_region = audio[scan_start_sample:seg_end_sample]
         if len(scan_region) > 0:
             # 采样计算：每隔 50ms 取一帧的 RMS，取最小值
-            min_rms = float('inf')
+            min_rms = float("inf")
             step_samples = int(0.05 * sample_rate)
             for s in range(0, len(scan_region) - frame_samples, step_samples):
-                frame = scan_region[s:s + frame_samples]
-                rms = float(np.sqrt(np.mean(
-                    np.asarray(frame, dtype=np.float64) ** 2
-                )))
+                frame = scan_region[s : s + frame_samples]
+                rms = float(np.sqrt(np.mean(np.asarray(frame, dtype=np.float64) ** 2)))
                 if rms < min_rms:
                     min_rms = rms
-            if min_rms == float('inf'):
+            if min_rms == float("inf"):
                 min_rms = 0.0
         else:
             min_rms = 0.0
@@ -332,7 +353,7 @@ class BoundaryRefiner:
             frame_end = frame_start + frame_size
             if 0 <= frame_start < len(audio) and frame_end <= len(audio):
                 frame = audio[frame_start:frame_end]
-                energies.append(float(np.sqrt(np.mean(frame ** 2))))
+                energies.append(float(np.sqrt(np.mean(frame**2))))
             else:
                 energies.append(0.0)
 
@@ -390,10 +411,10 @@ def resolve_boundary_conflict(
 
 
 def detect_language_switches(
-    words: List,
+    words: list,
     confidence_drop_threshold: float = 0.3,
     min_switch_length: int = 2,
-) -> List[int]:
+) -> list[int]:
     """检测词级时间戳中的语种切换点
 
     语种切换的特征（faster-whisper 在中英夹杂场景下表现）：
@@ -415,7 +436,8 @@ def detect_language_switches(
     # 提取置信度序列
     confidences = [
         getattr(w, "confidence", 1.0)
-        if hasattr(w, "confidence") else w.get("confidence", 1.0)
+        if hasattr(w, "confidence")
+        else w.get("confidence", 1.0)
         for w in words
     ]
 
@@ -425,13 +447,9 @@ def detect_language_switches(
 
     for i in range(1, len(confidences)):
         # 置信度骤降检测
-        avg_before = (
-            sum(confidences[max(0, i - 2):i])
-            / max(1, min(i, 2))
-        )
-        avg_after = (
-            sum(confidences[i:min(len(confidences), i + 3)])
-            / min(3, len(confidences) - i)
+        avg_before = sum(confidences[max(0, i - 2) : i]) / max(1, min(i, 2))
+        avg_after = sum(confidences[i : min(len(confidences), i + 3)]) / min(
+            3, len(confidences) - i
         )
 
         drop = avg_before - avg_after
@@ -456,9 +474,9 @@ def detect_language_switches(
 
 
 def smooth_multilingual_timestamps(
-    words: List,
-    switch_points: List[int],
-) -> List:
+    words: list,
+    switch_points: list[int],
+) -> list:
     """对语种切换点附近的时间戳做平滑处理
 
     语种切换边界的词级时间戳不可靠（置信度低），
@@ -492,13 +510,9 @@ def smooth_multilingual_timestamps(
         post_word = words[post_idx]
 
         t_start = (
-            pre_word.start if hasattr(pre_word, "start")
-            else pre_word.get("start", 0)
+            pre_word.start if hasattr(pre_word, "start") else pre_word.get("start", 0)
         )
-        t_end = (
-            post_word.end if hasattr(post_word, "end")
-            else post_word.get("end", 0)
-        )
+        t_end = post_word.end if hasattr(post_word, "end") else post_word.get("end", 0)
 
         if t_end <= t_start:
             continue
@@ -513,8 +527,8 @@ def smooth_multilingual_timestamps(
                 # TranscriptionWord 对象 → 创建 dict 替代
                 new_word = dict(
                     start=t_start + fraction * (t_end - t_start) * 0.9,
-                    end=t_start + (fraction + 1.0 / n_words_in_switch)
-                              * (t_end - t_start) * 0.9,
+                    end=t_start
+                    + (fraction + 1.0 / n_words_in_switch) * (t_end - t_start) * 0.9,
                     word=getattr(original, "word", ""),
                     confidence=getattr(original, "confidence", 1.0),
                     _timestamp_smoothed=True,
@@ -524,8 +538,8 @@ def smooth_multilingual_timestamps(
                 new_word = {
                     **original,
                     "start": t_start + fraction * (t_end - t_start) * 0.9,
-                    "end": t_start + (fraction + 1.0 / n_words_in_switch)
-                                * (t_end - t_start) * 0.9,
+                    "end": t_start
+                    + (fraction + 1.0 / n_words_in_switch) * (t_end - t_start) * 0.9,
                     "_timestamp_smoothed": True,
                 }
             smoothed[idx] = new_word

@@ -7,9 +7,9 @@ dependency direction: matching <- provenance <- golden_gate.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from difflib import SequenceMatcher
-from typing import Any, Mapping, Sequence
-
+from typing import Any
 
 LEGACY_MATCH_POLICY_VERSION = "legacy-overlap-v1"
 STRICT_MATCH_POLICY_VERSION = "strict-overlap-v1"
@@ -22,7 +22,11 @@ def _text(value: Any) -> str:
 
 def _overlap(left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
     try:
-        return max(0.0, min(float(left.get("end", 0)), float(right.get("end", 0))) - max(float(left.get("start", 0)), float(right.get("start", 0))))
+        return max(
+            0.0,
+            min(float(left.get("end", 0)), float(right.get("end", 0)))
+            - max(float(left.get("start", 0)), float(right.get("start", 0))),
+        )
     except (TypeError, ValueError):
         return 0.0
 
@@ -33,7 +37,9 @@ def _similarity(left: str, right: str) -> float:
 
 def _overlap_ratio(expected: Mapping[str, Any], candidate: Mapping[str, Any]) -> float:
     try:
-        duration = max(0.0, float(expected.get("end", 0)) - float(expected.get("start", 0)))
+        duration = max(
+            0.0, float(expected.get("end", 0)) - float(expected.get("start", 0))
+        )
     except (TypeError, ValueError):
         return 0.0
     return _overlap(expected, candidate) / duration if duration else 0.0
@@ -113,11 +119,13 @@ def classify_expected_match(
     best_overlap = overlap_ranked[0] if overlap_ranked else None
     best_text = text_ranked[0] if text_ranked else None
     gate_matches = [
-        item for item in candidates
+        item
+        for item in candidates
         if _overlap(expected, item) >= min_overlap_seconds
         and _overlap(expected, item) > 0
         and _overlap_ratio(expected, item) >= min_overlap_ratio
-        and _similarity(expected.get("text", ""), item.get("text", "")) >= min_similarity
+        and _similarity(expected.get("text", ""), item.get("text", ""))
+        >= min_similarity
     ]
     if gate_matches:
         best_overlap = max(
@@ -147,7 +155,11 @@ def classify_expected_match(
             and best_overlap_similarity >= min_similarity
             else "asr_text_mismatch"
         )
-    elif best_text and _similarity(expected.get("text", ""), best_text.get("text", "")) >= min_similarity:
+    elif (
+        best_text
+        and _similarity(expected.get("text", ""), best_text.get("text", ""))
+        >= min_similarity
+    ):
         stage = (
             "timeline_shift_or_boundary_mismatch"
             if _temporal_gap(expected, best_text) <= nearby_gap_seconds

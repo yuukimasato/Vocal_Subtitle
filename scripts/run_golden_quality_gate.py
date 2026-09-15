@@ -23,7 +23,9 @@ from vocal_subtitle.quality.golden_gate import (
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, required=True, help="JSON file with a cases list")
+    parser.add_argument(
+        "--input", type=Path, required=True, help="JSON file with a cases list"
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--required-category", action="append", default=[])
     parser.add_argument("--ci", action="store_true")

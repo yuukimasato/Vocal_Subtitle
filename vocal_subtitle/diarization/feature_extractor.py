@@ -22,7 +22,6 @@
 """
 
 import logging
-from typing import List
 
 import numpy as np
 
@@ -78,7 +77,7 @@ class FeatureExtractor:
         return result
 
     def extract_features_batch(
-        self, audio_segments: List[np.ndarray], sample_rate: int | None = None
+        self, audio_segments: list[np.ndarray], sample_rate: int | None = None
     ) -> np.ndarray:
         """批量提取特征矩阵
 
@@ -113,7 +112,7 @@ class FeatureExtractor:
         min_samples = int(_MIN_SEGMENT_DURATION * sr)
         if len(audio) < min_samples:
             padded = np.zeros(min_samples, dtype=np.float32)
-            padded[:len(audio)] = audio
+            padded[: len(audio)] = audio
             return padded
 
         return audio
@@ -122,7 +121,7 @@ class FeatureExtractor:
     # MFCC 特征 (65 维)
     # ------------------------------------------------------------------
 
-    def _mfcc_features(self, audio: np.ndarray, sr: int) -> List[float]:
+    def _mfcc_features(self, audio: np.ndarray, sr: int) -> list[float]:
         """提取 MFCC + Delta + Delta-Delta 统计量"""
         try:
             import librosa
@@ -160,7 +159,7 @@ class FeatureExtractor:
     # 频谱特征 (12 维)
     # ------------------------------------------------------------------
 
-    def _spectral_features(self, audio: np.ndarray, sr: int) -> List[float]:
+    def _spectral_features(self, audio: np.ndarray, sr: int) -> list[float]:
         """提取频谱质心、带宽、对比度、滚降点"""
         try:
             import librosa
@@ -168,7 +167,7 @@ class FeatureExtractor:
             return [0.0] * 12
 
         try:
-            S = np.abs(librosa.stft(audio, n_fft=2048, hop_length=512))
+            S = np.abs(librosa.stft(audio, n_fft=2048, hop_length=512))  # noqa: N806 (librosa 惯例：S=幅度谱)
 
             # 频谱质心 (2d)
             centroid = librosa.feature.spectral_centroid(S=S, sr=sr)[0]
@@ -200,7 +199,7 @@ class FeatureExtractor:
     # 基频 / 音高特征 (2 维)
     # ------------------------------------------------------------------
 
-    def _pitch_features(self, audio: np.ndarray, sr: int) -> List[float]:
+    def _pitch_features(self, audio: np.ndarray, sr: int) -> list[float]:
         """提取基频 F0 统计量"""
         try:
             import librosa
@@ -211,12 +210,16 @@ class FeatureExtractor:
             # 使用 pYIN 算法（更准确）或 yin 作为备选
             f0, voiced_flag, _ = librosa.pyin(
                 audio,
-                fmin=librosa.note_to_hz("C2"),   # ~65 Hz
-                fmax=librosa.note_to_hz("C7"),   # ~2093 Hz
+                fmin=librosa.note_to_hz("C2"),  # ~65 Hz
+                fmax=librosa.note_to_hz("C7"),  # ~2093 Hz
                 sr=sr,
             )
             # 仅使用有声音帧
-            f0_voiced = f0[voiced_flag] if voiced_flag is not None and np.any(voiced_flag) else f0
+            f0_voiced = (
+                f0[voiced_flag]
+                if voiced_flag is not None and np.any(voiced_flag)
+                else f0
+            )
             f0_clean = f0_voiced[~np.isnan(f0_voiced)]
             if len(f0_clean) == 0:
                 return [0.0, 0.0]
@@ -229,21 +232,21 @@ class FeatureExtractor:
     # 共振峰特征 (4 维)
     # ------------------------------------------------------------------
 
-    def _formant_features(self, audio: np.ndarray, sr: int) -> List[float]:
+    def _formant_features(self, audio: np.ndarray, sr: int) -> list[float]:
         """提取前两个共振峰 F1, F2 的均值和标准差
 
         共振峰表征声道形状，是区分不同说话人的关键特征。
         使用 LPC (线性预测编码) 估计共振峰频率。
         """
         try:
-            from scipy.signal import lfilter
+            from scipy.signal import lfilter  # noqa: F401 (可用性探测)
         except ImportError:
             return [0.0, 0.0, 0.0, 0.0]
 
         try:
             # 对短片段提取共振峰
             frame_length = int(0.03 * sr)  # 30ms 帧
-            hop_length = int(0.015 * sr)   # 15ms 步长
+            hop_length = int(0.015 * sr)  # 15ms 步长
             n_frames = (len(audio) - frame_length) // hop_length + 1
 
             if n_frames < 3:
@@ -254,7 +257,7 @@ class FeatureExtractor:
 
             for i in range(n_frames):
                 start = i * hop_length
-                frame = audio[start:start + frame_length]
+                frame = audio[start : start + frame_length]
 
                 if len(frame) < lpc_order + 1:
                     continue
@@ -264,11 +267,10 @@ class FeatureExtractor:
 
                 try:
                     # LPC 分析
-                    from numpy.fft import rfft
 
                     corr = np.correlate(frame, frame, mode="full")
-                    corr = corr[len(corr)//2:]
-                    R = corr[:lpc_order + 1]
+                    corr = corr[len(corr) // 2 :]
+                    R = corr[: lpc_order + 1]  # noqa: N806 (自相关惯例)
 
                     # Levinson-Durbin 递归
                     a = np.zeros(lpc_order + 1)
@@ -276,8 +278,10 @@ class FeatureExtractor:
                     e = R[0] if R[0] > 1e-10 else 1e-10
 
                     for k in range(1, lpc_order + 1):
-                        lam = -np.dot(a[:k][::-1], R[1:k+1]) / e if e > 1e-10 else 0.0
-                        a[1:k+1] = a[1:k+1] + lam * a[:k][::-1]
+                        lam = (
+                            -np.dot(a[:k][::-1], R[1 : k + 1]) / e if e > 1e-10 else 0.0
+                        )
+                        a[1 : k + 1] = a[1 : k + 1] + lam * a[:k][::-1]
                         e = e * (1.0 - lam * lam)
                         if e < 1e-10:
                             e = 1e-10
@@ -293,7 +297,12 @@ class FeatureExtractor:
                     freqs = angles * (sr / (2 * np.pi))
                     # 仅保留正频率且带宽合理的根 (带宽由极点幅度决定)
                     bandwidths = -0.5 * (sr / np.pi) * np.log(np.abs(roots))
-                    valid = (freqs > 50) & (freqs < 4000) & (bandwidths < 500) & (bandwidths > 0)
+                    valid = (
+                        (freqs > 50)
+                        & (freqs < 4000)
+                        & (bandwidths < 500)
+                        & (bandwidths > 0)
+                    )
                     valid_freqs = np.sort(freqs[valid])
 
                     if len(valid_freqs) >= 2:
@@ -311,8 +320,10 @@ class FeatureExtractor:
             f2 = np.array(f2_vals) if f2_vals else np.zeros_like(f1)
 
             return [
-                float(np.mean(f1)), float(np.std(f1)),
-                float(np.mean(f2)), float(np.std(f2)),
+                float(np.mean(f1)),
+                float(np.std(f1)),
+                float(np.mean(f2)),
+                float(np.std(f2)),
             ]
         except Exception as e:
             logger.debug("Formant extraction failed: %s", e)
@@ -322,7 +333,7 @@ class FeatureExtractor:
     # 时域特征 (2 维)
     # ------------------------------------------------------------------
 
-    def _temporal_features(self, audio: np.ndarray, sr: int) -> List[float]:
+    def _temporal_features(self, audio: np.ndarray, sr: int) -> list[float]:
         """提取过零率统计量"""
         try:
             # 自定义计算避免 librosa 依赖
@@ -334,7 +345,7 @@ class FeatureExtractor:
             frame_zcrs = []
             for i in range(min(n_frames, 100)):  # 最多采样 100 帧
                 start = i * hop_len
-                frame = audio[start:start + frame_len]
+                frame = audio[start : start + frame_len]
                 if len(frame) < 2:
                     continue
                 fzcr = np.sum(np.abs(np.diff(np.sign(frame)))) / (2 * len(frame))
@@ -349,10 +360,10 @@ class FeatureExtractor:
     # 能量特征 (2 维)
     # ------------------------------------------------------------------
 
-    def _energy_features(self, audio: np.ndarray) -> List[float]:
+    def _energy_features(self, audio: np.ndarray) -> list[float]:
         """提取 RMS 能量统计量"""
         try:
-            rms = np.sqrt(np.mean(audio ** 2))
+            rms = np.sqrt(np.mean(audio**2))
 
             # 分帧能量标准差
             frame_len = 1024
@@ -361,10 +372,10 @@ class FeatureExtractor:
             frame_energies = []
             for i in range(min(n_frames, 100)):
                 start = i * hop_len
-                frame = audio[start:start + frame_len]
+                frame = audio[start : start + frame_len]
                 if len(frame) < 2:
                     continue
-                frame_energies.append(np.sqrt(np.mean(frame ** 2)))
+                frame_energies.append(np.sqrt(np.mean(frame**2)))
             rms_std = float(np.std(frame_energies)) if frame_energies else 0.0
             return [rms, rms_std]
         except Exception as e:

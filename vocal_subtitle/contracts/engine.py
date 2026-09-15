@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional
+from typing import Any
 
 from .common import CONTRACT_VERSION, ErrorInfo, jsonable
 
@@ -51,15 +52,15 @@ class EngineRequest:
     payload: Any = None
     engine: str = ""
     model: str = ""
-    language: Optional[str] = None
+    language: str | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class PrepareResult:
     ready: bool
-    identity: Optional[EngineIdentity] = None
-    error: Optional[ErrorInfo] = None
+    identity: EngineIdentity | None = None
+    error: ErrorInfo | None = None
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,8 +77,8 @@ class EngineResult:
     success: bool
     output: Any = None
     events: tuple[Any, ...] = ()
-    identity: Optional[EngineIdentity] = None
-    error: Optional[ErrorInfo] = None
+    identity: EngineIdentity | None = None
+    error: ErrorInfo | None = None
     degraded: bool = False
     diagnostics: dict[str, Any] = field(default_factory=dict)
 

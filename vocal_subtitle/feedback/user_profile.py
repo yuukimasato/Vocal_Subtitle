@@ -8,9 +8,9 @@ import json
 import logging
 import os
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # 参数分级半衰期映射
 # ---------------------------------------------------------------------------
 
-PARAM_TIER_HALF_LIFE: Dict[str, Optional[int]] = {
+PARAM_TIER_HALF_LIFE: dict[str, int | None] = {
     # 长期偏好 — 半衰期 180 天（或不衰减）
     "subtitle.max_chars_cjk": 180,
     "subtitle.max_chars_latin": 180,
@@ -54,7 +54,7 @@ DEFAULT_HALF_LIFE_DAYS = 90
 MAX_BACKUPS = 3
 
 
-def get_param_half_life(param_path: str) -> Optional[int]:
+def get_param_half_life(param_path: str) -> int | None:
     """获取参数的分级半衰期（天），None 表示不衰减"""
     import fnmatch
 
@@ -72,16 +72,18 @@ def get_param_half_life(param_path: str) -> Optional[int]:
 APPLY_OVERRIDES_TOGGLE_FILE = "apply_overrides_on_run.json"
 
 
-def load_apply_overrides_on_run(feedback_config: Optional[FeedbackConfig] = None) -> bool:
+def load_apply_overrides_on_run(feedback_config: FeedbackConfig | None = None) -> bool:
     """读取用户级"应用学习参数"开关状态
 
     开关由 8613 反馈档案工作区写入，持久化在用户配置目录下的
     apply_overrides_on_run.json。文件缺失或损坏时返回 False（默认关）。
     """
     config = feedback_config or FeedbackConfig()
-    path = Path(os.path.expanduser(config.user_profile_dir)) / APPLY_OVERRIDES_TOGGLE_FILE
+    path = (
+        Path(os.path.expanduser(config.user_profile_dir)) / APPLY_OVERRIDES_TOGGLE_FILE
+    )
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
         return False
@@ -90,7 +92,7 @@ def load_apply_overrides_on_run(feedback_config: Optional[FeedbackConfig] = None
 
 def save_apply_overrides_on_run(
     enabled: bool,
-    feedback_config: Optional[FeedbackConfig] = None,
+    feedback_config: FeedbackConfig | None = None,
 ) -> bool:
     """写入用户级"应用学习参数"开关状态，返回最终状态"""
     config = feedback_config or FeedbackConfig()
@@ -116,7 +118,7 @@ class UserProfileManager:
         config = mgr.merge_with_base(base_config, overrides)
     """
 
-    def __init__(self, config: Optional[FeedbackConfig] = None):
+    def __init__(self, config: FeedbackConfig | None = None):
         self._config = config or FeedbackConfig()
         profile_dir = os.path.expanduser(self._config.user_profile_dir)
         self._profile_dir = Path(profile_dir)
@@ -136,15 +138,15 @@ class UserProfileManager:
     # CRUD
     # ------------------------------------------------------------------
 
-    def load(self, profile_name: str = "user_default") -> Dict[str, Any]:
+    def load(self, profile_name: str = "user_default") -> dict[str, Any]:
         """加载用户配置，若不存在返回默认空配置"""
         path = self._profile_path(profile_name)
         if not path.exists():
             return self._create_default(profile_name)
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return yaml.safe_load(f) or self._create_default(profile_name)
 
-    def save(self, profile: Dict[str, Any]) -> None:
+    def save(self, profile: dict[str, Any]) -> None:
         """保存用户配置，自动轮转备份"""
         profile_name = profile.get("profile_id", "user_default")
         path = self._profile_path(profile_name)
@@ -158,9 +160,19 @@ class UserProfileManager:
 
         # 写入新配置
         with open(path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(profile, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            yaml.safe_dump(
+                profile,
+                f,
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
+            )
 
-        logger.info("User profile saved: %s (feedback_count=%d)", profile_name, profile.get("feedback_count", 0))
+        logger.info(
+            "User profile saved: %s (feedback_count=%d)",
+            profile_name,
+            profile.get("feedback_count", 0),
+        )
 
     def delete(self, profile_name: str) -> bool:
         """删除用户配置及其备份"""
@@ -178,7 +190,7 @@ class UserProfileManager:
             logger.info("User profile deleted: %s", profile_name)
         return deleted
 
-    def list_profiles(self) -> List[str]:
+    def list_profiles(self) -> list[str]:
         """列出所有用户配置名称"""
         profiles = []
         for f in self._profile_dir.glob("*.yaml"):
@@ -208,7 +220,7 @@ class UserProfileManager:
         if current.exists():
             shutil.copy2(current, self._backup_path(profile_name, 1))
 
-    def rollback(self, profile_name: str = "user_default") -> Dict[str, Any]:
+    def rollback(self, profile_name: str = "user_default") -> dict[str, Any]:
         """回滚到上一个备份版本
 
         Returns:
@@ -232,7 +244,7 @@ class UserProfileManager:
 
         return self.load(profile_name)
 
-    def reset(self, profile_name: str = "user_default") -> Dict[str, Any]:
+    def reset(self, profile_name: str = "user_default") -> dict[str, Any]:
         """重置为系统默认（删除用户配置，返回空配置）"""
         # 先备份当前版本
         self._rotate_backups(profile_name)
@@ -248,7 +260,7 @@ class UserProfileManager:
     @staticmethod
     def merge_with_base(
         base_config: PipelineConfig,
-        user_overrides: Dict[str, Any],
+        user_overrides: dict[str, Any],
     ) -> PipelineConfig:
         """将用户覆盖合并到基础配置，生成最终运行配置
 
@@ -270,8 +282,8 @@ class UserProfileManager:
     @staticmethod
     def decay_weight(
         timestamp: str,
-        half_life_days: Optional[int] = None,
-        current_time: Optional[datetime] = None,
+        half_life_days: int | None = None,
+        current_time: datetime | None = None,
     ) -> float:
         """计算历史记录的时间衰减权重
 
@@ -299,13 +311,14 @@ class UserProfileManager:
             return 1.0
 
         import math
+
         return math.exp(-elapsed_days / half_life_days)
 
     @staticmethod
     def compute_effective_weight(
         timestamp: str,
         param_path: str,
-        current_time: Optional[datetime] = None,
+        current_time: datetime | None = None,
     ) -> float:
         """计算某条历史记录对某参数的有效权重
 
@@ -326,7 +339,7 @@ class UserProfileManager:
     # 内部
     # ------------------------------------------------------------------
 
-    def _create_default(self, profile_name: str) -> Dict[str, Any]:
+    def _create_default(self, profile_name: str) -> dict[str, Any]:
         now = datetime.now().isoformat()
         return {
             "profile_id": profile_name,

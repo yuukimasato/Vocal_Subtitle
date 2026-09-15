@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +35,14 @@ class ExperimentCategory(str, Enum):
 
 
 ALLOWED_EXPERIMENT_TRANSITIONS: dict[ExperimentStatus, frozenset[ExperimentStatus]] = {
-    ExperimentStatus.PROPOSED:   frozenset({ExperimentStatus.SHADOW}),
-    ExperimentStatus.SHADOW:     frozenset({ExperimentStatus.REVIEW, ExperimentStatus.ROLLED_BACK}),
-    ExperimentStatus.REVIEW:     frozenset({ExperimentStatus.ENABLED, ExperimentStatus.ROLLED_BACK}),
-    ExperimentStatus.ENABLED:    frozenset({ExperimentStatus.ROLLED_BACK}),
+    ExperimentStatus.PROPOSED: frozenset({ExperimentStatus.SHADOW}),
+    ExperimentStatus.SHADOW: frozenset(
+        {ExperimentStatus.REVIEW, ExperimentStatus.ROLLED_BACK}
+    ),
+    ExperimentStatus.REVIEW: frozenset(
+        {ExperimentStatus.ENABLED, ExperimentStatus.ROLLED_BACK}
+    ),
+    ExperimentStatus.ENABLED: frozenset({ExperimentStatus.ROLLED_BACK}),
     ExperimentStatus.ROLLED_BACK: frozenset({ExperimentStatus.PROPOSED}),
 }
 
@@ -47,6 +50,7 @@ ALLOWED_EXPERIMENT_TRANSITIONS: dict[ExperimentStatus, frozenset[ExperimentStatu
 @dataclass
 class ExperimentRecord:
     """单个实验记录"""
+
     experiment_id: str
     name: str
     category: ExperimentCategory = ExperimentCategory.CONFIG
@@ -108,9 +112,16 @@ class ExperimentRegistry:
                 models=["Qwen3-ASR-1.7B"],
                 languages=["zh", "en"],
                 expected_benefit="为 EvidenceDecision 提供异质引擎的文本候选，提高召回率和文本准确性",
-                known_risks=["GPU 内存额外占用 ~4GB", "处理时间增加 1.5-2x", "可能因 Qwen 错误导致替换退化"],
+                known_risks=[
+                    "GPU 内存额外占用 ~4GB",
+                    "处理时间增加 1.5-2x",
+                    "可能因 Qwen 错误导致替换退化",
+                ],
                 enable_scope="opt_in",
-                withdraw_conditions=["D1 对照运行中文/英文覆盖率下降 > 5%", "替换文本错误率 > 分段主候选"],
+                withdraw_conditions=[
+                    "D1 对照运行中文/英文覆盖率下降 > 5%",
+                    "替换文本错误率 > 分段主候选",
+                ],
                 validation_samples=["D1-培训测试-双人", "D1-中文多人", "D1-英文多人"],
                 owner="yuukimasato",
                 created=today,
@@ -124,7 +135,11 @@ class ExperimentRegistry:
                 models=["Qwen3-ForcedAligner-0.6B"],
                 languages=["zh", "en"],
                 expected_benefit="改进词级时间戳精度，减少时间 MAE",
-                known_risks=["GPU 内存额外占用 ~2GB", "仅在 ASR 文本准确时有效", "处理时间增加 0.5-1x"],
+                known_risks=[
+                    "GPU 内存额外占用 ~2GB",
+                    "仅在 ASR 文本准确时有效",
+                    "处理时间增加 0.5-1x",
+                ],
                 enable_scope="shadow_only",
                 withdraw_conditions=["时间 MAE 无显著改善或恶化"],
                 validation_samples=["D1-中文多人", "D1-英文多人"],
@@ -142,7 +157,10 @@ class ExperimentRegistry:
                 expected_benefit="识别音乐、噪声等非语音区域，辅助 EvidenceDecision 的 drop 决策",
                 known_risks=["可能过度标记（false positive）", "GPU 内存额外占用 ~1GB"],
                 enable_scope="shadow_only",
-                withdraw_conditions=["D4 过度检测率 > 15%", "导致有效的语音字幕被错误 drop"],
+                withdraw_conditions=[
+                    "D4 过度检测率 > 15%",
+                    "导致有效的语音字幕被错误 drop",
+                ],
                 validation_samples=["D4-音乐现场", "D4-高噪声"],
                 owner="yuukimasato",
                 created=today,
@@ -158,7 +176,10 @@ class ExperimentRegistry:
                 expected_benefit="更精确的 VAD 边界，减少 ASR 漏识和过识别",
                 known_risks=["三方法不一致时多数决可能选择次优边界", "CPU 开销增加"],
                 enable_scope="shadow_only",
-                withdraw_conditions=["D1 对照运行 VAD 边界精度无改善", "引入额外的语音片段碎片化"],
+                withdraw_conditions=[
+                    "D1 对照运行 VAD 边界精度无改善",
+                    "引入额外的语音片段碎片化",
+                ],
                 validation_samples=["D1-培训测试-双人"],
                 owner="yuukimasato",
                 created=today,
@@ -172,7 +193,12 @@ class ExperimentRegistry:
                 models=["deepseek-v4-pro", "gpt-4o"],
                 languages=["zh", "en"],
                 expected_benefit="修正 ASR 常见错误（同音字、标点），优化断句可读性",
-                known_risks=["可能改变语义", "API 成本", "增加处理延迟", "不同 LLM 产出不一致"],
+                known_risks=[
+                    "可能改变语义",
+                    "API 成本",
+                    "增加处理延迟",
+                    "不同 LLM 产出不一致",
+                ],
                 enable_scope="opt_in",
                 withdraw_conditions=["语义改变率 > 5%", "用户报告不需要的文本修改"],
                 validation_samples=["D1-培训测试-双人", "D1-英文多人"],
@@ -201,7 +227,7 @@ class ExperimentRegistry:
 
     # ---- 查询 ----
 
-    def get(self, experiment_id: str) -> Optional[ExperimentRecord]:
+    def get(self, experiment_id: str) -> ExperimentRecord | None:
         return self._experiments.get(experiment_id)
 
     def list_all(self) -> list[ExperimentRecord]:
@@ -270,7 +296,10 @@ class ExperimentRegistry:
         exp.status = target
         logger.info(
             "Experiment %s: %s → %s (reason: %s)",
-            experiment_id, old.value, target.value, reason or "N/A",
+            experiment_id,
+            old.value,
+            target.value,
+            reason or "N/A",
         )
         return True
 
@@ -280,7 +309,9 @@ class ExperimentRegistry:
 
     def promote_to_review(self, experiment_id: str) -> bool:
         """shadow → review"""
-        return self.transition(experiment_id, "review", reason="shadow validation passed")
+        return self.transition(
+            experiment_id, "review", reason="shadow validation passed"
+        )
 
     def enable(self, experiment_id: str) -> bool:
         """review → enabled"""

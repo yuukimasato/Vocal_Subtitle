@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..application.pipeline_result import PipelineStats
 
@@ -15,7 +15,7 @@ def run_preflight(
     pipeline: Any,
     input_path: Path,
     output_path: Path,
-    task_id: Optional[str],
+    task_id: str | None,
     stats: PipelineStats,
     skip_separation: bool = False,
 ) -> None:

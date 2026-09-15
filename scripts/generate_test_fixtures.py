@@ -11,7 +11,6 @@
 """
 
 import argparse
-import struct
 import wave
 from pathlib import Path
 
@@ -57,8 +56,8 @@ def generate_speech_wav(
             chirp_end = pos + 2 * (end - pos) // 3
             chirp_len = chirp_end - chirp_start
             chirp_t = np.arange(chirp_len) / sample_rate
-            audio[chirp_start:chirp_end] += (
-                0.2 * np.sin(2 * np.pi * freq * 1.5 * chirp_t)
+            audio[chirp_start:chirp_end] += 0.2 * np.sin(
+                2 * np.pi * freq * 1.5 * chirp_t
             )
 
         pos = end
@@ -101,8 +100,8 @@ def generate_multi_speaker_wav(
 
     # 说话人频率
     speakers = {
-        "speaker_1": {"freq": 180, "amplitude": 0.5},   # 低频（男声）
-        "speaker_2": {"freq": 350, "amplitude": 0.4},   # 中频（女声）
+        "speaker_1": {"freq": 180, "amplitude": 0.5},  # 低频（男声）
+        "speaker_2": {"freq": 350, "amplitude": 0.4},  # 中频（女声）
         "speaker_3": {"freq": 260, "amplitude": 0.35},  # 中低频
     }
     speaker_names = list(speakers.keys())
@@ -118,9 +117,7 @@ def generate_multi_speaker_wav(
         t = np.arange(end - pos) / sample_rate
 
         spk = speakers[speaker_names[speaker_idx % len(speaker_names)]]
-        audio[pos:end] = spk["amplitude"] * np.sin(
-            2 * np.pi * spk["freq"] * t
-        )
+        audio[pos:end] = spk["amplitude"] * np.sin(2 * np.pi * spk["freq"] * t)
 
         speaker_idx += 1
         pos = end + int(gap_dur * sample_rate)
@@ -158,14 +155,11 @@ def _write_wav(path: Path, audio: np.ndarray, sample_rate: int) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="生成测试用音频 fixtures"
-    )
+    parser = argparse.ArgumentParser(description="生成测试用音频 fixtures")
     parser.add_argument(
-        "--all", action="store_true", default=True,
-        help="生成所有 test fixtures"
+        "--all", action="store_true", default=True, help="生成所有 test fixtures"
     )
-    args = parser.parse_args()
+    parser.parse_args()
 
     print(f"生成测试音频 fixtures → {OUTPUT_DIR}")
     print()

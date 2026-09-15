@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any
 
 
-def result_summary(result_json: str | None, *, detail: bool = False) -> Dict[str, Any] | None:
+def result_summary(
+    result_json: str | None, *, detail: bool = False
+) -> dict[str, Any] | None:
     if not result_json:
         return None
     try:
@@ -46,7 +48,7 @@ def result_summary(result_json: str | None, *, detail: bool = False) -> Dict[str
     }
 
 
-def history_item(task: Dict[str, Any]) -> Dict[str, Any]:
+def history_item(task: dict[str, Any]) -> dict[str, Any]:
     summary = result_summary(task.get("result_json")) or {}
     return {
         "id": task["id"],
@@ -69,7 +71,7 @@ def history_item(task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def history_detail(task: Dict[str, Any]) -> Dict[str, Any]:
+def history_detail(task: dict[str, Any]) -> dict[str, Any]:
     result = result_summary(task.get("result_json"), detail=True)
     events = []
     if task.get("result_json"):

@@ -1,10 +1,7 @@
 """Regression tests for the WebUI background task state machine."""
 
-from pathlib import Path
-
 from vocal_subtitle.application.pipeline_result import PipelineStats
-from vocal_subtitle.webui import api
-from vocal_subtitle.webui import pipeline_tasks
+from vocal_subtitle.webui import api, pipeline_tasks
 
 
 class _HistorySpy:

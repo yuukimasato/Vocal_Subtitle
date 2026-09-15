@@ -15,7 +15,6 @@
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
 
 import numpy as np
 
@@ -55,8 +54,8 @@ class MergeConfig:
     min_segment_length: float = 0.5  # 最小段长（秒），与 MergingConfig 保持一致
     refine_boundaries: bool = True
     boundary_window: float = 0.15
-    protect_single_word: bool = True      # 禁止在单词中间切分
-    min_word_gap_ms: int = 80             # 单词内部允许的最大"静音"（清辅音间隔）
+    protect_single_word: bool = True  # 禁止在单词中间切分
+    min_word_gap_ms: int = 80  # 单词内部允许的最大"静音"（清辅音间隔）
 
 
 class MergeStrategy:
@@ -71,16 +70,16 @@ class MergeStrategy:
         merged = strategy.merge(vad_segments, audio, sample_rate)
     """
 
-    def __init__(self, config: Optional[MergeConfig] = None):
+    def __init__(self, config: MergeConfig | None = None):
         self.config = config or MergeConfig()
 
     def merge(
         self,
-        segments: List[SpeechSegment],
-        audio: Optional[np.ndarray] = None,
+        segments: list[SpeechSegment],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-        total_duration: Optional[float] = None,
-    ) -> List[SpeechSegment]:
+        total_duration: float | None = None,
+    ) -> list[SpeechSegment]:
         """执行合并策略
 
         Args:
@@ -106,7 +105,9 @@ class MergeStrategy:
             from ..utils.audio_utils import AudioUtils
 
             AudioUtils.refine_speech_boundaries(
-                segments, audio, sample_rate,
+                segments,
+                audio,
+                sample_rate,
                 window=cfg.boundary_window,
             )
 
@@ -114,7 +115,9 @@ class MergeStrategy:
         # 在 VAD 段内部的长静音处切分，避免 ASR 时间戳漂移
         if cfg.pre_split_silence and audio is not None:
             segments = self._pre_split_at_silence_gaps(
-                segments, audio, sample_rate,
+                segments,
+                audio,
+                sample_rate,
             )
 
         # Step 2: 合并相邻片段（含 RMS 静音验证）
@@ -134,11 +137,7 @@ class MergeStrategy:
         protected = self._apply_minimum_fragment_protection(padded)
 
         # Step 7: 过滤过短片段
-        filtered = [
-            seg
-            for seg in protected
-            if seg.duration >= cfg.min_segment_length
-        ]
+        filtered = [seg for seg in protected if seg.duration >= cfg.min_segment_length]
 
         logger.info(
             "Merge: %d→%d→%d→%d segments "
@@ -162,10 +161,10 @@ class MergeStrategy:
 
     def _pre_split_at_silence_gaps(
         self,
-        segments: List[SpeechSegment],
+        segments: list[SpeechSegment],
         audio: np.ndarray,
         sample_rate: int,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """在 VAD 段内部的静音间隙处预切分
 
         目的：避免段内长静音导致 ASR 时间戳漂移。
@@ -183,7 +182,6 @@ class MergeStrategy:
 
         result = []
         for seg in segments:
-            seg_samples = int((seg.end - seg.start) * sample_rate)
             # 短片段不需要预切分
             if seg.duration < cfg.pre_split_threshold * 2:
                 result.append(seg)
@@ -200,7 +198,10 @@ class MergeStrategy:
                 start_sample + int(0.5 * sample_rate),
             )
             baseline_rms = self._compute_baseline_rms(
-                audio, ref_start, ref_end, frame_size,
+                audio,
+                ref_start,
+                ref_end,
+                frame_size,
             )
             if baseline_rms is None:
                 result.append(seg)
@@ -212,8 +213,11 @@ class MergeStrategy:
 
             # 同时计算全局静音阈值作为绝对下限
             from ..utils.audio_utils import AudioUtils
+
             global_silence = AudioUtils.estimate_silence_rms(
-                audio, sample_rate, percentile=20,
+                audio,
+                sample_rate,
+                percentile=20,
             )
             effective_threshold = max(dynamic_threshold, global_silence * 1.5)
 
@@ -224,7 +228,7 @@ class MergeStrategy:
 
             for i in range(start_sample, end_sample - frame_size + 1, hop_size):
                 frame = audio[i : i + frame_size]
-                rms = float(np.sqrt(np.mean(frame ** 2)))
+                rms = float(np.sqrt(np.mean(frame**2)))
 
                 if rms < effective_threshold:
                     if not in_silence:
@@ -234,20 +238,24 @@ class MergeStrategy:
                     if in_silence:
                         gap_duration = (i - silence_begin_sample) / sample_rate
                         if gap_duration >= cfg.pre_split_threshold:
-                            silence_gaps.append((
-                                silence_begin_sample / sample_rate,
-                                i / sample_rate,
-                            ))
+                            silence_gaps.append(
+                                (
+                                    silence_begin_sample / sample_rate,
+                                    i / sample_rate,
+                                )
+                            )
                         in_silence = False
 
             # 处理尾部静音
             if in_silence:
                 gap_duration = (end_sample - silence_begin_sample) / sample_rate
                 if gap_duration >= cfg.pre_split_threshold:
-                    silence_gaps.append((
-                        silence_begin_sample / sample_rate,
-                        end_sample / sample_rate,
-                    ))
+                    silence_gaps.append(
+                        (
+                            silence_begin_sample / sample_rate,
+                            end_sample / sample_rate,
+                        )
+                    )
 
             # ---- 在静音间隙处切分 ----
             if not silence_gaps:
@@ -256,9 +264,7 @@ class MergeStrategy:
                 # 防护：如果单个静音间隙覆盖了 > 80% 的段长，
                 # 说明整个段被判定为静音（可能是极低能量信号），
                 # 不应切分，保留原始段。
-                total_gap_duration = sum(
-                    gap_e - gap_s for gap_s, gap_e in silence_gaps
-                )
+                total_gap_duration = sum(gap_e - gap_s for gap_s, gap_e in silence_gaps)
                 if total_gap_duration > seg.duration * 0.8 and len(silence_gaps) == 1:
                     result.append(seg)
                     continue
@@ -274,25 +280,32 @@ class MergeStrategy:
                     sub_s = sub_boundaries[i]
                     sub_e = sub_boundaries[i + 1]
                     if sub_e - sub_s >= cfg.min_fragment_duration:
-                        result.append(SpeechSegment(
-                            start=sub_s, end=sub_e,
-                            confidence=seg.confidence,
-                        ))
+                        result.append(
+                            SpeechSegment(
+                                start=sub_s,
+                                end=sub_e,
+                                confidence=seg.confidence,
+                            )
+                        )
                     else:
                         # 子段太短（如单字），保留在结果中
                         # 最小片段保护会在后续步骤处理
-                        result.append(SpeechSegment(
-                            start=sub_s, end=sub_e,
-                            confidence=seg.confidence,
-                        ))
+                        result.append(
+                            SpeechSegment(
+                                start=sub_s,
+                                end=sub_e,
+                                confidence=seg.confidence,
+                            )
+                        )
 
         # 重新按 start 排序
         result.sort(key=lambda s: s.start)
 
         logger.info(
-            "Pre-split: %d → %d segments (silence gap > %.1fs, "
-            "dynamic threshold)",
-            len(segments), len(result), cfg.pre_split_threshold,
+            "Pre-split: %d → %d segments (silence gap > %.1fs, dynamic threshold)",
+            len(segments),
+            len(result),
+            cfg.pre_split_threshold,
         )
         return result
 
@@ -302,16 +315,16 @@ class MergeStrategy:
         ref_start: int,
         ref_end: int,
         frame_size: int,
-    ) -> Optional[float]:
+    ) -> float | None:
         """计算参考段的 RMS 能量基准（鲁棒中位数估计）"""
         if ref_end <= ref_start + frame_size:
             chunk = audio[ref_start:ref_end]
-            return float(np.sqrt(np.mean(chunk ** 2))) if len(chunk) > 0 else None
+            return float(np.sqrt(np.mean(chunk**2))) if len(chunk) > 0 else None
 
         rms_vals = []
         for i in range(ref_start, ref_end - frame_size + 1, frame_size):
             frame = audio[i : i + frame_size]
-            rms_vals.append(float(np.sqrt(np.mean(frame ** 2))))
+            rms_vals.append(float(np.sqrt(np.mean(frame**2))))
 
         if not rms_vals:
             return None
@@ -321,7 +334,11 @@ class MergeStrategy:
         lo = max(0, int(len(rms_vals) * 0.4))
         hi = min(len(rms_vals), int(len(rms_vals) * 0.6) + 1)
         robust_vals = rms_vals[lo:hi]
-        return float(np.median(robust_vals)) if robust_vals else rms_vals[len(rms_vals)//2]
+        return (
+            float(np.median(robust_vals))
+            if robust_vals
+            else rms_vals[len(rms_vals) // 2]
+        )
 
     # ------------------------------------------------------------------
     # 自适应 Padding
@@ -329,10 +346,10 @@ class MergeStrategy:
 
     def _apply_adaptive_padding(
         self,
-        segments: List[SpeechSegment],
-        audio: Optional[np.ndarray] = None,
+        segments: list[SpeechSegment],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """根据边界能量梯度自适应调整 padding
 
         原理：
@@ -348,11 +365,17 @@ class MergeStrategy:
         for seg in segments:
             # 计算 onset（段首）的能量梯度
             onset_slope = self._energy_slope_at(
-                audio, sample_rate, seg.start, direction="forward",
+                audio,
+                sample_rate,
+                seg.start,
+                direction="forward",
             )
             # 计算 offset（段尾）的能量梯度
             offset_slope = self._energy_slope_at(
-                audio, sample_rate, seg.end, direction="backward",
+                audio,
+                sample_rate,
+                seg.end,
+                direction="backward",
             )
 
             onset_pad = self._slope_to_padding(onset_slope, cfg)
@@ -406,7 +429,7 @@ class MergeStrategy:
             frame_end = frame_start + frame_size
             if 0 <= frame_start < total_samples and frame_end <= total_samples:
                 frame = audio[frame_start:frame_end]
-                rms = float(np.sqrt(np.mean(frame ** 2)))
+                rms = float(np.sqrt(np.mean(frame**2)))
                 if offset < 0:
                     pre_energies.append(rms)
                 else:
@@ -442,13 +465,13 @@ class MergeStrategy:
         - slope ≤ 1.5: 能量模糊（语尾渐弱） → 最大 padding (200ms)
         """
         if slope > 8.0:
-            return cfg.padding_min   # 50ms
+            return cfg.padding_min  # 50ms
         elif slope > 3.0:
-            return cfg.padding       # 100ms
+            return cfg.padding  # 100ms
         elif slope > 1.5:
             return (cfg.padding + cfg.padding_max) / 2  # 150ms
         else:
-            return cfg.padding_max   # 200ms
+            return cfg.padding_max  # 200ms
 
     # ------------------------------------------------------------------
     # 最小片段保护
@@ -456,8 +479,8 @@ class MergeStrategy:
 
     def _apply_minimum_fragment_protection(
         self,
-        segments: List[SpeechSegment],
-    ) -> List[SpeechSegment]:
+        segments: list[SpeechSegment],
+    ) -> list[SpeechSegment]:
         """防止过短片段（<150ms）造成字幕碎片化
 
         处理策略：
@@ -469,7 +492,7 @@ class MergeStrategy:
         if len(segments) <= 1:
             return segments
 
-        result: List[SpeechSegment] = []
+        result: list[SpeechSegment] = []
         i = 0
         while i < len(segments):
             seg = segments[i]
@@ -511,7 +534,9 @@ class MergeStrategy:
         if len(result) != len(segments):
             logger.info(
                 "Fragment protection: %d → %d segments (min=%.0fms)",
-                len(segments), len(result), cfg.min_fragment_duration * 1000,
+                len(segments),
+                len(result),
+                cfg.min_fragment_duration * 1000,
             )
         return result
 
@@ -521,10 +546,10 @@ class MergeStrategy:
 
     def _merge_adjacent(
         self,
-        segments: List[SpeechSegment],
-        audio: Optional[np.ndarray] = None,
+        segments: list[SpeechSegment],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """合并间隔小于阈值且间隙为真实静音的相邻片段。
 
         使用 RMS 能量验证间隙是否真的是静音：
@@ -541,6 +566,7 @@ class MergeStrategy:
         silence_rms = None
         if audio is not None:
             from ..utils.audio_utils import AudioUtils
+
             silence_rms = AudioUtils.estimate_silence_rms(audio, sample_rate)
 
         for seg in segments[1:]:
@@ -551,8 +577,12 @@ class MergeStrategy:
                 is_silent_gap = True
                 if audio is not None and silence_rms is not None and gap > 0.01:
                     from ..utils.audio_utils import AudioUtils
+
                     gap_rms = AudioUtils.get_segment_rms(
-                        audio, result[-1].end, seg.start, sample_rate,
+                        audio,
+                        result[-1].end,
+                        seg.start,
+                        sample_rate,
                     )
                     # 间隙有语音能量 → 不应合并
                     if gap_rms > silence_rms * 2.0:
@@ -560,15 +590,16 @@ class MergeStrategy:
                         logger.debug(
                             "Gap %.3f-%.3f (%.2fs) has energy (rms=%.6f), "
                             "keeping segments separate",
-                            result[-1].end, seg.start, gap, gap_rms,
+                            result[-1].end,
+                            seg.start,
+                            gap,
+                            gap_rms,
                         )
 
                 if is_silent_gap:
                     # 合并到前一个段
                     result[-1].end = max(result[-1].end, seg.end)
-                    result[-1].confidence = max(
-                        result[-1].confidence, seg.confidence
-                    )
+                    result[-1].confidence = max(result[-1].confidence, seg.confidence)
                     continue
 
             result.append(seg)
@@ -577,10 +608,10 @@ class MergeStrategy:
 
     def _split_long_segments(
         self,
-        segments: List[SpeechSegment],
-        audio: Optional[np.ndarray] = None,
+        segments: list[SpeechSegment],
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """切分超长片段"""
         cfg = self.config
         result = []
@@ -622,9 +653,9 @@ class MergeStrategy:
     def _find_split_points(
         self,
         segment: SpeechSegment,
-        audio: Optional[np.ndarray],
+        audio: np.ndarray | None,
         sample_rate: int,
-    ) -> List[float]:
+    ) -> list[float]:
         """在长段内寻找合适的切分点
 
         策略：每隔 max_segment_length 找一个附近 RMS 最小的位置。
@@ -650,9 +681,7 @@ class MergeStrategy:
             search_end = min(segment.end, ideal_time + window)
 
             split_times.append(
-                self._find_quietest_point(
-                    search_start, search_end, audio, sample_rate
-                )
+                self._find_quietest_point(search_start, search_end, audio, sample_rate)
             )
 
         split_times.append(segment.end)
@@ -662,7 +691,7 @@ class MergeStrategy:
         self,
         start: float,
         end: float,
-        audio: Optional[np.ndarray],
+        audio: np.ndarray | None,
         sample_rate: int,
     ) -> float:
         """在时间范围内寻找 RMS 最小的采样点"""
@@ -695,9 +724,7 @@ class MergeStrategy:
 
         return min_pos / sample_rate
 
-    def _add_padding(
-        self, segments: List[SpeechSegment]
-    ) -> List[SpeechSegment]:
+    def _add_padding(self, segments: list[SpeechSegment]) -> list[SpeechSegment]:
         """为每个片段添加固定 padding（非自适应回退方案）"""
         if self.config.padding <= 0:
             return segments
@@ -712,9 +739,9 @@ class MergeStrategy:
 
     def _clip_boundaries(
         self,
-        segments: List[SpeechSegment],
+        segments: list[SpeechSegment],
         total_duration: float,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """确保片段不超出 [0, total_duration] 范围"""
         result = []
         for seg in segments:

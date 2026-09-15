@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any
 
 # ------------------------------------------------------------------
 # 维度值常量 (§2 场景切片表)
@@ -20,12 +21,24 @@ BACKGROUND_NOISES = ("clean", "light_noise", "heavy_noise", "music")
 SPEECH_RATES = ("slow", "normal", "fast")
 AUDIO_LENGTHS = ("short", "medium", "long", "very_long")
 DEVICES = ("cpu", "gpu_8gb", "gpu_12gb_plus", "mac_mps")
-SCENE_TYPES = ("podcast", "education", "variety_show", "music_live", "meeting", "outdoor")
+SCENE_TYPES = (
+    "podcast",
+    "education",
+    "variety_show",
+    "music_live",
+    "meeting",
+    "outdoor",
+)
 
 # 所有七维度的名称列表
 DIMENSION_NAMES = (
-    "language", "speaker_count", "background_noise",
-    "speech_rate", "audio_length", "device", "scene_type",
+    "language",
+    "speaker_count",
+    "background_noise",
+    "speech_rate",
+    "audio_length",
+    "device",
+    "scene_type",
 )
 
 # 语速阈值 (词/秒)
@@ -33,9 +46,9 @@ SPEED_WPS_SLOW = 3.0
 SPEED_WPS_FAST = 5.0
 
 # 音频长度阈值 (秒)
-LENGTH_SHORT_MAX = 180        # < 3 min
-LENGTH_MEDIUM_MAX = 1800      # 3-30 min
-LENGTH_LONG_MAX = 7200        # 30-120 min (> 7200 = very_long)
+LENGTH_SHORT_MAX = 180  # < 3 min
+LENGTH_MEDIUM_MAX = 1800  # 3-30 min
+LENGTH_LONG_MAX = 7200  # 30-120 min (> 7200 = very_long)
 
 # 维度平衡告警阈值 (§8)
 MAX_SINGLE_DIMENSION_RATIO = 0.60
@@ -121,7 +134,9 @@ class SceneSlicer:
             speaker_count = "multi"
 
         # 背景噪声
-        noise = str(metadata.get("background_noise", metadata.get("noise_level", ""))).lower()
+        noise = str(
+            metadata.get("background_noise", metadata.get("noise_level", ""))
+        ).lower()
         if noise in BACKGROUND_NOISES:
             background_noise = noise
         elif noise:
@@ -168,7 +183,9 @@ class SceneSlicer:
             audio_length = "very_long"
 
         # 设备
-        device_raw = str(metadata.get("device_name", metadata.get("device", ""))).lower()
+        device_raw = str(
+            metadata.get("device_name", metadata.get("device", ""))
+        ).lower()
         if "gpu" in device_raw or "cuda" in device_raw:
             vram = metadata.get("vram_gb", 0)
             try:
@@ -274,15 +291,17 @@ class SceneSlicer:
                 ratio = count / total
                 dim_report[val] = {"count": count, "ratio": round(ratio, 4)}
                 if ratio > MAX_SINGLE_DIMENSION_RATIO:
-                    warnings.append({
-                        "dimension": dim,
-                        "value": val,
-                        "ratio": round(ratio, 4),
-                        "message": (
-                            f"维度 {dim}={val} 占比 {ratio:.1%}，"
-                            f"超过 {MAX_SINGLE_DIMENSION_RATIO:.0%} 上限"
-                        ),
-                    })
+                    warnings.append(
+                        {
+                            "dimension": dim,
+                            "value": val,
+                            "ratio": round(ratio, 4),
+                            "message": (
+                                f"维度 {dim}={val} 占比 {ratio:.1%}，"
+                                f"超过 {MAX_SINGLE_DIMENSION_RATIO:.0%} 上限"
+                            ),
+                        }
+                    )
 
             dimensions[dim] = dim_report
 

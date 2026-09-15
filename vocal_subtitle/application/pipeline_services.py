@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import sys
 from datetime import datetime, timezone
-from typing import Optional
 
 from ..asr.base import ASREngine
 from ..config import PipelineConfig
@@ -45,19 +44,21 @@ class PipelineServices:
 
     def __init__(self, config: PipelineConfig) -> None:
         self.config = config
-        self.separation_engine: Optional[SeparationEngine] = None
-        self.vad_engine: Optional[VADEngine] = None
-        self.asr_engine: Optional[ASREngine] = None
+        self.separation_engine: SeparationEngine | None = None
+        self.vad_engine: VADEngine | None = None
+        self.asr_engine: ASREngine | None = None
         self.asr_engines: dict[str, ASREngine] = {}
-        self.cache: Optional[CacheManager] = None
-        self.history: Optional[TaskHistoryManager] = None
+        self.cache: CacheManager | None = None
+        self.history: TaskHistoryManager | None = None
 
         # ---- Engine lifecycle governance (ENGINE_LIFECYCLE.md) ----
         from ..governance.engine_lifecycle import EngineRegistry, LifecycleManager
 
         self.engine_registry = EngineRegistry()
         self.lifecycle = LifecycleManager(self.engine_registry)
-        self._lifecycle_events: list[dict] = []  # buffered until degradation logger attached
+        self._lifecycle_events: list[
+            dict
+        ] = []  # buffered until degradation logger attached
         self._degradation_logger: object = None  # DegradationLogger, lazy-attached
 
     def get_separation_engine(self) -> SeparationEngine:
@@ -90,7 +91,8 @@ class PipelineServices:
         # Track lifecycle
         model = self.get_sep_model_name()
         self._sync_lifecycle(
-            name, "ready_default" if name == "uvr" else "ready_shadow",
+            name,
+            "ready_default" if name == "uvr" else "ready_shadow",
             reason=f"engine instantiated (model={model})",
             model=model,
         )
@@ -131,16 +133,19 @@ class PipelineServices:
 
             self.vad_engine = WebRTCVAD()
         else:
-            raise ValueError(f"Unknown VAD engine: {name}. Options: silero, ten, webrtc")
+            raise ValueError(
+                f"Unknown VAD engine: {name}. Options: silero, ten, webrtc"
+            )
         # Track lifecycle
         self._sync_lifecycle(
-            name, "ready_default" if name == "silero" else "ready_shadow",
+            name,
+            "ready_default" if name == "silero" else "ready_shadow",
             reason="engine instantiated",
         )
         return self.vad_engine
 
     def get_asr_engine_for(
-        self, engine_name: str, model: Optional[str] = None, *, cache: bool = True
+        self, engine_name: str, model: str | None = None, *, cache: bool = True
     ) -> ASREngine:
         if cache and engine_name in self.asr_engines:
             return self.asr_engines[engine_name]
@@ -157,8 +162,11 @@ class PipelineServices:
             from ..asr.faster_whisper_engine import FasterWhisperEngine
 
             engine = FasterWhisperEngine(
-                model=model, device=device, compute_type=asr_cfg.compute_type,
-                beam_size=asr_cfg.beam_size, word_timestamps=asr_cfg.word_timestamps,
+                model=model,
+                device=device,
+                compute_type=asr_cfg.compute_type,
+                beam_size=asr_cfg.beam_size,
+                word_timestamps=asr_cfg.word_timestamps,
                 condition_on_previous_text=asr_cfg.condition_on_previous_text,
                 vad_filter=asr_cfg.vad_filter,
             )
@@ -166,7 +174,8 @@ class PipelineServices:
             from ..asr.whisper_cpp_engine import WhisperCppEngine
 
             engine = WhisperCppEngine(
-                model=model, language=asr_cfg.language,
+                model=model,
+                language=asr_cfg.language,
                 model_path=getattr(asr_cfg, "whisper_cpp_model_path", None),
                 whisper_cpp_bin=getattr(asr_cfg, "whisper_cpp_bin", None),
             )
@@ -241,7 +250,7 @@ class PipelineServices:
         Records lifecycle events that are later flushed to the degradation
         log when a DegradationLogger is attached.
         """
-        from ..governance.engine_lifecycle import EngineLifecycle as EL
+        from ..governance.engine_lifecycle import EngineLifecycle
 
         key = self._resolve_registry_key(engine_name)
         entry = self.engine_registry.get(key)
@@ -250,7 +259,9 @@ class PipelineServices:
 
         old_status = entry.status.value
         try:
-            self.lifecycle.transition(key, EL(status), reason=reason, force=True)
+            self.lifecycle.transition(
+                key, EngineLifecycle(status), reason=reason, force=True
+            )
         except ValueError as exc:
             logger.debug("Lifecycle sync skipped for %s: %s", key, exc)
             return
@@ -270,7 +281,7 @@ class PipelineServices:
         dlog = self._degradation_logger
         if dlog is not None and hasattr(dlog, "record"):
             dlog.record(
-                stage="engine:{}".format(key),
+                stage=f"engine:{key}",
                 from_path=old_status,
                 to_path=status,
                 reason=reason,

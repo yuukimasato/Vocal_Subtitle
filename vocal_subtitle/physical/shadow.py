@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any
 
 from ..asr.base import TranscriptionSegment
 from .context import build_context_windows
@@ -26,10 +27,10 @@ class ShadowBuildResult:
     global_transcript: GlobalTranscript
     global_speaker_timeline: GlobalSpeakerTimeline
     status: str = "ok"
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
-    statistics: Dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+    statistics: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
             "diagnostics": copy.deepcopy(self.diagnostics),
@@ -40,9 +41,18 @@ class ShadowBuildResult:
         }
 
 
-def _build_ownership_timeline(duration: float, macro_chunks: Optional[Sequence[Any]]) -> PhysicalTimeline:
+def _build_ownership_timeline(
+    duration: float, macro_chunks: Sequence[Any] | None
+) -> PhysicalTimeline:
     timeline = PhysicalTimeline(duration)
-    chunks = sorted(list(macro_chunks or []), key=lambda item: (float(item.start), float(item.end), int(getattr(item, "index", 0))))
+    chunks = sorted(
+        list(macro_chunks or []),
+        key=lambda item: (
+            float(item.start),
+            float(item.end),
+            int(getattr(item, "index", 0)),
+        ),
+    )
     if not chunks:
         timeline.add_clip(0.0, duration, clip_id="clip-000001")
         return timeline
@@ -86,18 +96,18 @@ def build_shadow_artifacts(
     contexts: Sequence[Any],
     duration: float,
     *,
-    macro_chunks: Optional[Sequence[Any]] = None,
-    context_offsets: Optional[Sequence[float]] = None,
+    macro_chunks: Sequence[Any] | None = None,
+    context_offsets: Sequence[float] | None = None,
     diarization_result: Any = None,
     left_context: float = 0.5,
     right_context: float = 0.5,
 ) -> ShadowBuildResult:
     """Build all phase-two artifacts from already-produced pipeline outputs."""
     timeline = _build_ownership_timeline(duration, macro_chunks)
-    diagnostics: Dict[str, Any] = {}
+    diagnostics: dict[str, Any] = {}
     evidence = EvidenceAdaptResult()
-    all_words: List[GlobalWord] = []
-    all_segments: List[GlobalTranscriptSegment] = []
+    all_words: list[GlobalWord] = []
+    all_segments: list[GlobalTranscriptSegment] = []
     offsets = list(context_offsets or [])
     if len(offsets) < len(contexts):
         offsets.extend([0.0] * (len(contexts) - len(offsets)))
@@ -125,18 +135,21 @@ def build_shadow_artifacts(
                 else:
                     diagnostics[key] = value
         except Exception as exc:
-            diagnostics.setdefault("context_errors", []).append(f"context[{index}]: {exc}")
+            diagnostics.setdefault("context_errors", []).append(
+                f"context[{index}]: {exc}"
+            )
 
         raw_asr_segments = getattr(context, "asr_segments", []) or []
         # The legacy mapper stores one list of TranscriptionSegment per VAD
         # segment; accept a flat sequence as well for standalone adapters.
-        asr_segments: List[TranscriptionSegment] = []
+        asr_segments: list[TranscriptionSegment] = []
         for item in raw_asr_segments:
             if isinstance(item, TranscriptionSegment):
                 asr_segments.append(item)
             elif isinstance(item, (list, tuple)):
                 asr_segments.extend(
-                    candidate for candidate in item
+                    candidate
+                    for candidate in item
                     if isinstance(candidate, TranscriptionSegment)
                 )
         if asr_segments:
@@ -151,16 +164,24 @@ def build_shadow_artifacts(
                 all_words.extend(transcript.words)
                 all_segments.extend(transcript.segments)
                 if transcript.diagnostics.get("skipped_segments"):
-                    diagnostics.setdefault("transcript_diagnostics", []).append(transcript.diagnostics)
+                    diagnostics.setdefault("transcript_diagnostics", []).append(
+                        transcript.diagnostics
+                    )
             except Exception as exc:
-                diagnostics.setdefault("transcript_errors", []).append(f"context[{index}]: {exc}")
+                diagnostics.setdefault("transcript_errors", []).append(
+                    f"context[{index}]: {exc}"
+                )
 
-    timeline.speech_evidence_spans.sort(key=lambda item: (item.start, item.end, item.id))
+    timeline.speech_evidence_spans.sort(
+        key=lambda item: (item.start, item.end, item.id)
+    )
     evidence.evidence_spans.sort(key=lambda item: (item.start, item.end, item.id))
-    timeline.diagnostics.update({
-        "evidence_source_counts": dict(evidence.source_counts),
-        "evidence_skipped_count": evidence.skipped_count,
-    })
+    timeline.diagnostics.update(
+        {
+            "evidence_source_counts": dict(evidence.source_counts),
+            "evidence_skipped_count": evidence.skipped_count,
+        }
+    )
     for window in build_context_windows(timeline, left_context, right_context):
         timeline.add_context_window(
             window.physical_clip_id,
@@ -184,14 +205,26 @@ def build_shadow_artifacts(
 
     if diarization_result is not None:
         try:
-            speaker_timeline = adapt_diarization_result(diarization_result, duration=duration)
+            speaker_timeline = adapt_diarization_result(
+                diarization_result, duration=duration
+            )
         except Exception as exc:
             diagnostics.setdefault("speaker_errors", []).append(str(exc))
-            speaker_timeline = GlobalSpeakerTimeline(duration=duration, turns=[], exclusive_turns=[], status="degraded")
+            speaker_timeline = GlobalSpeakerTimeline(
+                duration=duration, turns=[], exclusive_turns=[], status="degraded"
+            )
     else:
-        speaker_timeline = GlobalSpeakerTimeline(duration=duration, turns=[], exclusive_turns=[], status="unknown")
+        speaker_timeline = GlobalSpeakerTimeline(
+            duration=duration, turns=[], exclusive_turns=[], status="unknown"
+        )
 
-    degraded_keys = {"context_errors", "transcript_errors", "speaker_errors", "skipped", "skipped_by_source"}
+    degraded_keys = {
+        "context_errors",
+        "transcript_errors",
+        "speaker_errors",
+        "skipped",
+        "skipped_by_source",
+    }
     if evidence.skipped_count or any(key in diagnostics for key in degraded_keys):
         status = "degraded"
     else:

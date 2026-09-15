@@ -22,7 +22,6 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 # ------------------------------------------------------------------
 # 数据模型
@@ -68,7 +67,7 @@ class ComparisonReport:
     ground_truth_file: str
     total_events: int
     matched_events: int
-    comparisons: List[EventComparison] = field(default_factory=list)
+    comparisons: list[EventComparison] = field(default_factory=list)
 
     # 聚合统计
     start_mae_ms: float = 0.0
@@ -87,10 +86,10 @@ class ComparisonReport:
     end_gt_500ms_pct: float = 0.0
 
     # 异常事件
-    flagged_events: List[dict] = field(default_factory=list)
+    flagged_events: list[dict] = field(default_factory=list)
 
     # 声学校验（可选，如提供了 Pipeline 诊断输出）
-    health_score: Optional[float] = None
+    health_score: float | None = None
 
 
 # ------------------------------------------------------------------
@@ -98,7 +97,7 @@ class ComparisonReport:
 # ------------------------------------------------------------------
 
 
-def parse_ass(file_path: Path) -> List[TimelineEvent]:
+def parse_ass(file_path: Path) -> list[TimelineEvent]:
     """解析 ASS 字幕文件中的 Dialogue 事件
 
     提取 start, end, text 字段。忽略 Format/Comment/Style 等头部行。
@@ -106,26 +105,21 @@ def parse_ass(file_path: Path) -> List[TimelineEvent]:
     events = []
     dialogue_pattern = re.compile(
         r"^Dialogue:\s*"
-        r"(?:Marked=\d+,)?\s*"          # 可选的 Marked 字段
-        r"[^,]*,\s*"                     # Layer
-        r"(\d+:\d+:\d+\.?\d*),\s*"       # Start
-        r"(\d+:\d+:\d+\.?\d*),\s*"       # End
-        r"(?:[^,]*,\s*){"                # Style, Name, MarginL, MarginR, MarginV, Effect
-        r"(.+)$"                         # Text
+        r"(?:Marked=\d+,)?\s*"  # 可选的 Marked 字段
+        r"[^,]*,\s*"  # Layer
+        r"(\d+:\d+:\d+\.?\d*),\s*"  # Start
+        r"(\d+:\d+:\d+\.?\d*),\s*"  # End
+        r"(?:[^,]*,\s*){"  # Style, Name, MarginL, MarginR, MarginV, Effect
+        r"(.+)$"  # Text
     )
 
-    ass_time_pattern = re.compile(
-        r"(\d+):(\d+):(\d+)\.?(\d*)"
-    )
-
-    text_lines = []
     idx = 0
 
     try:
-        with open(file_path, "r", encoding="utf-8-sig") as f:
+        with open(file_path, encoding="utf-8-sig") as f:
             lines = f.readlines()
     except UnicodeDecodeError:
-        with open(file_path, "r", encoding="gbk") as f:
+        with open(file_path, encoding="gbk") as f:
             lines = f.readlines()
 
     for line in lines:
@@ -138,15 +132,14 @@ def parse_ass(file_path: Path) -> List[TimelineEvent]:
         if not match:
             # 手动解析（更鲁棒的方式）
             try:
-                parts = line[len("Dialogue:"):].split(",")
+                parts = line[len("Dialogue:") :].split(",")
                 # 跳过 Layer
                 start_str = parts[1].strip() if len(parts) > 1 else ""
                 end_str = parts[2].strip() if len(parts) > 2 else ""
                 # Text 是最后一个逗号之后（跳过中间的样式字段）
-                text_start = 0
                 # ASS Dialogue 格式: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
                 # Text 在第10个字段(索引9)
-                text_parts = line[len("Dialogue:"):].split(",", 9)
+                text_parts = line[len("Dialogue:") :].split(",", 9)
                 text = text_parts[9] if len(text_parts) > 9 else ""
             except Exception:
                 continue
@@ -170,17 +163,19 @@ def parse_ass(file_path: Path) -> List[TimelineEvent]:
             continue
 
         idx += 1
-        events.append(TimelineEvent(
-            index=idx,
-            start=start_sec,
-            end=end_sec,
-            text=clean_text,
-        ))
+        events.append(
+            TimelineEvent(
+                index=idx,
+                start=start_sec,
+                end=end_sec,
+                text=clean_text,
+            )
+        )
 
     return events
 
 
-def parse_srt(file_path: Path) -> List[TimelineEvent]:
+def parse_srt(file_path: Path) -> list[TimelineEvent]:
     """解析 SRT 字幕文件（使用 pysubs2）
 
     提取 start, end, text 字段。自动处理 speaker 标签。
@@ -193,16 +188,18 @@ def parse_srt(file_path: Path) -> List[TimelineEvent]:
         text = evt.text.replace("\\N", " ").replace("\n", " ").strip()
         if not text:
             continue
-        events.append(TimelineEvent(
-            index=idx + 1,
-            start=evt.start / 1000.0,  # pysubs2 uses ms
-            end=evt.end / 1000.0,
-            text=text,
-        ))
+        events.append(
+            TimelineEvent(
+                index=idx + 1,
+                start=evt.start / 1000.0,  # pysubs2 uses ms
+                end=evt.end / 1000.0,
+                text=text,
+            )
+        )
     return events
 
 
-def parse_subtitle(file_path: Path) -> List[TimelineEvent]:
+def parse_subtitle(file_path: Path) -> list[TimelineEvent]:
     """自动检测格式并解析字幕文件（ASS/SRT）"""
     suffix = file_path.suffix.lower()
     if suffix == ".srt":
@@ -217,7 +214,7 @@ def parse_subtitle(file_path: Path) -> List[TimelineEvent]:
             return parse_ass(file_path)
 
 
-def _ass_time_to_seconds(time_str: str) -> Optional[float]:
+def _ass_time_to_seconds(time_str: str) -> float | None:
     """ASS 时间格式 → 秒数"""
     time_str = time_str.strip()
     # 支持 H:MM:SS.cs 和 H:MM:SS.xx 格式
@@ -240,10 +237,10 @@ def _ass_time_to_seconds(time_str: str) -> Optional[float]:
 
 
 def match_events(
-    auto_events: List[TimelineEvent],
-    gt_events: List[TimelineEvent],
+    auto_events: list[TimelineEvent],
+    gt_events: list[TimelineEvent],
     max_time_diff: float = 3.0,
-) -> List[Tuple[TimelineEvent, TimelineEvent]]:
+) -> list[tuple[TimelineEvent, TimelineEvent]]:
     """将自动生成的字幕事件与 ground truth 事件匹配
 
     优先按索引匹配，如果数量不同则用小的时间窗口 + 文本相似度匹配。
@@ -262,9 +259,10 @@ def match_events(
 
     if len(auto_events) == len(gt_events):
         # Same count: validate by-index pairing with text+time scores
-        from difflib import SequenceMatcher as _SM
+        from difflib import SequenceMatcher
+
         for a, g in zip(auto_events, gt_events):
-            text_sim = _SM(None, a.text, g.text).ratio()
+            text_sim = SequenceMatcher(None, a.text, g.text).ratio()
             time_diff = abs(a.start - g.start) + abs(a.end - g.end)
             time_score = max(0, 1 - time_diff / (max_time_diff * 2))
             if text_sim * 0.6 + time_score * 0.4 > 0.5:
@@ -310,17 +308,23 @@ def match_events(
 
 
 def compute_statistics(
-    comparisons: List[EventComparison],
+    comparisons: list[EventComparison],
 ) -> dict:
     """从对比列表计算聚合统计"""
     if not comparisons:
         return {
-            "start_mae_ms": 0, "end_mae_ms": 0,
-            "start_mean_error_ms": 0, "end_mean_error_ms": 0,
-            "start_std_ms": 0, "end_std_ms": 0,
-            "max_start_error_ms": 0, "max_end_error_ms": 0,
-            "start_gt_300ms_pct": 0, "end_gt_300ms_pct": 0,
-            "start_gt_500ms_pct": 0, "end_gt_500ms_pct": 0,
+            "start_mae_ms": 0,
+            "end_mae_ms": 0,
+            "start_mean_error_ms": 0,
+            "end_mean_error_ms": 0,
+            "start_std_ms": 0,
+            "end_std_ms": 0,
+            "max_start_error_ms": 0,
+            "max_end_error_ms": 0,
+            "start_gt_300ms_pct": 0,
+            "end_gt_300ms_pct": 0,
+            "start_gt_500ms_pct": 0,
+            "end_gt_500ms_pct": 0,
         }
 
     n = len(comparisons)
@@ -371,11 +375,11 @@ def compute_statistics(
 
 
 def compare(
-    auto_events: List[TimelineEvent],
-    gt_events: List[TimelineEvent],
+    auto_events: list[TimelineEvent],
+    gt_events: list[TimelineEvent],
     auto_file: str = "",
     gt_file: str = "",
-    health_score: Optional[float] = None,
+    health_score: float | None = None,
 ) -> ComparisonReport:
     """执行完整的对比分析
 
@@ -433,17 +437,19 @@ def compare(
         if comp.start_error_abs_ms > 300:
             flags.append(f"start_error_{comp.start_error_abs_ms:.0f}ms")
         if flags:
-            report.flagged_events.append({
-                "id": comp.index,
-                "issues": flags,
-                "auto_start": round(comp.auto_start, 2),
-                "auto_end": round(comp.auto_end, 2),
-                "gt_start": round(comp.gt_start, 2),
-                "gt_end": round(comp.gt_end, 2),
-                "text_preview": comp.auto_text[:50],
-                "start_error_ms": comp.start_error_ms,
-                "end_error_ms": comp.end_error_ms,
-            })
+            report.flagged_events.append(
+                {
+                    "id": comp.index,
+                    "issues": flags,
+                    "auto_start": round(comp.auto_start, 2),
+                    "auto_end": round(comp.auto_end, 2),
+                    "gt_start": round(comp.gt_start, 2),
+                    "gt_end": round(comp.gt_end, 2),
+                    "text_preview": comp.auto_text[:50],
+                    "start_error_ms": comp.start_error_ms,
+                    "end_error_ms": comp.end_error_ms,
+                }
+            )
 
     return report
 
@@ -464,19 +470,33 @@ def print_report(report: ComparisonReport) -> None:
     print("=" * 65)
     print(f"  自动生成: {report.auto_file}")
     print(f"  手动校正: {report.ground_truth_file}")
-    print(f"  匹配事件: {report.matched_events}/{report.total_events} ({matched_pct:.0f}%)")
+    print(
+        f"  匹配事件: {report.matched_events}/{report.total_events} ({matched_pct:.0f}%)"
+    )
     print()
 
     # 偏差统计表
     print("  ┌────────────┬──────────┬──────────┐")
     print("  │  指标       │ Start    │ End      │")
     print("  ├────────────┼──────────┼──────────┤")
-    print(f"  │ 平均偏差    │ {report.start_mean_error_ms:>6.0f}ms │ {report.end_mean_error_ms:>6.0f}ms │")
-    print(f"  │ 平均绝对误差│ {report.start_mae_ms:>6.0f}ms │ {report.end_mae_ms:>6.0f}ms │")
-    print(f"  │ 标准差      │ {report.start_std_ms:>6.0f}ms │ {report.end_std_ms:>6.0f}ms │")
-    print(f"  │ 最大误差    │ {report.max_start_error_ms:>6.0f}ms │ {report.max_end_error_ms:>6.0f}ms │")
-    print(f"  │ >300ms 占比 │ {report.start_gt_300ms_pct:>5.1f}%  │ {report.end_gt_300ms_pct:>5.1f}%  │")
-    print(f"  │ >500ms 占比 │ {report.start_gt_500ms_pct:>5.1f}%  │ {report.end_gt_500ms_pct:>5.1f}%  │")
+    print(
+        f"  │ 平均偏差    │ {report.start_mean_error_ms:>6.0f}ms │ {report.end_mean_error_ms:>6.0f}ms │"
+    )
+    print(
+        f"  │ 平均绝对误差│ {report.start_mae_ms:>6.0f}ms │ {report.end_mae_ms:>6.0f}ms │"
+    )
+    print(
+        f"  │ 标准差      │ {report.start_std_ms:>6.0f}ms │ {report.end_std_ms:>6.0f}ms │"
+    )
+    print(
+        f"  │ 最大误差    │ {report.max_start_error_ms:>6.0f}ms │ {report.max_end_error_ms:>6.0f}ms │"
+    )
+    print(
+        f"  │ >300ms 占比 │ {report.start_gt_300ms_pct:>5.1f}%  │ {report.end_gt_300ms_pct:>5.1f}%  │"
+    )
+    print(
+        f"  │ >500ms 占比 │ {report.start_gt_500ms_pct:>5.1f}%  │ {report.end_gt_500ms_pct:>5.1f}%  │"
+    )
     print("  └────────────┴──────────┴──────────┘")
 
     if report.health_score is not None:
@@ -490,10 +510,12 @@ def print_report(report: ComparisonReport) -> None:
         print("  --- 异常事件列表 ---")
         for f in report.flagged_events[:20]:  # 最多显示20条
             issues_str = ", ".join(f["issues"])
-            print(f"  #{f['id']:>3d} [{issues_str}] "
-                  f"auto:{f['auto_start']:.2f}-{f['auto_end']:.2f} "
-                  f"gt:{f['gt_start']:.2f}-{f['gt_end']:.2f} "
-                  f"\"{f['text_preview']}\"")
+            print(
+                f"  #{f['id']:>3d} [{issues_str}] "
+                f"auto:{f['auto_start']:.2f}-{f['auto_end']:.2f} "
+                f"gt:{f['gt_start']:.2f}-{f['gt_end']:.2f} "
+                f'"{f["text_preview"]}"'
+            )
         if len(report.flagged_events) > 20:
             print(f"  ... 及其他 {len(report.flagged_events) - 20} 条")
 
@@ -534,7 +556,10 @@ def report_to_dict(report: ComparisonReport) -> dict:
             {
                 "index": c.index,
                 "auto": {"start": round(c.auto_start, 3), "end": round(c.auto_end, 3)},
-                "ground_truth": {"start": round(c.gt_start, 3), "end": round(c.gt_end, 3)},
+                "ground_truth": {
+                    "start": round(c.gt_start, 3),
+                    "end": round(c.gt_end, 3),
+                },
                 "error_ms": {"start": c.start_error_ms, "end": c.end_error_ms},
                 "text": {"auto": c.auto_text, "ground_truth": c.gt_text},
             }
@@ -560,19 +585,22 @@ def build_parser() -> argparse.ArgumentParser:
         """,
     )
     parser.add_argument(
-        "-a", "--auto",
+        "-a",
+        "--auto",
         required=True,
         type=Path,
         help="自动生成的字幕文件路径 (ASS/SRT)",
     )
     parser.add_argument(
-        "-g", "--ground-truth",
+        "-g",
+        "--ground-truth",
         required=True,
         type=Path,
         help="手动校正的 ground truth 字幕文件路径 (ASS/SRT)",
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         type=Path,
         default=None,
         help="输出 JSON 报告路径（默认打印到 stdout）",
@@ -584,7 +612,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="声学校验健康度分数（可选，0-100）",
     )
     parser.add_argument(
-        "-q", "--quiet",
+        "-q",
+        "--quiet",
         action="store_true",
         help="安静模式，不打印摘要到终端",
     )
@@ -616,7 +645,8 @@ def main():
 
     # 执行对比
     report = compare(
-        auto_events, gt_events,
+        auto_events,
+        gt_events,
         auto_file=str(args.auto),
         gt_file=str(args.ground_truth),
         health_score=args.health_score,

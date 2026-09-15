@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -12,17 +11,23 @@ from .skeleton import compute_vad_overlap
 logger = logging.getLogger(__name__)
 
 
-def classify_energy_type(audio: np.ndarray, sample_rate: int, start: float, end: float) -> str:
-    segment = audio[int(start * sample_rate):int(end * sample_rate)]
+def classify_energy_type(
+    audio: np.ndarray, sample_rate: int, start: float, end: float
+) -> str:
+    segment = audio[int(start * sample_rate) : int(end * sample_rate)]
     if len(segment) < 256:
         return "unknown"
     try:
         autocorr = np.correlate(segment, segment, mode="full")
-        autocorr = autocorr[len(autocorr) // 2:]
+        autocorr = autocorr[len(autocorr) // 2 :]
         autocorr = autocorr / (autocorr[0] + 1e-8)
         peaks = []
         for i in range(1, min(len(autocorr) - 1, sample_rate // 50)):
-            if autocorr[i] > autocorr[i - 1] and autocorr[i] > autocorr[i + 1] and autocorr[i] > 0.15:
+            if (
+                autocorr[i] > autocorr[i - 1]
+                and autocorr[i] > autocorr[i + 1]
+                and autocorr[i] > 0.15
+            ):
                 peaks.append((i, autocorr[i]))
         if not peaks:
             return "transient_noise"
@@ -32,7 +37,12 @@ def classify_energy_type(audio: np.ndarray, sample_rate: int, start: float, end:
         return "unknown"
 
 
-def classify_acoustic_events(skeleton: List[Tuple[float, float]], silero_segments: List, audio: np.ndarray, sample_rate: int) -> List[Dict]:
+def classify_acoustic_events(
+    skeleton: list[tuple[float, float]],
+    silero_segments: list,
+    audio: np.ndarray,
+    sample_rate: int,
+) -> list[dict]:
     classified = []
     for start, end in skeleton:
         silero_overlap = compute_vad_overlap(start, end, silero_segments)
@@ -50,13 +60,16 @@ def classify_acoustic_events(skeleton: List[Tuple[float, float]], silero_segment
             "silero_overlap_ratio": round(silero_overlap, 2),
         }
         if event_type == "non_human_energy":
-            entry["energy_subtype"] = classify_energy_type(audio, sample_rate, start, end)
+            entry["energy_subtype"] = classify_energy_type(
+                audio, sample_rate, start, end
+            )
         classified.append(entry)
     non_human_count = sum(item["type"] == "non_human_energy" for item in classified)
     if non_human_count:
         logger.info(
             "Acoustic event classification: %d total, %d non-human energy (%.0f%%), %d human speech",
-            len(classified), non_human_count,
+            len(classified),
+            non_human_count,
             non_human_count / max(len(classified), 1) * 100,
             sum(item["type"] == "human_speech" for item in classified),
         )

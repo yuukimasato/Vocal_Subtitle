@@ -17,10 +17,10 @@ PROPOSED -> PROJECTED -> ACCEPTED
 
 from __future__ import annotations
 
-import copy
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 
 class ProjectionState(Enum):
@@ -42,7 +42,11 @@ _VALID_TRANSITIONS = {
         ProjectionState.ONE_REPAIR,
         ProjectionState.FALLBACK,
     },
-    ProjectionState.MERGED: {ProjectionState.ACCEPTED, ProjectionState.FALLBACK, ProjectionState.ONE_REPAIR},
+    ProjectionState.MERGED: {
+        ProjectionState.ACCEPTED,
+        ProjectionState.FALLBACK,
+        ProjectionState.ONE_REPAIR,
+    },
     ProjectionState.ONE_REPAIR: {ProjectionState.PROJECTED, ProjectionState.FALLBACK},
     ProjectionState.ACCEPTED: set(),
     ProjectionState.FALLBACK: set(),
@@ -61,8 +65,8 @@ class BoundaryCandidate:
     direction: str  # "start" | "end"
     confidence: float = 0.0
     source: str = "unknown"
-    evidence_ids: Tuple[str, ...] = ()
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    evidence_ids: tuple[str, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.time < 0:
@@ -72,7 +76,7 @@ class BoundaryCandidate:
         self.time = float(self.time)
         self.confidence = max(0.0, min(1.0, float(self.confidence)))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "candidate_id": self.candidate_id,
             "time": self.time,
@@ -101,10 +105,10 @@ class ProjectionResult:
     group_index: int
     projected_start: ProjectedBoundary
     projected_end: ProjectedBoundary
-    candidates_considered: List[BoundaryCandidate] = field(default_factory=list)
-    candidates_rejected: List[Dict[str, Any]] = field(default_factory=list)
-    transition_log: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    candidates_considered: list[BoundaryCandidate] = field(default_factory=list)
+    candidates_rejected: list[dict[str, Any]] = field(default_factory=list)
+    transition_log: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def is_accepted(self) -> bool:
@@ -120,7 +124,7 @@ class ProjectionResult:
             or self.projected_end.state == ProjectionState.FALLBACK
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "group_index": self.group_index,
             "projected_start": {
@@ -143,13 +147,13 @@ class ProjectionResult:
 
 
 def project_boundaries(
-    semantic_groups: Sequence[Dict[str, Any]],
+    semantic_groups: Sequence[dict[str, Any]],
     start_candidates: Sequence[BoundaryCandidate],
     end_candidates: Sequence[BoundaryCandidate],
     *,
     max_duration: float = 5.0,
     min_duration: float = 0.3,
-) -> List[ProjectionResult]:
+) -> list[ProjectionResult]:
     """将语义分组投影到合法边界候选集合。
 
     Args:
@@ -162,11 +166,11 @@ def project_boundaries(
     Returns:
         每个语义组的 ProjectionResult。
     """
-    results: List[ProjectionResult] = []
+    results: list[ProjectionResult] = []
 
     for index, group in enumerate(semantic_groups):
-        transition_log: List[str] = []
-        warnings: List[str] = []
+        transition_log: list[str] = []
+        warnings: list[str] = []
         state = ProjectionState.PROPOSED
         log_transition(transition_log, None, state, f"group {index} starts")
 
@@ -175,16 +179,18 @@ def project_boundaries(
 
         # STATE: PROPOSED -> PROJECTED
         state = ProjectionState.PROJECTED
-        log_transition(transition_log, ProjectionState.PROPOSED, state,
-                       f"projecting [{target_start:.3f}, {target_end:.3f}]")
+        log_transition(
+            transition_log,
+            ProjectionState.PROPOSED,
+            state,
+            f"projecting [{target_start:.3f}, {target_end:.3f}]",
+        )
 
         # 为这个语义组选择最佳候选
         start_choice = _select_best_candidate(
             target_start, start_candidates, direction="start"
         )
-        end_choice = _select_best_candidate(
-            target_end, end_candidates, direction="end"
-        )
+        end_choice = _select_best_candidate(target_end, end_candidates, direction="end")
 
         # 验证候选是否在合法范围内
         candidates_considered = []
@@ -199,7 +205,9 @@ def project_boundaries(
         if start_choice and end_choice:
             duration = end_choice.time - start_choice.time
             if duration <= 0:
-                warnings.append(f"inverted projection: {start_choice.time} >= {end_choice.time}")
+                warnings.append(
+                    f"inverted projection: {start_choice.time} >= {end_choice.time}"
+                )
                 admissible = False
             elif duration > max_duration:
                 warnings.append(f"duration {duration:.2f}s exceeds max {max_duration}s")
@@ -207,18 +215,27 @@ def project_boundaries(
 
         if not start_choice:
             warnings.append("no admissible start candidate")
-            candidates_rejected.append({"reason": "no_start_candidate", "target": target_start})
+            candidates_rejected.append(
+                {"reason": "no_start_candidate", "target": target_start}
+            )
             admissible = False
 
         if not end_choice:
             warnings.append("no admissible end candidate")
-            candidates_rejected.append({"reason": "no_end_candidate", "target": target_end})
+            candidates_rejected.append(
+                {"reason": "no_end_candidate", "target": target_end}
+            )
             admissible = False
 
         if admissible and start_choice and end_choice:
             # STATE: PROJECTED -> ACCEPTED
             state = ProjectionState.ACCEPTED
-            log_transition(transition_log, ProjectionState.PROJECTED, state, "admissible projection")
+            log_transition(
+                transition_log,
+                ProjectionState.PROJECTED,
+                state,
+                "admissible projection",
+            )
 
             projected_start = ProjectedBoundary(
                 projected_time=start_choice.time,
@@ -235,29 +252,41 @@ def project_boundaries(
         elif _can_merge_with_neighbor(group, index, semantic_groups):
             # STATE: PROJECTED -> MERGED
             state = ProjectionState.MERGED
-            log_transition(transition_log, ProjectionState.PROJECTED, state,
-                           "merged with compatible neighbor")
+            log_transition(
+                transition_log,
+                ProjectionState.PROJECTED,
+                state,
+                "merged with compatible neighbor",
+            )
             # Use best available candidates after merge, or fallback times
             fallback_start = start_choice.time if start_choice else target_start
             fallback_end = end_choice.time if end_choice else target_end
 
             projected_start = ProjectedBoundary(
                 projected_time=fallback_start,
-                candidate_id=start_choice.candidate_id if start_choice else "merge-fallback",
+                candidate_id=start_choice.candidate_id
+                if start_choice
+                else "merge-fallback",
                 confidence=start_choice.confidence if start_choice else 0.0,
                 state=ProjectionState.MERGED,
             )
             projected_end = ProjectedBoundary(
                 projected_time=fallback_end,
-                candidate_id=end_choice.candidate_id if end_choice else "merge-fallback",
+                candidate_id=end_choice.candidate_id
+                if end_choice
+                else "merge-fallback",
                 confidence=end_choice.confidence if end_choice else 0.0,
                 state=ProjectionState.MERGED,
             )
         else:
             # STATE: PROJECTED -> FALLBACK
             state = ProjectionState.FALLBACK
-            log_transition(transition_log, ProjectionState.PROJECTED, state,
-                           "no admissible projection or merge")
+            log_transition(
+                transition_log,
+                ProjectionState.PROJECTED,
+                state,
+                "no admissible projection or merge",
+            )
             projected_start = ProjectedBoundary(
                 projected_time=target_start,
                 candidate_id="fallback",
@@ -271,27 +300,29 @@ def project_boundaries(
                 state=ProjectionState.FALLBACK,
             )
 
-        results.append(ProjectionResult(
-            group_index=index,
-            projected_start=projected_start,
-            projected_end=projected_end,
-            candidates_considered=candidates_considered,
-            candidates_rejected=candidates_rejected,
-            transition_log=transition_log,
-            warnings=warnings,
-        ))
+        results.append(
+            ProjectionResult(
+                group_index=index,
+                projected_start=projected_start,
+                projected_end=projected_end,
+                candidates_considered=candidates_considered,
+                candidates_rejected=candidates_rejected,
+                transition_log=transition_log,
+                warnings=warnings,
+            )
+        )
 
     return results
 
 
 def project_with_repair(
-    semantic_groups: Sequence[Dict[str, Any]],
+    semantic_groups: Sequence[dict[str, Any]],
     start_candidates: Sequence[BoundaryCandidate],
     end_candidates: Sequence[BoundaryCandidate],
     *,
     repair_fn=None,
     **kwargs,
-) -> List[ProjectionResult]:
+) -> list[ProjectionResult]:
     """带一次修复机会的边界投影。
 
     无合法投影时：
@@ -330,12 +361,17 @@ def project_with_repair(
                     end_candidates=end_candidates,
                 )
                 if repair_result:
-                    result.projected_start = repair_result.get("start", result.projected_start)
-                    result.projected_end = repair_result.get("end", result.projected_end)
+                    result.projected_start = repair_result.get(
+                        "start", result.projected_start
+                    )
+                    result.projected_end = repair_result.get(
+                        "end", result.projected_end
+                    )
                     result.projected_start.state = ProjectionState.ONE_REPAIR
                     result.projected_end.state = ProjectionState.ONE_REPAIR
                     log_transition(
-                        result.transition_log, state_before,
+                        result.transition_log,
+                        state_before,
                         ProjectionState.ONE_REPAIR,
                         "single repair attempt succeeded",
                     )
@@ -358,8 +394,8 @@ def project_with_repair(
 
 
 def log_transition(
-    log: List[str],
-    from_state: Optional[ProjectionState],
+    log: list[str],
+    from_state: ProjectionState | None,
     to_state: ProjectionState,
     reason: str,
 ) -> None:
@@ -371,7 +407,9 @@ def log_transition(
                 f"invalid transition: {from_state.value} -> {to_state.value}. "
                 f"Valid: {[s.value for s in valid]}"
             )
-    log.append(f"{from_state.value if from_state else 'none'} -> {to_state.value}: {reason}")
+    log.append(
+        f"{from_state.value if from_state else 'none'} -> {to_state.value}: {reason}"
+    )
 
 
 def _select_best_candidate(
@@ -379,7 +417,7 @@ def _select_best_candidate(
     candidates: Sequence[BoundaryCandidate],
     direction: str,
     max_deviation: float = 0.5,
-) -> Optional[BoundaryCandidate]:
+) -> BoundaryCandidate | None:
     """从候选集中选出最佳边界候选。
 
     选择标准：时间最近的候选，且在合法偏差范围内。
@@ -387,7 +425,7 @@ def _select_best_candidate(
     if not candidates:
         return None
 
-    best: Optional[BoundaryCandidate] = None
+    best: BoundaryCandidate | None = None
     best_distance = float("inf")
 
     for candidate in candidates:
@@ -402,9 +440,9 @@ def _select_best_candidate(
 
 
 def _can_merge_with_neighbor(
-    group: Dict[str, Any],
+    group: dict[str, Any],
     index: int,
-    all_groups: Sequence[Dict[str, Any]],
+    all_groups: Sequence[dict[str, Any]],
 ) -> bool:
     """检查是否可以与相邻兼容组合并。"""
     if index >= len(all_groups) - 1:

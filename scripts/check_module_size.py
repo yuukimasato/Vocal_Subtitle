@@ -59,13 +59,15 @@ def main() -> int:
         sources &= changed_paths()
     for path in sorted(sources):
         lines = sum(1 for _ in path.open("r", encoding="utf-8"))
-        rows.append({
-            "path": str(path),
-            "lines": lines,
-            "status": "hard" if lines > args.hard_limit else (
-                "large" if lines > args.max_lines else "ok"
-            ),
-        })
+        rows.append(
+            {
+                "path": str(path),
+                "lines": lines,
+                "status": "hard"
+                if lines > args.hard_limit
+                else ("large" if lines > args.max_lines else "ok"),
+            }
+        )
 
     if args.json:
         print(json.dumps(rows, ensure_ascii=True, indent=2))

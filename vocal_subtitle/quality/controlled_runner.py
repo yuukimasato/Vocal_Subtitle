@@ -13,13 +13,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class RunKind(str, Enum):
     """运行类型"""
+
     BASELINE = "baseline"
     CANDIDATE = "candidate"
     SHADOW = "shadow"
@@ -102,10 +102,11 @@ class ControlledRunManager:
         rec = mgr.recommend(comparison)
     """
 
-    def __init__(self, storage_dir: Optional[Path] = None):
-        self._storage_dir = Path(storage_dir or (
-            Path(__file__).parent.parent.parent / "cache" / "controlled_runs"
-        ))
+    def __init__(self, storage_dir: Path | None = None):
+        self._storage_dir = Path(
+            storage_dir
+            or (Path(__file__).parent.parent.parent / "cache" / "controlled_runs")
+        )
         self._storage_dir.mkdir(parents=True, exist_ok=True)
 
     def create_run(
@@ -113,10 +114,10 @@ class ControlledRunManager:
         kind: RunKind,
         audio_path: Path,
         config_path: Path,
-        overrides: Optional[dict] = None,
+        overrides: dict | None = None,
         *,
-        output_dir: Optional[Path] = None,
-        ground_truth: Optional[Path] = None,
+        output_dir: Path | None = None,
+        ground_truth: Path | None = None,
     ) -> ControlledRunSpec:
         """创建一个对照运行规格。
 
@@ -201,7 +202,7 @@ class ControlledRunManager:
         baseline: ControlledRunSpec,
         candidate: ControlledRunSpec,
         *,
-        ground_truth: Optional[Path] = None,
+        ground_truth: Path | None = None,
     ) -> dict:
         """比较 baseline 和 candidate 的输出。
 
@@ -226,7 +227,9 @@ class ControlledRunManager:
 
         # 尝试 import 路径
         try:
-            from scripts.compare_timeline import compare as _compare, report_to_dict
+            from scripts.compare_timeline import compare as _compare
+            from scripts.compare_timeline import report_to_dict
+
             report = _compare(str(gt_path), str(auto_path))
             return report_to_dict(report)
         except ImportError:
@@ -236,9 +239,12 @@ class ControlledRunManager:
         try:
             result = subprocess.run(
                 [
-                    "python", "scripts/compare_timeline.py",
-                    "--ground-truth", str(gt_path),
-                    "--auto", str(auto_path),
+                    "python",
+                    "scripts/compare_timeline.py",
+                    "--ground-truth",
+                    str(gt_path),
+                    "--auto",
+                    str(auto_path),
                 ],
                 capture_output=True,
                 text=True,
@@ -304,14 +310,14 @@ class ControlledRunManager:
             encoding="utf-8",
         )
 
-    def load_spec(self, run_id: str) -> Optional[ControlledRunSpec]:
+    def load_spec(self, run_id: str) -> ControlledRunSpec | None:
         path = self._spec_path(run_id)
         if not path.exists():
             return None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             return ControlledRunSpec.from_dict(data)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return None
 
 

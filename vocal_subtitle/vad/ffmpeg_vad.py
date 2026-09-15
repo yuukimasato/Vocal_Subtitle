@@ -22,7 +22,6 @@ import logging
 import re
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -54,7 +53,7 @@ class FFmpegSilenceVAD(VADEngine):
         threshold: float = -35.0,
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 400,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """检测音频文件中的语音区间
 
         Args:
@@ -74,13 +73,13 @@ class FFmpegSilenceVAD(VADEngine):
 
         total_duration = self._get_duration(audio_path)
         speech_segments = self._invert_intervals(
-            silence_intervals, total_duration,
+            silence_intervals,
+            total_duration,
             min_speech_duration=min_speech_duration_ms / 1000.0,
         )
 
         return [
-            SpeechSegment(start=s, end=e, confidence=0.9)
-            for s, e in speech_segments
+            SpeechSegment(start=s, end=e, confidence=0.9) for s, e in speech_segments
         ]
 
     def detect_on_array(
@@ -90,7 +89,7 @@ class FFmpegSilenceVAD(VADEngine):
         threshold: float = -35.0,
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 400,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """在 numpy 数组上检测（通过临时 WAV 文件）
 
         为避免重复写文件，生产环境建议直接调用 detect()。
@@ -122,23 +121,32 @@ class FFmpegSilenceVAD(VADEngine):
         audio_path: Path,
         noise_db: float = -35.0,
         min_silence_duration: float = 0.4,
-    ) -> List[Tuple[float, float]]:
+    ) -> list[tuple[float, float]]:
         """调用 ffmpeg silencedetect 检测静音区间
 
         Returns:
             [(silence_start, silence_end), ...] 单位：秒
         """
         cmd = [
-            "ffmpeg", "-y", "-loglevel", "info",
-            "-i", str(audio_path),
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "info",
+            "-i",
+            str(audio_path),
             "-af",
             f"silencedetect=noise={noise_db}dB:d={min_silence_duration}",
-            "-f", "null", "-",
+            "-f",
+            "null",
+            "-",
         ]
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=120,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
         except subprocess.TimeoutExpired:
             logger.error("ffmpeg silencedetect timed out (>120s)")
@@ -171,16 +179,18 @@ class FFmpegSilenceVAD(VADEngine):
 
         logger.info(
             "ffmpeg silencedetect (%.0fdB, min=%.2fs): %d silence intervals",
-            noise_db, min_silence_duration, len(intervals),
+            noise_db,
+            min_silence_duration,
+            len(intervals),
         )
         return intervals
 
     @staticmethod
     def _invert_intervals(
-        silence_intervals: List[Tuple[float, float]],
+        silence_intervals: list[tuple[float, float]],
         total_duration: float,
         min_speech_duration: float = 0.25,
-    ) -> List[Tuple[float, float]]:
+    ) -> list[tuple[float, float]]:
         """反转静音区间为语音区间
 
         Args:
@@ -212,19 +222,27 @@ class FFmpegSilenceVAD(VADEngine):
     def _get_duration(audio_path: Path) -> float:
         """获取音频时长（秒）"""
         cmd = [
-            "ffprobe", "-v", "quiet",
-            "-show_entries", "format=duration",
-            "-of", "csv=p=0",
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "csv=p=0",
             str(audio_path),
         ]
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=10,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             return float(result.stdout.strip())
         except (subprocess.TimeoutExpired, ValueError, FileNotFoundError):
             # 回退：通过 WAV 头解析
             import wave
+
             try:
                 with wave.open(str(audio_path), "rb") as wf:
                     return wf.getnframes() / wf.getframerate()
@@ -236,7 +254,7 @@ def unified_ffmpeg_pass(
     audio_path: Path,
     noise_db: float = -40.0,
     min_silence_duration: float = 0.1,
-) -> Dict:
+) -> dict:
     """统一的 ffmpeg silencedetect 调用
 
     跑一次 ffmpeg（敏感模式），产出两种粒度的结果：
@@ -247,7 +265,8 @@ def unified_ffmpeg_pass(
     避免方案一和方案七各自调用一次 ffmpeg。
     """
     raw_intervals = FFmpegSilenceVAD._detect_silence(
-        audio_path, noise_db=noise_db,
+        audio_path,
+        noise_db=noise_db,
         min_silence_duration=min_silence_duration,
     )
     total_duration = FFmpegSilenceVAD._get_duration(audio_path)
@@ -255,14 +274,17 @@ def unified_ffmpeg_pass(
     return {
         # 方案七用：所有 >0.1s 的静音 → 反转得到完整声学骨架
         "skeleton": FFmpegSilenceVAD._invert_intervals(
-            raw_intervals, total_duration, min_speech_duration=0.05,
+            raw_intervals,
+            total_duration,
+            min_speech_duration=0.05,
         ),
         # 方案一用：过滤后 >0.4s 的静音 → 反转得到 VAD 级语音段
         "coarse_speech": [
             SpeechSegment(start=s, end=e, confidence=0.9)
             for s, e in FFmpegSilenceVAD._invert_intervals(
                 [(s, e) for s, e in raw_intervals if e - s >= 0.4],
-                total_duration, min_speech_duration=0.25,
+                total_duration,
+                min_speech_duration=0.25,
             )
         ],
         # 原始静音区间

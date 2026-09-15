@@ -17,15 +17,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Mapping, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class IssueCategory(str, Enum):
     """质量问题类别"""
+
     USABILITY = "usability"
     COMPLETENESS = "completeness"
     TEXT_ACCURACY = "text_accuracy"
@@ -40,74 +42,169 @@ class IssueCategory(str, Enum):
 
 class IssueSeverity(str, Enum):
     """问题严重度"""
-    CRITICAL = "critical"    # 系统不可用、输出损坏
-    HIGH = "high"            # 严重影响使用
-    MEDIUM = "medium"        # 一定影响
-    LOW = "low"              # 轻微影响
+
+    CRITICAL = "critical"  # 系统不可用、输出损坏
+    HIGH = "high"  # 严重影响使用
+    MEDIUM = "medium"  # 一定影响
+    LOW = "low"  # 轻微影响
 
 
 # 各类别的严重度范围 (§1 表格)
 CATEGORY_SEVERITY_RANGE: dict[IssueCategory, tuple[IssueSeverity, IssueSeverity]] = {
-    IssueCategory.USABILITY:      (IssueSeverity.CRITICAL, IssueSeverity.HIGH),
-    IssueCategory.COMPLETENESS:   (IssueSeverity.HIGH, IssueSeverity.MEDIUM),
-    IssueCategory.TEXT_ACCURACY:  (IssueSeverity.MEDIUM, IssueSeverity.LOW),
-    IssueCategory.TIME_ACCURACY:  (IssueSeverity.MEDIUM, IssueSeverity.LOW),
-    IssueCategory.SPEAKER:        (IssueSeverity.MEDIUM, IssueSeverity.LOW),
-    IssueCategory.READABILITY:    (IssueSeverity.LOW, IssueSeverity.LOW),
-    IssueCategory.PERFORMANCE:    (IssueSeverity.MEDIUM, IssueSeverity.MEDIUM),
-    IssueCategory.COST:           (IssueSeverity.LOW, IssueSeverity.LOW),
+    IssueCategory.USABILITY: (IssueSeverity.CRITICAL, IssueSeverity.HIGH),
+    IssueCategory.COMPLETENESS: (IssueSeverity.HIGH, IssueSeverity.MEDIUM),
+    IssueCategory.TEXT_ACCURACY: (IssueSeverity.MEDIUM, IssueSeverity.LOW),
+    IssueCategory.TIME_ACCURACY: (IssueSeverity.MEDIUM, IssueSeverity.LOW),
+    IssueCategory.SPEAKER: (IssueSeverity.MEDIUM, IssueSeverity.LOW),
+    IssueCategory.READABILITY: (IssueSeverity.LOW, IssueSeverity.LOW),
+    IssueCategory.PERFORMANCE: (IssueSeverity.MEDIUM, IssueSeverity.MEDIUM),
+    IssueCategory.COST: (IssueSeverity.LOW, IssueSeverity.LOW),
     IssueCategory.EXPLAINABILITY: (IssueSeverity.MEDIUM, IssueSeverity.MEDIUM),
-    IssueCategory.UNKNOWN:        (IssueSeverity.MEDIUM, IssueSeverity.LOW),
+    IssueCategory.UNKNOWN: (IssueSeverity.MEDIUM, IssueSeverity.LOW),
 }
 
 # 分类关键词映射（中英文混合，覆盖 §1 示例）
 CATEGORY_KEYWORDS: dict[IssueCategory, list[str]] = {
     IssueCategory.USABILITY: [
-        "崩溃", "crash", "无法导出", "输出损坏", "启动失败",
-        "不能运行", "死机", "无响应", "闪退", "报错退出",
-        "can't export", "output corrupted", "won't start",
+        "崩溃",
+        "crash",
+        "无法导出",
+        "输出损坏",
+        "启动失败",
+        "不能运行",
+        "死机",
+        "无响应",
+        "闪退",
+        "报错退出",
+        "can't export",
+        "output corrupted",
+        "won't start",
     ],
     IssueCategory.COMPLETENESS: [
-        "漏句", "漏词", "跳段", "漏识", "缺失", "遗漏",
-        "少字幕", "缺字幕", "不完整", "空洞", "空白字幕",
-        "missing", "dropped", "skipped", "incomplete", "gap",
+        "漏句",
+        "漏词",
+        "跳段",
+        "漏识",
+        "缺失",
+        "遗漏",
+        "少字幕",
+        "缺字幕",
+        "不完整",
+        "空洞",
+        "空白字幕",
+        "missing",
+        "dropped",
+        "skipped",
+        "incomplete",
+        "gap",
     ],
     IssueCategory.TEXT_ACCURACY: [
-        "错字", "同音字", "多字", "少字", "错词", "误识",
-        "识别错误", "文本错误", "误判", "替换错误",
-        "wrong word", "misrecognition", "incorrect text",
-        "hallucination", "幻觉",
+        "错字",
+        "同音字",
+        "多字",
+        "少字",
+        "错词",
+        "误识",
+        "识别错误",
+        "文本错误",
+        "误判",
+        "替换错误",
+        "wrong word",
+        "misrecognition",
+        "incorrect text",
+        "hallucination",
+        "幻觉",
     ],
     IssueCategory.TIME_ACCURACY: [
-        "偏移", "跨静音", "拉伸", "时间轴", "时间不准",
-        "提前", "滞后", "对不上", "不同步", "延迟",
-        "offset", "misaligned", "out of sync", "latency",
-        "boundary", "边界",
+        "偏移",
+        "跨静音",
+        "拉伸",
+        "时间轴",
+        "时间不准",
+        "提前",
+        "滞后",
+        "对不上",
+        "不同步",
+        "延迟",
+        "offset",
+        "misaligned",
+        "out of sync",
+        "latency",
+        "boundary",
+        "边界",
     ],
     IssueCategory.SPEAKER: [
-        "错标", "漏标", "说话人", "角色", "speaker",
-        "标错人", "混标", "重复标注", "人标",
-        "speaker label", "mislabel", "角色标注",
+        "错标",
+        "漏标",
+        "说话人",
+        "角色",
+        "speaker",
+        "标错人",
+        "混标",
+        "重复标注",
+        "人标",
+        "speaker label",
+        "mislabel",
+        "角色标注",
     ],
     IssueCategory.READABILITY: [
-        "过长", "断句", "标点", "可读", "显示",
-        "太长", "拆分", "合并", "排版", "换行",
-        "readability", "formatting", "too long", "punctuation",
+        "过长",
+        "断句",
+        "标点",
+        "可读",
+        "显示",
+        "太长",
+        "拆分",
+        "合并",
+        "排版",
+        "换行",
+        "readability",
+        "formatting",
+        "too long",
+        "punctuation",
     ],
     IssueCategory.PERFORMANCE: [
-        "超时", "OOM", "内存", "慢", "卡顿", "速度",
-        "耗时", "资源", "显存", "GPU", "CPU占用",
-        "timeout", "out of memory", "slow", "performance",
+        "超时",
+        "OOM",
+        "内存",
+        "慢",
+        "卡顿",
+        "速度",
+        "耗时",
+        "资源",
+        "显存",
+        "GPU",
+        "CPU占用",
+        "timeout",
+        "out of memory",
+        "slow",
+        "performance",
     ],
     IssueCategory.COST: [
-        "费用", "成本", "API", "token", "调用量",
-        "计费", "花费", "价格",
-        "cost", "expensive", "billing",
+        "费用",
+        "成本",
+        "API",
+        "token",
+        "调用量",
+        "计费",
+        "花费",
+        "价格",
+        "cost",
+        "expensive",
+        "billing",
     ],
     IssueCategory.EXPLAINABILITY: [
-        "无 trace", "来源不明", "无法解释", "不知道哪来的",
-        "无来源", "无法追溯", "黑盒", "不可审计",
-        "untraceable", "unknown source", "black box",
+        "无 trace",
+        "来源不明",
+        "无法解释",
+        "不知道哪来的",
+        "无来源",
+        "无法追溯",
+        "黑盒",
+        "不可审计",
+        "untraceable",
+        "unknown source",
+        "black box",
     ],
 }
 
@@ -135,6 +232,7 @@ SEVERITY_DOWNGRADE_INDICATORS: dict[str, dict[str, Any]] = {
 @dataclass
 class CategoryDefinition:
     """类别定义"""
+
     category: IssueCategory
     description: str
     severity_max: IssueSeverity
@@ -160,13 +258,13 @@ class QualityIssue:
     description: str = ""
     category: IssueCategory = IssueCategory.UNKNOWN
     severity: IssueSeverity = IssueSeverity.MEDIUM
-    detected_by: str = ""        # D0_engineering | D1_reference | D2_feedback | D3_feedback | D4_challenge | user_report
+    detected_by: str = ""  # D0_engineering | D1_reference | D2_feedback | D3_feedback | D4_challenge | user_report
     impacted_scenes: list[str] = field(default_factory=list)
-    source: str = ""             # run_id / sample_id / report path
+    source: str = ""  # run_id / sample_id / report path
     first_seen: str = ""
-    impact_range: int = 1        # 1-5
-    reproducibility: int = 1     # 1-3
-    fix_confidence: int = 1      # 1-3
+    impact_range: int = 1  # 1-5
+    reproducibility: int = 1  # 1-3
+    fix_confidence: int = 1  # 1-3
 
     def to_dict(self) -> dict:
         return {
@@ -213,7 +311,9 @@ def _build_category_definitions() -> dict[IssueCategory, CategoryDefinition]:
     }
     defs = {}
     for cat in IssueCategory:
-        sev_range = CATEGORY_SEVERITY_RANGE.get(cat, (IssueSeverity.MEDIUM, IssueSeverity.LOW))
+        sev_range = CATEGORY_SEVERITY_RANGE.get(
+            cat, (IssueSeverity.MEDIUM, IssueSeverity.LOW)
+        )
         defs[cat] = CategoryDefinition(
             category=cat,
             description=descriptions.get(cat, ""),
@@ -237,7 +337,9 @@ class IssueClassifier:
         # issue.category = COMPLETENESS, issue.severity = HIGH
     """
 
-    CATEGORY_DEFINITIONS: dict[IssueCategory, CategoryDefinition] = _build_category_definitions()
+    CATEGORY_DEFINITIONS: dict[IssueCategory, CategoryDefinition] = (
+        _build_category_definitions()
+    )
 
     @staticmethod
     def classify(text: str) -> IssueCategory:
@@ -267,7 +369,7 @@ class IssueClassifier:
     @staticmethod
     def assess_severity(
         category: IssueCategory,
-        indicators: Optional[Mapping[str, Any]] = None,
+        indicators: Mapping[str, Any] | None = None,
     ) -> IssueSeverity:
         """评估问题严重度。
 
@@ -282,7 +384,9 @@ class IssueClassifier:
         Returns:
             IssueSeverity 级别
         """
-        sev_range = CATEGORY_SEVERITY_RANGE.get(category, (IssueSeverity.MEDIUM, IssueSeverity.LOW))
+        sev_range = CATEGORY_SEVERITY_RANGE.get(
+            category, (IssueSeverity.MEDIUM, IssueSeverity.LOW)
+        )
         severity = sev_range[0]  # 从最高开始
 
         if indicators is None:
@@ -318,7 +422,12 @@ class IssueClassifier:
             severity = downgrade_map.get(severity, severity)
 
         # 不降到类别最低严重度以下
-        sev_order = [IssueSeverity.CRITICAL, IssueSeverity.HIGH, IssueSeverity.MEDIUM, IssueSeverity.LOW]
+        sev_order = [
+            IssueSeverity.CRITICAL,
+            IssueSeverity.HIGH,
+            IssueSeverity.MEDIUM,
+            IssueSeverity.LOW,
+        ]
         min_idx = sev_order.index(sev_range[1])
         current_idx = sev_order.index(severity)
         if current_idx > min_idx:
@@ -384,7 +493,10 @@ class IssueClassifier:
         Returns:
             QualityIssue 列表
         """
-        return [cls.analyze(issue, source=source, detected_by=detected_by) for issue in issues]
+        return [
+            cls.analyze(issue, source=source, detected_by=detected_by)
+            for issue in issues
+        ]
 
 
 __all__ = [

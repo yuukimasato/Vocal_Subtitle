@@ -19,10 +19,10 @@ import hashlib
 import json
 import shutil
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
 
 # schema 字符串固定（定案 §4 dataset-v1）
 DATASET_SCHEMA = "dataset-v1"
@@ -36,10 +36,22 @@ SCENARIOS = (
 )
 
 # --bundle-audio 从任务会话目录复制的音频实体后缀
-AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".m4a", ".ogg", ".opus", ".aac", ".wma", ".webm"}
+AUDIO_SUFFIXES = {
+    ".wav",
+    ".mp3",
+    ".flac",
+    ".m4a",
+    ".ogg",
+    ".opus",
+    ".aac",
+    ".wma",
+    ".webm",
+}
 
 # 数据集卡片头部警示（--bundle-audio 时写入 README 与 stdout）
-BUNDLE_AUDIO_WARNING = "audio/ 目录含原始音频实体，体积大且涉及版权，不建议推送到 git 远程"
+BUNDLE_AUDIO_WARNING = (
+    "audio/ 目录含原始音频实体，体积大且涉及版权，不建议推送到 git 远程"
+)
 
 
 class LicenseRequiredError(ValueError):
@@ -54,11 +66,15 @@ class ExportOutcome:
     generated_at: str
     license: str = ""
     scenarios: list[str] = field(default_factory=list)
-    accepted_total: int = 0            # 过滤后样本库中的 accepted 总数
-    exported_ids: list[str] = field(default_factory=list)   # 本次新写入的样本
-    skipped_missing_text: list[str] = field(default_factory=list)  # 缺字幕全文无法物化的旧样本
-    shards: list[str] = field(default_factory=list)         # 本次新增分片（相对路径）
-    bundled_audio: list[str] = field(default_factory=list)  # 已打包的会话目录（sha256 前 16 位）
+    accepted_total: int = 0  # 过滤后样本库中的 accepted 总数
+    exported_ids: list[str] = field(default_factory=list)  # 本次新写入的样本
+    skipped_missing_text: list[str] = field(
+        default_factory=list
+    )  # 缺字幕全文无法物化的旧样本
+    shards: list[str] = field(default_factory=list)  # 本次新增分片（相对路径）
+    bundled_audio: list[str] = field(
+        default_factory=list
+    )  # 已打包的会话目录（sha256 前 16 位）
     missing_audio: list[str] = field(default_factory=list)  # 找不到音频实体的引用
 
     @property
@@ -89,7 +105,7 @@ def collect_accepted_samples(
     return sorted(samples, key=lambda item: item.get("sample_id", ""))
 
 
-def build_entry(sample: dict) -> Optional[dict]:
+def build_entry(sample: dict) -> dict | None:
     """D2 样本 → dataset-v1 条目（字段以定案 §4 条目示例为准）。
 
     旧版样本只落了字幕哈希没存全文，无法物化文本对 → 返回 None（导出时跳过并记录）。
@@ -140,7 +156,9 @@ def _load_manifest(out_dir: Path) -> dict:
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except ValueError as exc:
-        raise ValueError(f"输出目录已有 manifest.json 无法解析（{exc}），请人工检查后处理") from exc
+        raise ValueError(
+            f"输出目录已有 manifest.json 无法解析（{exc}），请人工检查后处理"
+        ) from exc
     if not isinstance(manifest, dict):
         raise ValueError("输出目录已有 manifest.json 格式异常（顶层不是对象）")
     manifest.setdefault("schema", DATASET_SCHEMA)
@@ -167,7 +185,9 @@ def _default_session_root(manager) -> Path:
     return Path(manager.storage_dir).parent / "uploads"
 
 
-def _bundle_audio(samples: list[dict], out_dir: Path, session_root: Path) -> tuple[list[str], list[str]]:
+def _bundle_audio(
+    samples: list[dict], out_dir: Path, session_root: Path
+) -> tuple[list[str], list[str]]:
     """把音频引用对应的会话音频实体复制进 out_dir/audio/{sha256[:16]}/。
 
     找不到会话目录或音频文件的引用照写，只记录缺失并告警（不阻塞导出）。
@@ -183,10 +203,15 @@ def _bundle_audio(samples: list[dict], out_dir: Path, session_root: Path) -> tup
         seen.add(sha)
         prefix = sha[:16]
         source_dir = session_root / prefix
-        audio_files = sorted(
-            path for path in source_dir.glob("*")
-            if path.is_file() and path.suffix.lower() in AUDIO_SUFFIXES
-        ) if source_dir.is_dir() else []
+        audio_files = (
+            sorted(
+                path
+                for path in source_dir.glob("*")
+                if path.is_file() and path.suffix.lower() in AUDIO_SUFFIXES
+            )
+            if source_dir.is_dir()
+            else []
+        )
         if not audio_files:
             missing.append(prefix)
             continue
@@ -263,7 +288,9 @@ def render_readme(
         license_block += f"（历史导出许可：{'、'.join(licenses[1:])}）"
     audio_line = "- 音频：条目仅含音频引用（task_id + sha256 + duration），不含音频字节"
     if bundle_audio:
-        audio_line += f"；本次导出另将音频实体复制到了 audio/ 目录（⚠️ {BUNDLE_AUDIO_WARNING}）"
+        audio_line += (
+            f"；本次导出另将音频实体复制到了 audio/ 目录（⚠️ {BUNDLE_AUDIO_WARNING}）"
+        )
     lines = [
         f"# {dataset_name} 数据集卡片",
         "",
@@ -318,8 +345,8 @@ def export_dataset(
     bundle_audio: bool = False,
     shard_size: int = 500,
     dataset_name: str = "subtitle-feedback",
-    session_root: Optional[Path] = None,
-    now: Optional[str] = None,
+    session_root: Path | None = None,
+    now: str | None = None,
 ) -> ExportOutcome:
     """把 accepted 样本追加导出为 dataset-v1 数据集目录。
 
@@ -339,7 +366,9 @@ def export_dataset(
         ValueError: 首次导出没有可导出样本，或已有 manifest 损坏
     """
     if not str(license or "").strip():
-        raise LicenseRequiredError("数据集许可未指定：dataset-v1 导出强制显式选择许可（--license 或交互确认）")
+        raise LicenseRequiredError(
+            "数据集许可未指定：dataset-v1 导出强制显式选择许可（--license 或交互确认）"
+        )
     license_name = str(license).strip()
     out_dir = Path(out_dir)
     generated_at = now or _utc_now_iso()
@@ -389,20 +418,22 @@ def export_dataset(
         data_dir.mkdir(parents=True, exist_ok=True)
         index = _next_shard_index(out_dir)
         for start in range(0, len(entries), max(1, shard_size)):
-            chunk = entries[start:start + max(1, shard_size)]
+            chunk = entries[start : start + max(1, shard_size)]
             shard_rel = f"data/shard-{index:04d}.jsonl"
             payload = "".join(
                 json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
                 for entry in chunk
             )
             (out_dir / shard_rel).write_text(payload, encoding="utf-8")
-            manifest["shards"].append({
-                "file": shard_rel,
-                "sample_count": len(chunk),
-                "sha256": _sha256_text(payload),
-                "sample_ids": [entry["sample_id"] for entry in chunk],
-                "created_at": generated_at,
-            })
+            manifest["shards"].append(
+                {
+                    "file": shard_rel,
+                    "sample_count": len(chunk),
+                    "sha256": _sha256_text(payload),
+                    "sample_ids": [entry["sample_id"] for entry in chunk],
+                    "created_at": generated_at,
+                }
+            )
             shards_written.append(shard_rel)
             index += 1
 
@@ -412,23 +443,29 @@ def export_dataset(
         root = Path(session_root) if session_root else _default_session_root(manager)
         bundled, missing_audio = _bundle_audio(selected, out_dir, root)
 
-    manifest.update({
-        "schema": DATASET_SCHEMA,
-        "generated_at": manifest.get("generated_at") or generated_at,
-        "updated_at": generated_at,
-        "license": license_name,
-        "total_samples": sum(shard.get("sample_count", 0) for shard in manifest["shards"]),
-        "scenarios_filter": wanted,
-    })
-    manifest["exports"].append({
-        "generated_at": generated_at,
-        "license": license_name,
-        "scenarios": wanted,
-        "bundle_audio": bundle_audio,
-        "new_samples": len(entries),
-        "skipped_missing_text": skipped_ids,
-        "shards": shards_written,
-    })
+    manifest.update(
+        {
+            "schema": DATASET_SCHEMA,
+            "generated_at": manifest.get("generated_at") or generated_at,
+            "updated_at": generated_at,
+            "license": license_name,
+            "total_samples": sum(
+                shard.get("sample_count", 0) for shard in manifest["shards"]
+            ),
+            "scenarios_filter": wanted,
+        }
+    )
+    manifest["exports"].append(
+        {
+            "generated_at": generated_at,
+            "license": license_name,
+            "scenarios": wanted,
+            "bundle_audio": bundle_audio,
+            "new_samples": len(entries),
+            "skipped_missing_text": skipped_ids,
+            "shards": shards_written,
+        }
+    )
 
     stats = _aggregate_stats(out_dir, manifest)
     readme = render_readme(
@@ -443,7 +480,8 @@ def export_dataset(
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "README.md").write_text(readme, encoding="utf-8")
     (out_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8",
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
     )
 
     return ExportOutcome(
@@ -519,10 +557,12 @@ def summarize_export(
     return {
         "schema": DATASET_SCHEMA,
         "scenarios_filter": wanted,
-        "accepted_total": len(selected),       # 过滤后样本库中的 accepted 总数
-        "already_exported": already_count,     # 其中已在此输出目录导出过的
-        "exportable_count": len(exportable_ids),  # 本次将新增导出的条目数 = 导出 exported_count
-        "skipped_missing_text": skipped_ids,   # 缺字幕全文无法物化的旧样本
+        "accepted_total": len(selected),  # 过滤后样本库中的 accepted 总数
+        "already_exported": already_count,  # 其中已在此输出目录导出过的
+        "exportable_count": len(
+            exportable_ids
+        ),  # 本次将新增导出的条目数 = 导出 exported_count
+        "skipped_missing_text": skipped_ids,  # 缺字幕全文无法物化的旧样本
         "by_scenario": dict(by_scenario),
         "by_language": dict(by_language),
         "total_duration_seconds": round(total_duration, 2),

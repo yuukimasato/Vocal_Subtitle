@@ -2,16 +2,15 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from vocal_subtitle.asr.base import ASREngine, TranscriptionSegment, WordTimestamp
-from vocal_subtitle.asr.evidence_review import EvidenceReviewRuntimePorts
 from vocal_subtitle.application.offline_production import (
     OfflineProductionCoordinator,
     OfflineProductionRequest,
 )
+from vocal_subtitle.asr.base import ASREngine, TranscriptionSegment, WordTimestamp
+from vocal_subtitle.asr.evidence_review import EvidenceReviewRuntimePorts
 from vocal_subtitle.config import PipelineConfig
 from vocal_subtitle.mapping.subtitle_builder import SubtitleBuilder
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
-from vocal_subtitle.pipeline import Pipeline, PipelineStats
 from vocal_subtitle.physical.allocator import (
     WordAllocation,
     allocate_words,
@@ -29,6 +28,7 @@ from vocal_subtitle.physical.subtitle_bins import (
     build_physical_subtitle_bins,
 )
 from vocal_subtitle.physical.timeline import PhysicalTimeline
+from vocal_subtitle.pipeline import Pipeline, PipelineStats
 from vocal_subtitle.webui import api
 
 
@@ -258,7 +258,9 @@ def test_global_path_defers_uncovered_tail_to_evidence_review(monkeypatch):
     assert transcript.status == "degraded"
 
 
-def test_coordinator_recovers_global_coverage_gap_through_decision_projection(monkeypatch):
+def test_coordinator_recovers_global_coverage_gap_through_decision_projection(
+    monkeypatch,
+):
     engine, events, _, _ = _run_recovery_case(monkeypatch, True)
     timeline = PhysicalTimeline.from_duration(2.0)
     timeline.add_evidence(0.0, 1.0, "ffmpeg_skeleton", physical_clip_id="clip-000001")
@@ -285,8 +287,7 @@ def test_coordinator_recovers_global_coverage_gap_through_decision_projection(mo
     assert result.diagnostics["recovery"]["candidate_count"] == 1
     assert result.diagnostics["physical_projection"]["coverage"]["complete"] is True
     assert any(
-        "local_recovery" in decision.candidate_ids[0]
-        for decision in result.decisions
+        "local_recovery" in decision.candidate_ids[0] for decision in result.decisions
     )
 
 
@@ -356,9 +357,7 @@ def test_webui_payload_round_trip_preserves_physical_metadata():
         "physical_bin_start": 0.9,
         "physical_bin_end": 2.1,
         "time_source": "physical_bin",
-        "physical_spans": [
-            {"physical_clip_id": "clip-a", "start": 0.9, "end": 2.1}
-        ],
+        "physical_spans": [{"physical_clip_id": "clip-a", "start": 0.9, "end": 2.1}],
         "source_word_ids": ["word-2"],
     }
 

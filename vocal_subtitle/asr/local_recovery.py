@@ -14,8 +14,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -47,8 +48,8 @@ class RecoveryCandidate:
     start: float
     end: float
     confidence: float = 0.0
-    language: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    language: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.word_id, str) or not self.word_id.strip():
@@ -58,12 +59,14 @@ class RecoveryCandidate:
         if not isinstance(self.start, (int, float)) or self.start < 0:
             raise ValueError("start must be non-negative")
         if not isinstance(self.end, (int, float)) or self.end <= self.start:
-            raise ValueError(f"end must be greater than start: {self.start=}, {self.end=}")
+            raise ValueError(
+                f"end must be greater than start: {self.start=}, {self.end=}"
+            )
         self.start = float(self.start)
         self.end = float(self.end)
         self.confidence = max(0.0, min(1.0, float(self.confidence)))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "word_id": self.word_id,
             "text": self.text,
@@ -104,18 +107,20 @@ class LocalRecoveryRequest:
     start: float
     end: float
     reasons: Sequence[str] = field(default_factory=lambda: ["uncovered"])
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.start < 0 or self.end <= self.start:
-            raise ValueError(f"recovery request must have 0 <= start < end: {self.start=}, {self.end=}")
+            raise ValueError(
+                f"recovery request must have 0 <= start < end: {self.start=}, {self.end=}"
+            )
         self.start = float(self.start)
         self.end = float(self.end)
         if not self.reasons:
             raise ValueError("at least one reason is required")
-        self.reasons = tuple(dict.fromkeys(
-            str(reason).strip().lower() for reason in self.reasons
-        ))
+        self.reasons = tuple(
+            dict.fromkeys(str(reason).strip().lower() for reason in self.reasons)
+        )
 
     @property
     def duration(self) -> float:
@@ -135,10 +140,10 @@ class LocalRecoveryResult:
     """
 
     request: LocalRecoveryRequest
-    candidates: List[RecoveryCandidate] = field(default_factory=list)
+    candidates: list[RecoveryCandidate] = field(default_factory=list)
     attempt_count: int = 0
     outcome: str = "skipped"
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.outcome not in _VALID_OUTCOMES:
@@ -199,10 +204,10 @@ class LocalRecoveryEngine:
         self,
         asr_engine: ASREngine,
         *,
-        config: Optional[LocalRecoveryConfig] = None,
-        fallback_asr: Optional[ASREngine] = None,
+        config: LocalRecoveryConfig | None = None,
+        fallback_asr: ASREngine | None = None,
         word_id_prefix: str = "rec",
-        language: Optional[str] = None,
+        language: str | None = None,
     ):
         self._asr = asr_engine
         self._fallback = fallback_asr
@@ -220,7 +225,7 @@ class LocalRecoveryEngine:
         audio: np.ndarray,
         *,
         sample_rate: int = 16000,
-    ) -> List[LocalRecoveryResult]:
+    ) -> list[LocalRecoveryResult]:
         """处理一批再识别请求。
 
         每个请求单独尝试，失败不会阻塞后续请求。
@@ -228,7 +233,7 @@ class LocalRecoveryEngine:
         if not requests:
             return []
 
-        results: List[LocalRecoveryResult] = []
+        results: list[LocalRecoveryResult] = []
         for request in requests:
             result = self._process_one(request, audio, sample_rate=sample_rate)
             results.append(result)
@@ -263,7 +268,7 @@ class LocalRecoveryEngine:
             )
 
         segment_audio = audio[start_sample:end_sample]
-        last_error: Optional[str] = None
+        last_error: str | None = None
 
         for attempt in range(1, cfg.max_attempts_per_range + 1):
             try:
@@ -271,7 +276,9 @@ class LocalRecoveryEngine:
                     segment_audio, sample_rate, context_start, request
                 )
             except Exception as exc:
-                logger.warning("Recovery ASR call failed (attempt %d): %s", attempt, exc)
+                logger.warning(
+                    "Recovery ASR call failed (attempt %d): %s", attempt, exc
+                )
                 last_error = str(exc)
                 continue
 
@@ -281,17 +288,20 @@ class LocalRecoveryEngine:
                     candidates=candidates,
                     attempt_count=attempt,
                     outcome="recovered",
-                diagnostics={
-                    "context_start": context_start,
-                    "context_end": context_end,
-                    "request_tolerance": cfg.request_tolerance,
-                },
+                    diagnostics={
+                        "context_start": context_start,
+                        "context_end": context_end,
+                        "request_tolerance": cfg.request_tolerance,
+                    },
                 )
 
             if attempt < cfg.max_attempts_per_range:
                 logger.debug(
                     "Recovery attempt %d/%d returned no candidates for [%.2f, %.2f]",
-                    attempt, cfg.max_attempts_per_range, request.start, request.end,
+                    attempt,
+                    cfg.max_attempts_per_range,
+                    request.start,
+                    request.end,
                 )
 
         if last_error is not None:
@@ -326,10 +336,10 @@ class LocalRecoveryEngine:
         sample_rate: int,
         time_offset: float,
         request: LocalRecoveryRequest,
-    ) -> List[RecoveryCandidate]:
+    ) -> list[RecoveryCandidate]:
         """尝试一次转录，返回通过过滤的候选词。"""
 
-        def _transcribe(engine: ASREngine) -> List[TranscriptionSegment]:
+        def _transcribe(engine: ASREngine) -> list[TranscriptionSegment]:
             result = engine.transcribe(
                 segment_audio, sample_rate, language=self._language
             )
@@ -361,13 +371,13 @@ class LocalRecoveryEngine:
 
     def _segments_to_candidates(
         self,
-        segments: List[TranscriptionSegment],
+        segments: list[TranscriptionSegment],
         time_offset: float,
         request: LocalRecoveryRequest,
-    ) -> List[RecoveryCandidate]:
+    ) -> list[RecoveryCandidate]:
         """将 ASR 转录段转为候选词，过滤不可接受的候选。"""
         cfg = self._config
-        candidates: List[RecoveryCandidate] = []
+        candidates: list[RecoveryCandidate] = []
         candidate_index = 0
 
         for seg in segments:
@@ -446,9 +456,8 @@ class LocalRecoveryEngine:
         candidate bounded to the same local region.
         """
         tolerance = max(0.01, float(tolerance))
-        return (
-            word_start < request.end + tolerance
-            and word_end > max(0.0, request.start - tolerance)
+        return word_start < request.end + tolerance and word_end > max(
+            0.0, request.start - tolerance
         )
 
 
@@ -459,8 +468,8 @@ def make_recovery_requests_from_coverage(
     recovery_ranges: Sequence[Any],
     reason: str = "uncovered",
     *,
-    turns: Optional[Sequence[Any]] = None,
-) -> List[LocalRecoveryRequest]:
+    turns: Sequence[Any] | None = None,
+) -> list[LocalRecoveryRequest]:
     """从物理覆盖率审计的 recovery_ranges 构建请求。
 
     turns 提供时(时间轴仲裁层 R3 联动):空洞区间与换人边界相交,或
@@ -479,17 +488,26 @@ def make_recovery_requests_from_coverage(
         start = float(getattr(rec_range, "start", 0.0))
         end = float(getattr(rec_range, "end", 0.0))
         if end > start:
-            metadata: Dict[str, Any] = {}
+            metadata: dict[str, Any] = {}
             flagged = bool(getattr(rec_range, "possible_speaker_hole", False))
-            if not flagged and boundaries and hole_intersects_speaker_change(
-                start, end, boundaries,
+            if (
+                not flagged
+                and boundaries
+                and hole_intersects_speaker_change(
+                    start,
+                    end,
+                    boundaries,
+                )
             ):
                 flagged = True
             if flagged:
                 metadata["possible_speaker_hole"] = True
             requests.append(
                 LocalRecoveryRequest(
-                    start=start, end=end, reasons=[reason], metadata=metadata,
+                    start=start,
+                    end=end,
+                    reasons=[reason],
+                    metadata=metadata,
                 )
             )
     return requests

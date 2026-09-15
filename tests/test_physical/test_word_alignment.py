@@ -1,25 +1,23 @@
 """Tests for constrained word-level boundary alignment."""
 
-import pytest
 import numpy as np
 
 from vocal_subtitle.physical.allocator import (
-    AllocationResult,
     PhysicalSpan,
     WordAllocation,
 )
-from vocal_subtitle.physical.ir import GlobalWord
-from vocal_subtitle.physical.subtitle_bins import PhysicalSubtitleBin
 from vocal_subtitle.physical.boundary_arbiter import BoundaryDecision
+from vocal_subtitle.physical.ir import GlobalWord
 from vocal_subtitle.physical.noise_profile import LocalNoiseProfile, NoiseInterval
-from vocal_subtitle.vad.base import SpeechSegment
+from vocal_subtitle.physical.subtitle_bins import PhysicalSubtitleBin
 from vocal_subtitle.physical.word_alignment import (
     _asr_confidence_tier,
-    _search_window_for_tier,
-    _score_start_candidate,
     _score_end_candidate,
+    _score_start_candidate,
+    _search_window_for_tier,
     align_words_to_physical,
 )
+from vocal_subtitle.vad.base import SpeechSegment
 
 
 def _make_word(
@@ -201,11 +199,13 @@ class TestAlignWords:
 
     def test_alignment_injects_all_acoustic_candidate_features(self):
         sample_rate = 1000
-        audio = np.concatenate([
-            np.zeros(350, dtype=np.float32),
-            np.full(500, 0.25, dtype=np.float32),
-            np.zeros(350, dtype=np.float32),
-        ])
+        audio = np.concatenate(
+            [
+                np.zeros(350, dtype=np.float32),
+                np.full(500, 0.25, dtype=np.float32),
+                np.zeros(350, dtype=np.float32),
+            ]
+        )
         profile = LocalNoiseProfile(
             intervals=[NoiseInterval(0.0, 1.2, 0.01, 0.001, -40.0, True, 10)]
         )
@@ -234,5 +234,9 @@ class TestAlignWords:
             details = decision.candidate_diagnostics
             assert details
             keys = set(details[0]["features"])
-            assert {"rms_gradient", "vad_probability", "ffmpeg_boundary_distance"} <= keys
+            assert {
+                "rms_gradient",
+                "vad_probability",
+                "ffmpeg_boundary_distance",
+            } <= keys
             assert {"noise_db", "noise_stability"} <= keys

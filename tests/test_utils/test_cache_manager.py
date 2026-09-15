@@ -1,6 +1,5 @@
 """测试 CacheManager 缓存管理模块"""
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -112,7 +111,9 @@ class TestCacheManager:
         assert cache.get("separation", key) == "sep_data"
         assert cache.get("transcription", key) == "asr_data"
 
-    @pytest.mark.parametrize("stage", ["separation", "transcription", "vad", "subtitle"])
+    @pytest.mark.parametrize(
+        "stage", ["separation", "transcription", "vad", "subtitle"]
+    )
     def test_all_stages(self, cache: CacheManager, stage: str):
         """所有阶段都能正常存取"""
         key = f"test_{stage}"

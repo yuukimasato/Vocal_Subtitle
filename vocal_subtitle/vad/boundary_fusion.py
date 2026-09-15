@@ -12,8 +12,7 @@
 """
 
 import logging
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -26,12 +25,12 @@ logger = logging.getLogger(__name__)
 class FusionConfig:
     """融合配置"""
 
-    grid_resolution: float = 0.01       # 时间网格精度（秒），10ms
-    min_consensus: int = 2              # 最少共识方法数（共3种方法）
-    high_conf_padding: float = 0.03     # 高置信边界的 padding
-    low_conf_padding: float = 0.12      # 低置信边界的 padding
-    min_speech_duration: float = 0.25   # 最小语音段（秒）
-    sample_rate: int = 16000            # 统一采样率
+    grid_resolution: float = 0.01  # 时间网格精度（秒），10ms
+    min_consensus: int = 2  # 最少共识方法数（共3种方法）
+    high_conf_padding: float = 0.03  # 高置信边界的 padding
+    low_conf_padding: float = 0.12  # 低置信边界的 padding
+    min_speech_duration: float = 0.25  # 最小语音段（秒）
+    sample_rate: int = 16000  # 统一采样率
 
 
 class BoundaryFusion:
@@ -44,17 +43,17 @@ class BoundaryFusion:
         )
     """
 
-    def __init__(self, config: Optional[FusionConfig] = None):
+    def __init__(self, config: FusionConfig | None = None):
         self.config = config or FusionConfig()
         self._sample_rate = self.config.sample_rate
 
     def fuse(
         self,
-        silero_segments: List[SpeechSegment],
-        ffmpeg_segments: List[SpeechSegment],
+        silero_segments: list[SpeechSegment],
+        ffmpeg_segments: list[SpeechSegment],
         audio: np.ndarray,
         sample_rate: int,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """融合三种检测结果
 
         Args:
@@ -71,7 +70,8 @@ class BoundaryFusion:
 
         # Step 1: 生成 RMS 能量检测结果（第三种方法）
         rms_segments = self._detect_by_rms_energy(
-            audio, sample_rate,
+            audio,
+            sample_rate,
             min_speech_duration=cfg.min_speech_duration,
         )
 
@@ -81,13 +81,22 @@ class BoundaryFusion:
         votes = np.zeros(num_bins, dtype=np.int8)
 
         self._vote_by_sample_index(
-            votes, silero_segments, sample_rate, grid_samples,
+            votes,
+            silero_segments,
+            sample_rate,
+            grid_samples,
         )
         self._vote_by_sample_index(
-            votes, ffmpeg_segments, sample_rate, grid_samples,
+            votes,
+            ffmpeg_segments,
+            sample_rate,
+            grid_samples,
         )
         self._vote_by_sample_index(
-            votes, rms_segments, sample_rate, grid_samples,
+            votes,
+            rms_segments,
+            sample_rate,
+            grid_samples,
         )
 
         # Step 3: 多数决 → 高/低置信度语音网格
@@ -96,21 +105,26 @@ class BoundaryFusion:
 
         # Step 4: 连续语音网格 → 语音段
         fused = self._mask_to_segments(
-            speech_mask, high_conf_mask,
-            cfg.grid_resolution, total_duration,
+            speech_mask,
+            high_conf_mask,
+            cfg.grid_resolution,
+            total_duration,
             cfg.min_speech_duration,
         )
 
         # Step 5: 根据置信度应用不同的 padding
         fused = self._apply_adaptive_padding(
-            fused, high_conf_padding=cfg.high_conf_padding,
+            fused,
+            high_conf_padding=cfg.high_conf_padding,
             low_conf_padding=cfg.low_conf_padding,
         )
 
         logger.info(
             "Fusion: Silero=%d + FFmpeg=%d + RMS=%d → %d segments",
-            len(silero_segments), len(ffmpeg_segments),
-            len(rms_segments), len(fused),
+            len(silero_segments),
+            len(ffmpeg_segments),
+            len(rms_segments),
+            len(fused),
         )
         return fused
 
@@ -129,7 +143,7 @@ class BoundaryFusion:
     def _vote_by_sample_index(
         self,
         votes: np.ndarray,
-        segments: List[SpeechSegment],
+        segments: list[SpeechSegment],
         sample_rate: int,
         grid_samples: int,
     ) -> None:
@@ -151,7 +165,7 @@ class BoundaryFusion:
         min_speech_duration: float = 0.25,
         frame_ms: int = 10,
         hop_ms: int = 5,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """基于 RMS 能量的纯能量语音检测
 
         比 ffmpeg silencedetect 更细粒度（10ms 帧 + 5ms hop）。
@@ -166,7 +180,9 @@ class BoundaryFusion:
 
         # 估计静音 RMS 阈值
         silence_rms = AudioUtils.estimate_silence_rms(
-            audio, sample_rate, percentile=20,
+            audio,
+            sample_rate,
+            percentile=20,
         )
         speech_threshold = max(silence_rms * speech_threshold_ratio, 1e-6)
 
@@ -174,8 +190,8 @@ class BoundaryFusion:
         frame_times = []
         is_speech = []
         for i in range(0, total_samples - frame_size + 1, hop_size):
-            frame = audio[i: i + frame_size]
-            rms = float(np.sqrt(np.mean(frame ** 2)))
+            frame = audio[i : i + frame_size]
+            rms = float(np.sqrt(np.mean(frame**2)))
             frame_times.append(i / sample_rate)
             is_speech.append(rms > speech_threshold)
 
@@ -194,17 +210,25 @@ class BoundaryFusion:
                 in_speech = True
             elif not speech and in_speech:
                 if t - seg_start >= min_speech_duration:
-                    segments.append(SpeechSegment(
-                        start=seg_start, end=t, confidence=0.7,
-                    ))
+                    segments.append(
+                        SpeechSegment(
+                            start=seg_start,
+                            end=t,
+                            confidence=0.7,
+                        )
+                    )
                 in_speech = False
 
         if in_speech:
             final_t = total_samples / sample_rate
             if final_t - seg_start >= min_speech_duration:
-                segments.append(SpeechSegment(
-                    start=seg_start, end=final_t, confidence=0.7,
-                ))
+                segments.append(
+                    SpeechSegment(
+                        start=seg_start,
+                        end=final_t,
+                        confidence=0.7,
+                    )
+                )
 
         return segments
 
@@ -215,7 +239,7 @@ class BoundaryFusion:
         resolution: float,
         total_duration: float,
         min_duration: float,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """连续语音网格 → SpeechSegment 列表"""
         segments = []
         in_speech = False
@@ -235,28 +259,34 @@ class BoundaryFusion:
                 duration = t - seg_start
                 if duration >= min_duration:
                     confidence = 0.95 if seg_high_conf else 0.65
-                    segments.append(SpeechSegment(
-                        start=seg_start, end=t,
-                        confidence=confidence,
-                    ))
+                    segments.append(
+                        SpeechSegment(
+                            start=seg_start,
+                            end=t,
+                            confidence=confidence,
+                        )
+                    )
                 in_speech = False
 
         if in_speech:
             duration = total_duration - seg_start
             if duration >= min_duration:
-                segments.append(SpeechSegment(
-                    start=seg_start, end=total_duration,
-                    confidence=0.95 if seg_high_conf else 0.65,
-                ))
+                segments.append(
+                    SpeechSegment(
+                        start=seg_start,
+                        end=total_duration,
+                        confidence=0.95 if seg_high_conf else 0.65,
+                    )
+                )
 
         return segments
 
     def _apply_adaptive_padding(
         self,
-        segments: List[SpeechSegment],
+        segments: list[SpeechSegment],
         high_conf_padding: float,
         low_conf_padding: float,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """根据置信度应用不同 padding"""
         for seg in segments:
             is_high_conf = seg.confidence >= 0.9

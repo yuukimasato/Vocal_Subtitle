@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 
 from .timeline import PhysicalTimeline, SpeechEvidenceSpan
-
 
 _SOURCE_PRIORITY = (
     "ffmpeg_skeleton",
@@ -118,7 +118,9 @@ def build_physical_subtitle_bins(
     return _renumber_bins(bins)
 
 
-def assign_word_to_bin(word: Any, bins: Sequence[PhysicalSubtitleBin]) -> PhysicalSubtitleBin | None:
+def assign_word_to_bin(
+    word: Any, bins: Sequence[PhysicalSubtitleBin]
+) -> PhysicalSubtitleBin | None:
     """Return the bin with the largest positive overlap for a global word."""
     raw_start = float(getattr(word, "raw_start"))
     raw_end = float(getattr(word, "raw_end"))

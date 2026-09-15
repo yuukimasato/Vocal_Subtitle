@@ -8,9 +8,10 @@ missing runtimes/models into a typed, diagnosable degradation.
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Optional, Sequence
+from typing import Any
 
 from .evidence import CandidateEvidence, EvidenceWord, candidates_from_segments
 from .model_paths import (
@@ -18,8 +19,7 @@ from .model_paths import (
     internal_language_name,
     qwen_language_name,
 )
-from .review_engines import ReviewEngineUnavailable
-
+from .review_engines import ReviewEngineUnavailableError
 
 ModelLoader = Callable[[str, str], Any]
 
@@ -28,7 +28,7 @@ def _require_local_model(model_path: str, *, allow_remote: bool) -> None:
     if allow_remote:
         return
     if not model_path or not Path(model_path).expanduser().exists():
-        raise ReviewEngineUnavailable(
+        raise ReviewEngineUnavailableError(
             "model_unavailable",
             f"local review model does not exist: {model_path or '<empty>'}",
         )
@@ -59,7 +59,7 @@ def _word(
     offset: float,
     index: int,
     time_source: str = "qwen_forced_alignment",
-) -> Optional[EvidenceWord]:
+) -> EvidenceWord | None:
     if isinstance(value, EvidenceWord):
         return value
     text = str(_value(value, "word", "text", "token", default="")).strip()
@@ -106,14 +106,18 @@ def _segments(raw: Any, *, window: Any) -> list[Any]:
         SimpleNamespace(
             text=text,
             start=_value(raw, "start", "start_time", default=0.0),
-            end=_value(raw, "end", "end_time", default=float(window.end - window.start)),
+            end=_value(
+                raw, "end", "end_time", default=float(window.end - window.start)
+            ),
             words=_value(raw, "words", "timestamps", default=[]),
             language=_value(raw, "language", default=None),
         )
     ]
 
 
-def _adapt_qwen_segments(raw: Any, *, window: Any, model_name: str) -> list[CandidateEvidence]:
+def _adapt_qwen_segments(
+    raw: Any, *, window: Any, model_name: str
+) -> list[CandidateEvidence]:
     adapted = []
     for index, segment in enumerate(_segments(raw, window=window)):
         words = []
@@ -129,7 +133,9 @@ def _adapt_qwen_segments(raw: Any, *, window: Any, model_name: str) -> list[Cand
             if item is not None:
                 words.append(item)
         start = _value(segment, "start", "start_time", default=0.0)
-        end = _value(segment, "end", "end_time", default=float(window.end - window.start))
+        end = _value(
+            segment, "end", "end_time", default=float(window.end - window.start)
+        )
         try:
             start = float(start) + float(window.start)
             end = float(end) + float(window.start)
@@ -168,7 +174,7 @@ class LazyQwenASR:
         *,
         device: str = "auto",
         allow_remote: bool = False,
-        model_loader: Optional[ModelLoader] = None,
+        model_loader: ModelLoader | None = None,
     ) -> None:
         if model_path:
             self.model_path = str(Path(model_path).expanduser())
@@ -187,13 +193,25 @@ class LazyQwenASR:
         if self._model_loader is not None:
             return {"status": "ready", "engine": self.name, "model": self.model_name}
         if not self.model_path:
-            return {"status": "unavailable", "reason": "model_path_missing", "engine": self.name}
+            return {
+                "status": "unavailable",
+                "reason": "model_path_missing",
+                "engine": self.name,
+            }
         if not self.allow_remote and not Path(self.model_path).expanduser().exists():
-            return {"status": "unavailable", "reason": "model_path_missing", "engine": self.name}
+            return {
+                "status": "unavailable",
+                "reason": "model_path_missing",
+                "engine": self.name,
+            }
         try:
             importlib.import_module("qwen_asr")
         except ImportError:
-            return {"status": "unavailable", "reason": "qwen_asr_not_installed", "engine": self.name}
+            return {
+                "status": "unavailable",
+                "reason": "qwen_asr_not_installed",
+                "engine": self.name,
+            }
         return {"status": "ready", "engine": self.name, "model": self.model_name}
 
     def _load(self) -> Any:
@@ -209,11 +227,11 @@ class LazyQwenASR:
             kwargs = {} if self.device == "auto" else {"device_map": self.device}
             self._model = model_type.from_pretrained(self.model_path, **kwargs)
         except (ImportError, AttributeError) as exc:
-            raise ReviewEngineUnavailable(
+            raise ReviewEngineUnavailableError(
                 "dependency_unavailable", "install qwen-asr to enable Qwen3-ASR"
             ) from exc
         except Exception as exc:
-            raise ReviewEngineUnavailable("model_unavailable", str(exc)) from exc
+            raise ReviewEngineUnavailableError("model_unavailable", str(exc)) from exc
         return self._model
 
     def review(
@@ -222,7 +240,7 @@ class LazyQwenASR:
         sample_rate: int,
         window: Any,
         *,
-        language: Optional[str] = None,
+        language: str | None = None,
         cancellation_token: Any = None,
     ) -> Sequence[CandidateEvidence]:
         if cancellation_token is not None:
@@ -250,7 +268,7 @@ class LazyQwenForcedAligner:
         *,
         device: str = "auto",
         allow_remote: bool = False,
-        model_loader: Optional[ModelLoader] = None,
+        model_loader: ModelLoader | None = None,
     ) -> None:
         self.model_path = str(model_path or "")
         self.device = device
@@ -266,13 +284,25 @@ class LazyQwenForcedAligner:
         if self._model_loader is not None:
             return {"status": "ready", "engine": self.name, "model": self.model_name}
         if not self.model_path:
-            return {"status": "unavailable", "reason": "model_path_missing", "engine": self.name}
+            return {
+                "status": "unavailable",
+                "reason": "model_path_missing",
+                "engine": self.name,
+            }
         if not self.allow_remote and not Path(self.model_path).expanduser().exists():
-            return {"status": "unavailable", "reason": "model_path_missing", "engine": self.name}
+            return {
+                "status": "unavailable",
+                "reason": "model_path_missing",
+                "engine": self.name,
+            }
         try:
             importlib.import_module("qwen_asr")
         except ImportError:
-            return {"status": "unavailable", "reason": "qwen_asr_not_installed", "engine": self.name}
+            return {
+                "status": "unavailable",
+                "reason": "qwen_asr_not_installed",
+                "engine": self.name,
+            }
         return {"status": "ready", "engine": self.name, "model": self.model_name}
 
     def _load(self) -> Any:
@@ -288,21 +318,35 @@ class LazyQwenForcedAligner:
             kwargs = {} if self.device == "auto" else {"device_map": self.device}
             self._model = model_type.from_pretrained(self.model_path, **kwargs)
         except (ImportError, AttributeError) as exc:
-            raise ReviewEngineUnavailable(
+            raise ReviewEngineUnavailableError(
                 "dependency_unavailable", "install qwen-asr to enable ForcedAligner"
             ) from exc
         except Exception as exc:
-            raise ReviewEngineUnavailable("model_unavailable", str(exc)) from exc
+            raise ReviewEngineUnavailableError("model_unavailable", str(exc)) from exc
         return self._model
 
-    def align(self, audio: Any, sample_rate: int, text: str, window: Any, *, language: Optional[str] = None) -> Sequence[EvidenceWord]:
+    def align(
+        self,
+        audio: Any,
+        sample_rate: int,
+        text: str,
+        window: Any,
+        *,
+        language: str | None = None,
+    ) -> Sequence[EvidenceWord]:
         model = self._load()
         clipped = _relative_window_audio(audio, sample_rate, window)
         try:
-            raw = model.align(audio=(clipped, sample_rate), text=text, language=language)
+            raw = model.align(
+                audio=(clipped, sample_rate), text=text, language=language
+            )
         except TypeError:
             raw = model.align((clipped, sample_rate), text, language=language)
-        values = raw.get("words", raw) if isinstance(raw, dict) else getattr(raw, "words", raw)
+        values = (
+            raw.get("words", raw)
+            if isinstance(raw, dict)
+            else getattr(raw, "words", raw)
+        )
         if values and isinstance(values[0], (list, tuple)):
             values = values[0]
         result = []
@@ -324,7 +368,7 @@ class LazyAudioClassifierSED:
         *,
         device: str = "auto",
         allow_remote: bool = False,
-        model_loader: Optional[ModelLoader] = None,
+        model_loader: ModelLoader | None = None,
     ) -> None:
         self.model_path = str(model_path or "")
         self.device = device
@@ -340,13 +384,25 @@ class LazyAudioClassifierSED:
         if self._model_loader is not None:
             return {"status": "ready", "engine": self.name, "model": self.model_name}
         if not self.model_path:
-            return {"status": "unavailable", "reason": "model_path_missing", "engine": self.name}
+            return {
+                "status": "unavailable",
+                "reason": "model_path_missing",
+                "engine": self.name,
+            }
         if not self.allow_remote and not Path(self.model_path).expanduser().exists():
-            return {"status": "unavailable", "reason": "model_path_missing", "engine": self.name}
+            return {
+                "status": "unavailable",
+                "reason": "model_path_missing",
+                "engine": self.name,
+            }
         try:
             importlib.import_module("transformers")
         except ImportError:
-            return {"status": "unavailable", "reason": "transformers_not_installed", "engine": self.name}
+            return {
+                "status": "unavailable",
+                "reason": "transformers_not_installed",
+                "engine": self.name,
+            }
         return {"status": "ready", "engine": self.name, "model": self.model_name}
 
     def _load(self) -> Any:
@@ -359,7 +415,7 @@ class LazyAudioClassifierSED:
         try:
             from transformers import pipeline
         except ImportError as exc:
-            raise ReviewEngineUnavailable(
+            raise ReviewEngineUnavailableError(
                 "dependency_unavailable", "install transformers to enable SED"
             ) from exc
         try:
@@ -376,7 +432,7 @@ class LazyAudioClassifierSED:
                 model_kwargs={"local_files_only": not self.allow_remote},
             )
         except Exception as exc:
-            raise ReviewEngineUnavailable("model_unavailable", str(exc)) from exc
+            raise ReviewEngineUnavailableError("model_unavailable", str(exc)) from exc
         return self._pipeline
 
     def detect(self, audio: Any, sample_rate: int, window: Any) -> dict[str, Any]:

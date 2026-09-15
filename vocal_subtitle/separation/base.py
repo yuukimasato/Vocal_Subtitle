@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -55,7 +54,7 @@ class SeparationEngine(ABC):
         ...
 
     @abstractmethod
-    def load_model(self, model_name: Optional[str] = None) -> None:
+    def load_model(self, model_name: str | None = None) -> None:
         """加载模型（延迟加载）
 
         Args:

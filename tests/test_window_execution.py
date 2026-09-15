@@ -20,7 +20,9 @@ def test_window_executor_respects_worker_limit_and_collects_candidates():
     class Engine:
         name = "fake-secondary"
 
-        def review(self, audio, sample_rate, window, *, language=None, cancellation_token=None):
+        def review(
+            self, audio, sample_rate, window, *, language=None, cancellation_token=None
+        ):
             nonlocal active, peak
             with lock:
                 active += 1
@@ -28,14 +30,16 @@ def test_window_executor_respects_worker_limit_and_collects_candidates():
             time.sleep(0.02)
             with lock:
                 active -= 1
-            return [CandidateEvidence(
-                id=f"candidate-{window.id}",
-                source="qwen",
-                text="hello",
-                start=window.start,
-                end=window.end,
-                window_id=window.id,
-            )]
+            return [
+                CandidateEvidence(
+                    id=f"candidate-{window.id}",
+                    source="qwen",
+                    text="hello",
+                    start=window.start,
+                    end=window.end,
+                    window_id=window.id,
+                )
+            ]
 
     candidates, diagnostics = WindowExecutionCoordinator(max_workers=2).execute(
         None,
@@ -55,7 +59,9 @@ def test_window_executor_timeout_is_window_scoped_and_cancellable():
     class SlowEngine:
         name = "slow-secondary"
 
-        def review(self, audio, sample_rate, window, *, language=None, cancellation_token=None):
+        def review(
+            self, audio, sample_rate, window, *, language=None, cancellation_token=None
+        ):
             started.set()
             while True:
                 if cancellation_token is not None:

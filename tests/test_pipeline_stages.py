@@ -60,7 +60,9 @@ def test_audio_stage_forwards_progress_callback_and_returns_context():
             seen["context"] = context
             return context
 
-    callback = lambda *args: None
+    def callback(*args):
+        return None
+
     context = _context()
 
     result = AudioStage(Pipeline()).execute(context, progress_callback=callback)
@@ -91,7 +93,9 @@ def test_asr_stage_executes_and_returns_context():
 
 def test_mapping_stage_preserves_event_order_through_postprocess():
     class Pipeline:
-        def _post_process_events(self, events, vocals_path, audio, sample_rate, stats, **kwargs):
+        def _post_process_events(
+            self, events, vocals_path, audio, sample_rate, stats, **kwargs
+        ):
             self.kwargs = kwargs
             return list(reversed(events))
 
@@ -101,8 +105,12 @@ def test_mapping_stage_preserves_event_order_through_postprocess():
     events = ["a", "b", "c"]
 
     result = MappingStage(pipeline).execute(
-        context, events, audio="audio", sample_rate=16000,
-        vocals_path="vocals", ffmpeg_unified_result={"skeleton": []},
+        context,
+        events,
+        audio="audio",
+        sample_rate=16000,
+        vocals_path="vocals",
+        ffmpeg_unified_result={"skeleton": []},
     )
 
     assert result == list(reversed(events))

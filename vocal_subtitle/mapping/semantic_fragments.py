@@ -10,8 +10,9 @@ grouping combine fragments within those safe boundaries.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -33,11 +34,11 @@ class AdaptivePauseThresholds:
     using robust quantiles and clamped to design ranges.
     """
 
-    speaker_id: Optional[int] = None
-    micro_pause_max: float = 0.150    # initial ≈120-250ms, calibrated
+    speaker_id: int | None = None
+    micro_pause_max: float = 0.150  # initial ≈120-250ms, calibrated
     sentence_pause_max: float = 0.350  # initial ≈250-500ms, calibrated
-    long_pause_min: float = 0.600      # initial ≈500ms+, calibrated
-    speech_rate_wps: float = 2.5       # words per second estimate
+    long_pause_min: float = 0.600  # initial ≈500ms+, calibrated
+    speech_rate_wps: float = 2.5  # words per second estimate
     sample_count: int = 0
     calibration_quality: str = "default"  # "calibrated" | "default" | "fallback"
 
@@ -52,10 +53,10 @@ class PhysicalFragment:
     """
 
     id: str
-    word_ids: List[str] = field(default_factory=list)
+    word_ids: list[str] = field(default_factory=list)
     physical_start: float = 0.0
     physical_end: float = 0.0
-    candidate_speaker: Optional[int] = None
+    candidate_speaker: int | None = None
     speaker_confidence: float = 0.0
     speaker_status: str = "unknown"
     pause_class: str = ""  # "micro" | "sentence" | "long" | "hard_split" | "overlap"
@@ -63,10 +64,10 @@ class PhysicalFragment:
     hard_split_before: bool = False
     hard_split_reason: str = ""
     genuine_overlap: bool = False
-    language: Optional[str] = None
-    evidence_ids: List[str] = field(default_factory=list)
+    language: str | None = None
+    evidence_ids: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "word_ids": list(self.word_ids),
@@ -92,7 +93,7 @@ class PhysicalFragment:
 
 def _estimate_gap_distribution(
     gaps: np.ndarray,
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     """Estimate micro/sentence/long thresholds from gap data.
 
     Uses robust quantiles: p25 for micro, p60 for sentence, p85 for long.
@@ -128,7 +129,7 @@ def _estimate_gap_distribution(
 def calibrate_speaker_thresholds(
     allocations: Sequence[WordAllocation],
     *,
-    speaker_id: Optional[int] = None,
+    speaker_id: int | None = None,
     min_samples: int = 3,
 ) -> AdaptivePauseThresholds:
     """Calibrate pause thresholds per speaker from aligned word gaps.
@@ -144,11 +145,15 @@ def calibrate_speaker_thresholds(
         relevant = list(allocations)
 
     if not relevant:
-        return AdaptivePauseThresholds(speaker_id=speaker_id, calibration_quality="fallback")
+        return AdaptivePauseThresholds(
+            speaker_id=speaker_id, calibration_quality="fallback"
+        )
 
     # Extract gaps from aligned times
-    gaps: List[float] = []
-    words = sorted(relevant, key=lambda a: getattr(a, "aligned_start", a.word.raw_start))
+    gaps: list[float] = []
+    words = sorted(
+        relevant, key=lambda a: getattr(a, "aligned_start", a.word.raw_start)
+    )
 
     for i in range(1, len(words)):
         prev_end = getattr(words[i - 1], "aligned_end", words[i - 1].word.raw_end)
@@ -158,7 +163,9 @@ def calibrate_speaker_thresholds(
             gaps.append(gap)
 
     if len(gaps) < min_samples:
-        return AdaptivePauseThresholds(speaker_id=speaker_id, calibration_quality="fallback")
+        return AdaptivePauseThresholds(
+            speaker_id=speaker_id, calibration_quality="fallback"
+        )
 
     gaps_arr = np.array(gaps, dtype=np.float64)
     micro, sentence, long_ = _estimate_gap_distribution(gaps_arr)
@@ -187,13 +194,13 @@ def calibrate_speaker_thresholds(
 def build_physical_fragments(
     allocations: Sequence[WordAllocation],
     *,
-    thresholds: Optional[AdaptivePauseThresholds] = None,
+    thresholds: AdaptivePauseThresholds | None = None,
     fragment_id_prefix: str = "frag",
     min_fragment_words: int = 1,
     max_fragment_words: int = 15,
     max_fragment_duration: float = 8.0,
     hard_split_speaker_change: bool = True,
-) -> List[PhysicalFragment]:
+) -> list[PhysicalFragment]:
     """Build PhysicalFragments from aligned word allocations.
 
     Hard boundaries are established first:
@@ -223,17 +230,19 @@ def build_physical_fragments(
     if thresholds is None:
         thresholds = calibrate_speaker_thresholds(allocations)
 
-    words = sorted(allocations, key=lambda a: getattr(a, "aligned_start", a.word.raw_start))
+    words = sorted(
+        allocations, key=lambda a: getattr(a, "aligned_start", a.word.raw_start)
+    )
 
     # Group words by their aligned positions
-    fragments: List[PhysicalFragment] = []
-    current_word_ids: List[str] = []
-    current_start: Optional[float] = None
-    current_end: Optional[float] = None
-    current_speaker: Optional[int] = None
+    fragments: list[PhysicalFragment] = []
+    current_word_ids: list[str] = []
+    current_start: float | None = None
+    current_end: float | None = None
+    current_speaker: int | None = None
     current_speaker_status: str = "unknown"
-    current_language: Optional[str] = None
-    current_evidence_ids: List[str] = []
+    current_language: str | None = None
+    current_evidence_ids: list[str] = []
     fragment_index = 0
 
     def _emit_fragment(hard_split: bool, reason: str) -> None:
@@ -241,27 +250,29 @@ def build_physical_fragments(
         if not current_word_ids:
             return
         fragment_index += 1
-        fragments.append(PhysicalFragment(
-            id=f"{fragment_id_prefix}-{fragment_index:04d}",
-            word_ids=list(current_word_ids),
-            physical_start=current_start or 0.0,
-            physical_end=current_end or 0.0,
-            candidate_speaker=current_speaker,
-            speaker_status=current_speaker_status,
-            pause_class="hard_split" if hard_split else "",
-            hard_split_before=False,
-            hard_split_reason=reason if hard_split else "",
-            genuine_overlap=False,
-            language=current_language,
-            evidence_ids=list(current_evidence_ids),
-        ))
+        fragments.append(
+            PhysicalFragment(
+                id=f"{fragment_id_prefix}-{fragment_index:04d}",
+                word_ids=list(current_word_ids),
+                physical_start=current_start or 0.0,
+                physical_end=current_end or 0.0,
+                candidate_speaker=current_speaker,
+                speaker_status=current_speaker_status,
+                pause_class="hard_split" if hard_split else "",
+                hard_split_before=False,
+                hard_split_reason=reason if hard_split else "",
+                genuine_overlap=False,
+                language=current_language,
+                evidence_ids=list(current_evidence_ids),
+            )
+        )
         current_word_ids.clear()
         current_start = None
         current_end = None
 
-    previous_clip: Optional[str] = None
-    previous_confirmed_speaker: Optional[int] = None
-    previous_end: Optional[float] = None
+    previous_clip: str | None = None
+    previous_confirmed_speaker: int | None = None
+    previous_end: float | None = None
 
     for alloc in words:
         word = alloc.word
@@ -273,19 +284,31 @@ def build_physical_fragments(
 
         # Determine speaker
         spk = alloc.speaker_id
-        spk_status = "confirmed" if spk is not None and alloc.speaker_source == "diarization" else "unknown"
+        spk_status = (
+            "confirmed"
+            if spk is not None and alloc.speaker_source == "diarization"
+            else "unknown"
+        )
 
         # Hard boundary checks
         hard_reason = ""
         is_hard = False
 
         # 1. PhysicalClip change
-        if previous_clip is not None and current_clip is not None and current_clip != previous_clip:
+        if (
+            previous_clip is not None
+            and current_clip is not None
+            and current_clip != previous_clip
+        ):
             is_hard = True
             hard_reason = f"PhysicalClip: {previous_clip} -> {current_clip}"
 
         # 2. Confirmed speaker change
-        if hard_split_speaker_change and previous_confirmed_speaker is not None and spk is not None:
+        if (
+            hard_split_speaker_change
+            and previous_confirmed_speaker is not None
+            and spk is not None
+        ):
             if spk != previous_confirmed_speaker and spk_status == "confirmed":
                 is_hard = True
                 hard_reason = f"Speaker: {previous_confirmed_speaker} -> {spk}"
@@ -338,7 +361,9 @@ def build_physical_fragments(
                 soft_reason = f"sentence_pause: {gap:.3f}s"
 
         if soft_reason and current_word_ids:
-            pause_dur = aligned_start - (previous_end or aligned_start) if previous_end else 0.0
+            pause_dur = (
+                aligned_start - (previous_end or aligned_start) if previous_end else 0.0
+            )
             _emit_fragment(False, soft_reason)
             if fragments:
                 fragments[-1].pause_duration = pause_dur

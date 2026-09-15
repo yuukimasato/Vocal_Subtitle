@@ -33,11 +33,11 @@ Usage:
 # 因此必须在包的最早加载点设置这些环境变量，确保默认优先使用本地缓存。
 # ------------------------------------------------------------------
 import os
+
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 
-from .pipeline import Pipeline, PipelineStats
 from .config import ConfigLoader, PipelineConfig
 
 # governance public API
@@ -46,6 +46,15 @@ from .governance import (
     EngineRegistry,
     EngineStatus,
     LifecycleManager,
+)
+from .pipeline import Pipeline, PipelineStats
+
+# quality public API (key classes only)
+from .quality import (
+    IssueCategory,
+    IssueClassifier,
+    IssueSeverity,
+    QualityIssue,
 )
 
 # reporting public API
@@ -56,14 +65,6 @@ from .reporting import (
     RunReport,
     RunReportBuilder,
     StageInfo,
-)
-
-# quality public API (key classes only)
-from .quality import (
-    IssueCategory,
-    IssueClassifier,
-    IssueSeverity,
-    QualityIssue,
 )
 
 __all__ = [

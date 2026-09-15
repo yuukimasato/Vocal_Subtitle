@@ -58,8 +58,8 @@ class TestStreamingBuffer:
     @pytest.fixture
     def buffer(self):
         return StreamingBuffer(
-            chunk_duration=0.5,       # 500ms 窗口（便于测试）
-            overlap_duration=0.125,   # 125ms 重叠
+            chunk_duration=0.5,  # 500ms 窗口（便于测试）
+            overlap_duration=0.125,  # 125ms 重叠
             sample_rate=16000,
         )
 

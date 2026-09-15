@@ -15,8 +15,16 @@ from vocal_subtitle.quality.golden_gate import (
 )
 
 
-def _case(case_id, *, start_delta_ms=20.0, end_delta_ms=10.0, coverage=1.0,
-          cross_merge=0, micro_splits=0, event_count=2):
+def _case(
+    case_id,
+    *,
+    start_delta_ms=20.0,
+    end_delta_ms=10.0,
+    coverage=1.0,
+    cross_merge=0,
+    micro_splits=0,
+    event_count=2,
+):
     return {
         "id": case_id,
         "diagnostics": {
@@ -32,10 +40,12 @@ def _case(case_id, *, start_delta_ms=20.0, end_delta_ms=10.0, coverage=1.0,
 
 
 def test_tts_gate_reports_skeleton_metrics():
-    report = evaluate_tts_golden_set([
-        _case("tts-1", start_delta_ms=20.0, end_delta_ms=10.0),
-        _case("tts-2", start_delta_ms=40.0, end_delta_ms=30.0),
-    ])
+    report = evaluate_tts_golden_set(
+        [
+            _case("tts-1", start_delta_ms=20.0, end_delta_ms=10.0),
+            _case("tts-2", start_delta_ms=40.0, end_delta_ms=30.0),
+        ]
+    )
 
     metrics = report["metrics"]
     assert metrics["case_count"] == 2
@@ -70,8 +80,15 @@ def test_tts_gate_blocks_boundary_delta_and_coverage_failures():
     report = evaluate_tts_golden_set(
         [
             _case("tts-1", start_delta_ms=80.0, end_delta_ms=90.0, coverage=0.9),
-            _case("tts-2", start_delta_ms=120.0, end_delta_ms=60.0,
-                  coverage=0.95, cross_merge=1, micro_splits=1, event_count=2),
+            _case(
+                "tts-2",
+                start_delta_ms=120.0,
+                end_delta_ms=60.0,
+                coverage=0.95,
+                cross_merge=1,
+                micro_splits=1,
+                event_count=2,
+            ),
         ],
         thresholds=thresholds,
     )

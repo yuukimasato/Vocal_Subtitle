@@ -7,10 +7,7 @@
 import json
 from unittest import mock
 
-import pytest
-
 from vocal_subtitle.diarization.role_labeler import RoleLabeler, _int_to_label
-
 
 # ---------------------------------------------------------------------------
 # Mock 工具
@@ -79,11 +76,26 @@ def _mock_role_only_response(speaker_ids: list[int]) -> str:
     for spk_id in speaker_ids:
         key = _int_to_label(spk_id)
         if spk_id == 0:
-            data[key] = {"name": None, "role": "主持人", "label": "主持人", "confidence": "role"}
+            data[key] = {
+                "name": None,
+                "role": "主持人",
+                "label": "主持人",
+                "confidence": "role",
+            }
         elif spk_id == 1:
-            data[key] = {"name": None, "role": "嘉宾", "label": "嘉宾", "confidence": "role"}
+            data[key] = {
+                "name": None,
+                "role": "嘉宾",
+                "label": "嘉宾",
+                "confidence": "role",
+            }
         else:
-            data[key] = {"name": None, "role": None, "label": f"说话人{key}", "confidence": "fallback"}
+            data[key] = {
+                "name": None,
+                "role": None,
+                "label": f"说话人{key}",
+                "confidence": "fallback",
+            }
     return json.dumps(data)
 
 
@@ -219,11 +231,23 @@ class TestRoleLabelerIdentity:
         transcript = {0: ["Hello."], 1: ["Hi."], 2: ["Hey."]}
 
         # 只返回 A, B，缺少 C
-        incomplete_json = json.dumps({
-            "A": {"name": "Alice", "role": "Host", "label": "Alice(Host)", "confidence": "identity"},
-            "B": {"name": "Bob", "role": "Guest", "label": "Bob(Guest)", "confidence": "identity"},
-            # 缺少 C
-        })
+        incomplete_json = json.dumps(
+            {
+                "A": {
+                    "name": "Alice",
+                    "role": "Host",
+                    "label": "Alice(Host)",
+                    "confidence": "identity",
+                },
+                "B": {
+                    "name": "Bob",
+                    "role": "Guest",
+                    "label": "Bob(Guest)",
+                    "confidence": "identity",
+                },
+                # 缺少 C
+            }
+        )
 
         mock_llm = _make_mock_call_llm(incomplete_json)
 

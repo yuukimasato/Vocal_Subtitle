@@ -12,8 +12,12 @@ def physical_owner_compatible(left: dict, right: dict) -> bool:
     right_spans = right.get("physical_spans", []) or []
     if not left_spans or not right_spans:
         return True
-    left_clips = {span.get("physical_clip_id") or span.get("clip_id") for span in left_spans}
-    right_clips = {span.get("physical_clip_id") or span.get("clip_id") for span in right_spans}
+    left_clips = {
+        span.get("physical_clip_id") or span.get("clip_id") for span in left_spans
+    }
+    right_clips = {
+        span.get("physical_clip_id") or span.get("clip_id") for span in right_spans
+    }
     return bool(left_clips & right_clips)
 
 
@@ -32,7 +36,9 @@ def physical_owner_compatible_for_events(left: object, right: object) -> bool:
             return span.get("physical_clip_id") or span.get("clip_id")
         return getattr(span, "clip_id", None) or getattr(span, "physical_clip_id", None)
 
-    return bool({clip_id(span) for span in left_spans} & {clip_id(span) for span in right_spans})
+    return bool(
+        {clip_id(span) for span in left_spans} & {clip_id(span) for span in right_spans}
+    )
 
 
 def can_merge_gap(gap: float, max_gap: float, *, allow_overlap: bool = False) -> bool:

@@ -31,11 +31,9 @@ LLM 输出格式 (JSON):
 import json
 import logging
 import os
-import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
 
-from ..asr.base import TranscriptionSegment, WordTimestamp
+from ..asr.base import TranscriptionSegment
 from ..vad.base import SpeechSegment
 
 logger = logging.getLogger(__name__)
@@ -45,15 +43,16 @@ logger = logging.getLogger(__name__)
 # 数据结构
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class WordAssignment:
     """单个词的归属决定"""
 
     word: str
-    segment: str                       # "left" | "right"
-    confidence: float                  # 0.0 ~ 1.0
-    global_start: Optional[float] = None  # 修正后的全局开始时间
-    global_end: Optional[float] = None    # 修正后的全局结束时间
+    segment: str  # "left" | "right"
+    confidence: float  # 0.0 ~ 1.0
+    global_start: float | None = None  # 修正后的全局开始时间
+    global_end: float | None = None  # 修正后的全局结束时间
 
 
 @dataclass
@@ -61,16 +60,16 @@ class ArbitrationResult:
     """单个边界的仲裁结果"""
 
     boundary_index: int
-    word_assignments: List[WordAssignment] = field(default_factory=list)
-    left_text_final: str = ""          # 仲裁后的左段文本
-    right_text_final: str = ""         # 仲裁后的右段文本
-    left_end_time: Optional[float] = None   # 修正后的左段结束时间
-    right_start_time: Optional[float] = None  # 修正后的右段开始时间
-    confidence: float = 0.0            # 整体仲裁置信度
-    rationale: str = ""                # LLM 判断理由
-    auto_applied: bool = False         # 是否自动应用
-    needs_review: bool = False         # 是否需人工复核
-    error: Optional[str] = None
+    word_assignments: list[WordAssignment] = field(default_factory=list)
+    left_text_final: str = ""  # 仲裁后的左段文本
+    right_text_final: str = ""  # 仲裁后的右段文本
+    left_end_time: float | None = None  # 修正后的左段结束时间
+    right_start_time: float | None = None  # 修正后的右段开始时间
+    confidence: float = 0.0  # 整体仲裁置信度
+    rationale: str = ""  # LLM 判断理由
+    auto_applied: bool = False  # 是否自动应用
+    needs_review: bool = False  # 是否需人工复核
+    error: str | None = None
 
 
 @dataclass
@@ -78,13 +77,13 @@ class ArbitrationConfig:
     """仲裁配置"""
 
     llm_model: str = "deepseek-v4-pro"
-    llm_base_url: Optional[str] = None
-    llm_api_key: Optional[str] = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
     llm_temperature: float = 0.1
     llm_timeout: float = 15.0
 
-    auto_apply_confidence: float = 0.8   # > 此值自动应用
-    review_threshold: float = 0.5        # 50-80% 标记复核
+    auto_apply_confidence: float = 0.8  # > 此值自动应用
+    review_threshold: float = 0.5  # 50-80% 标记复核
     # 降级：无 LLM 时使用纯规则
     fallback_to_rules: bool = True
 
@@ -170,6 +169,7 @@ Output:
 # 仲裁器
 # ---------------------------------------------------------------------------
 
+
 class BoundaryArbitrator:
     """LLM 语义仲裁器
 
@@ -184,9 +184,9 @@ class BoundaryArbitrator:
             apply_word_reassignment(result, events)
     """
 
-    def __init__(self, config: Optional[ArbitrationConfig] = None):
+    def __init__(self, config: ArbitrationConfig | None = None):
         self.config = config or ArbitrationConfig()
-        self._llm_available: Optional[bool] = None
+        self._llm_available: bool | None = None
 
     def arbitrate(
         self,
@@ -215,24 +215,27 @@ class BoundaryArbitrator:
 
         # 收集原始词（全局时间戳）
         original_words_left = [
-            (w.start, w.end, w.word)
-            for w in reasr_result.original_left_words
+            (w.start, w.end, w.word) for w in reasr_result.original_left_words
         ]
         original_words_right = [
-            (w.start, w.end, w.word)
-            for w in reasr_result.original_right_words
+            (w.start, w.end, w.word) for w in reasr_result.original_right_words
         ]
 
         # 判断争议词范围：哪些词在边界附近
         disputed_words = self._identify_disputed_words(
-            original_words_left, original_words_right,
-            left_seg_end, right_seg_start,
+            original_words_left,
+            original_words_right,
+            left_seg_end,
+            right_seg_start,
         )
 
         # 先尝试纯规则降级（快速路径，零成本）
         rule_result = self._rule_based_arbitration(
-            reasr_result, window_texts, disputed_words,
-            left_seg_end, right_seg_start,
+            reasr_result,
+            window_texts,
+            disputed_words,
+            left_seg_end,
+            right_seg_start,
         )
         if rule_result is not None and rule_result.confidence >= 0.9:
             rule_result.auto_applied = True
@@ -242,10 +245,13 @@ class BoundaryArbitrator:
         if self._check_llm_available():
             try:
                 return self._llm_arbitration(
-                    reasr_result, window_texts,
-                    left_context, right_context,
+                    reasr_result,
+                    window_texts,
+                    left_context,
+                    right_context,
                     disputed_words,
-                    left_seg_end, right_seg_start,
+                    left_seg_end,
+                    right_seg_start,
                 )
             except Exception as e:
                 logger.warning("LLM arbitration failed, using rule fallback: %s", e)
@@ -278,11 +284,11 @@ class BoundaryArbitrator:
     def _rule_based_arbitration(
         self,
         reasr_result,  # BoundaryReASRResult
-        window_texts: Dict[str, str],
-        disputed_words: List[str],
+        window_texts: dict[str, str],
+        disputed_words: list[str],
         left_end: float,
         right_start: float,
-    ) -> Optional[ArbitrationResult]:
+    ) -> ArbitrationResult | None:
         """纯规则仲裁（零成本，< 1ms）
 
         规则:
@@ -301,7 +307,7 @@ class BoundaryArbitrator:
         right_words = right_text.split()
         left_words = left_text.split()
 
-        assignments: List[WordAssignment] = []
+        assignments: list[WordAssignment] = []
         confidence = 0.5
 
         # 规则 1：左段以句号结尾但疑似假句号
@@ -314,43 +320,60 @@ class BoundaryArbitrator:
                 if right_words:
                     first_rw = right_words[0].rstrip(",.!?，。！？")
                     from .boundary_confidence import ORPHAN_ADJECTIVES
+
                     if ORPHAN_ADJECTIVES.match(first_rw):
                         # 副词 + 形容词 → 应在一起
-                        assignments.append(WordAssignment(
-                            word=last_word, segment="left", confidence=1.0,
-                        ))
-                        assignments.append(WordAssignment(
-                            word=first_rw, segment="left", confidence=0.85,
-                        ))
+                        assignments.append(
+                            WordAssignment(
+                                word=last_word,
+                                segment="left",
+                                confidence=1.0,
+                            )
+                        )
+                        assignments.append(
+                            WordAssignment(
+                                word=first_rw,
+                                segment="left",
+                                confidence=0.85,
+                            )
+                        )
                         confidence = 0.85
 
         # 规则 2：右段首词是孤儿词 + 间隙 < 50ms
         if right_words and not assignments:
             first_rw = right_words[0].rstrip(",.!?，。！？")
             from .boundary_confidence import (
-                ORPHAN_ADVERBS, ORPHAN_ADJECTIVES,
-                ORPHAN_CONJUNCTIONS, ORPHAN_SINGLE_SYLLABLE,
+                ORPHAN_ADJECTIVES,
+                ORPHAN_ADVERBS,
+                ORPHAN_CONJUNCTIONS,
             )
+
             gap = right_start - left_end
             if gap < 0.05:
-                if (ORPHAN_ADVERBS.match(first_rw) or
-                        ORPHAN_ADJECTIVES.match(first_rw)):
+                if ORPHAN_ADVERBS.match(first_rw) or ORPHAN_ADJECTIVES.match(first_rw):
                     # 可能属于左段
-                    assignments.append(WordAssignment(
-                        word=first_rw, segment="left", confidence=0.7,
-                    ))
+                    assignments.append(
+                        WordAssignment(
+                            word=first_rw,
+                            segment="left",
+                            confidence=0.7,
+                        )
+                    )
                     confidence = 0.7
                 elif ORPHAN_CONJUNCTIONS.match(first_rw):
                     # 连词通常在两个子句之间，但间隙极小时倾向合并到左段
-                    assignments.append(WordAssignment(
-                        word=first_rw, segment="left", confidence=0.6,
-                    ))
+                    assignments.append(
+                        WordAssignment(
+                            word=first_rw,
+                            segment="left",
+                            confidence=0.6,
+                        )
+                    )
                     confidence = 0.6
 
         # 规则 3：窗口文本比对
         if window_texts:
             left_expand = window_texts.get("left_expand", "")
-            fusion = window_texts.get("fusion", "")
 
             # 如果左扩展窗口包含了右段的首个词，则该词应属于左段
             if left_expand and right_words:
@@ -359,10 +382,13 @@ class BoundaryArbitrator:
                 for w in left_expand_ending:
                     if w.rstrip(",.!?，。！？").lower() == first_rw_clean:
                         if not assignments:
-                            assignments.append(WordAssignment(
-                                word=right_words[0].rstrip(",.!?，。！？"),
-                                segment="left", confidence=0.8,
-                            ))
+                            assignments.append(
+                                WordAssignment(
+                                    word=right_words[0].rstrip(",.!?，。！？"),
+                                    segment="left",
+                                    confidence=0.8,
+                                )
+                            )
                             confidence = 0.8
                         break
 
@@ -375,12 +401,16 @@ class BoundaryArbitrator:
         final_right_words = list(right_words)
 
         # 将属于左段的词从右段首部移出
-        while final_right_words and final_right_words[0].rstrip(",.!?，。！？").lower() in moved_words:
+        while (
+            final_right_words
+            and final_right_words[0].rstrip(",.!?，。！？").lower() in moved_words
+        ):
             final_left_words.append(final_right_words.pop(0))
 
         # 清理左段中的假句号（所有被确认的 orphan 词）
         # 词在被移动到左段后，其尾部的句号也应被清除
         from .boundary_confidence import ORPHAN_ADVERBS
+
         clean_left_words = []
         for w in final_left_words:
             if w and w[-1] in sentence_endings and len(w) > 1:
@@ -403,7 +433,9 @@ class BoundaryArbitrator:
             rationale=f"[rule] {len(moved_words)} word(s) reassigned based on orphan patterns + window alignment",
             auto_applied=confidence >= self.config.auto_apply_confidence,
             needs_review=(
-                self.config.review_threshold <= confidence < self.config.auto_apply_confidence
+                self.config.review_threshold
+                <= confidence
+                < self.config.auto_apply_confidence
             ),
         )
 
@@ -414,10 +446,10 @@ class BoundaryArbitrator:
     def _llm_arbitration(
         self,
         reasr_result,
-        window_texts: Dict[str, str],
+        window_texts: dict[str, str],
         left_context: str,
         right_context: str,
-        disputed_words: List[str],
+        disputed_words: list[str],
         left_end: float,
         right_start: float,
     ) -> ArbitrationResult:
@@ -447,10 +479,15 @@ class BoundaryArbitrator:
 
         messages = [
             {"role": "system", "content": BOUNDARY_ARBITRATION_PROMPT},
-            {"role": "user", "content": json.dumps(user_input, ensure_ascii=False, indent=2)},
+            {
+                "role": "user",
+                "content": json.dumps(user_input, ensure_ascii=False, indent=2),
+            },
         ]
 
-        api_url = f"{cfg.llm_base_url}/v1/chat/completions" if cfg.llm_base_url else None
+        api_url = (
+            f"{cfg.llm_base_url}/v1/chat/completions" if cfg.llm_base_url else None
+        )
         if not api_url:
             raise ValueError("No LLM API URL configured")
 
@@ -466,7 +503,9 @@ class BoundaryArbitrator:
         }
 
         response = requests.post(
-            api_url, json=payload, headers=headers,
+            api_url,
+            json=payload,
+            headers=headers,
             timeout=cfg.llm_timeout,
         )
         response.raise_for_status()
@@ -479,18 +518,21 @@ class BoundaryArbitrator:
         # 构建 ArbitrationResult
         word_assignments = []
         for wa in llm_result.get("word_assignments", []):
-            word_assignments.append(WordAssignment(
-                word=wa.get("word", ""),
-                segment=wa.get("segment", "left"),
-                confidence=float(wa.get("confidence", 0.5)),
-            ))
+            word_assignments.append(
+                WordAssignment(
+                    word=wa.get("word", ""),
+                    segment=wa.get("segment", "left"),
+                    confidence=float(wa.get("confidence", 0.5)),
+                )
+            )
 
         llm_confidence = float(llm_result.get("confidence", 0.5))
         rationale = llm_result.get("rationale", "")
 
         # 构建最终文本
         moved_to_left = {
-            a.word.lower() for a in word_assignments
+            a.word.lower()
+            for a in word_assignments
             if a.segment == "left" and a.confidence > 0.5
         }
 
@@ -502,10 +544,14 @@ class BoundaryArbitrator:
         if left_words and left_words[-1][-1] in sentence_endings:
             clean = left_words[-1].rstrip(".!?。！？")
             from .boundary_confidence import ORPHAN_ADVERBS
+
             if ORPHAN_ADVERBS.match(clean):
                 left_words[-1] = clean
 
-        while right_words and right_words[0].rstrip(",.!?，。！？").lower() in moved_to_left:
+        while (
+            right_words
+            and right_words[0].rstrip(",.!?，。！？").lower() in moved_to_left
+        ):
             left_words.append(right_words.pop(0))
 
         final_left = " ".join(left_words)
@@ -513,13 +559,16 @@ class BoundaryArbitrator:
 
         # 从融合窗获取时间戳
         from .boundary_reasr import SlidingWindowReASR
+
         fusion_words = SlidingWindowReASR.extract_fusion_words_global(reasr_result)
 
         left_end_time = None
         right_start_time = None
         if fusion_words:
             # 找仲裁后左段最后一个词的时间戳
-            last_left_word = left_words[-1].rstrip(",.!?，。！？").lower() if left_words else ""
+            last_left_word = (
+                left_words[-1].rstrip(",.!?，。！？").lower() if left_words else ""
+            )
             for gs, ge, w, _ in fusion_words:
                 if w.rstrip(",.!?，。！？").lower() == last_left_word:
                     left_end_time = ge
@@ -558,12 +607,12 @@ class BoundaryArbitrator:
 
     @staticmethod
     def _identify_disputed_words(
-        left_words: List[Tuple[float, float, str]],
-        right_words: List[Tuple[float, float, str]],
+        left_words: list[tuple[float, float, str]],
+        right_words: list[tuple[float, float, str]],
         left_end: float,
         right_start: float,
         window_ms: float = 0.5,
-    ) -> List[str]:
+    ) -> list[str]:
         """识别边界附近的争议词
 
         争议词 = 距离边界 < window_ms 的词
@@ -607,7 +656,9 @@ class BoundaryArbitrator:
             self._llm_available = True
         else:
             self._llm_available = False
-            logger.info("No LLM API configured — boundary arbitration will use rules only")
+            logger.info(
+                "No LLM API configured — boundary arbitration will use rules only"
+            )
 
         return self._llm_available
 
@@ -616,11 +667,12 @@ class BoundaryArbitrator:
 # 批量仲裁
 # ---------------------------------------------------------------------------
 
+
 def apply_arbitration_results(
-    arbitration_results: Dict[int, ArbitrationResult],
-    asr_results: List[List[TranscriptionSegment]],
-    segments: List[SpeechSegment],
-) -> Tuple[List[List[TranscriptionSegment]], List[SpeechSegment]]:
+    arbitration_results: dict[int, ArbitrationResult],
+    asr_results: list[list[TranscriptionSegment]],
+    segments: list[SpeechSegment],
+) -> tuple[list[list[TranscriptionSegment]], list[SpeechSegment]]:
     """将仲裁结果应用到 ASR 结果和段边界
 
     修改:
@@ -646,22 +698,28 @@ def apply_arbitration_results(
             elif arb.left_text_final:
                 # 创建占位 TranscriptionSegment
                 from ..asr.base import TranscriptionSegment
-                asr_results[idx] = [TranscriptionSegment(
-                    text=arb.left_text_final,
-                    start=0.0,
-                    end=segments[idx].end - segments[idx].start,
-                )]
+
+                asr_results[idx] = [
+                    TranscriptionSegment(
+                        text=arb.left_text_final,
+                        start=0.0,
+                        end=segments[idx].end - segments[idx].start,
+                    )
+                ]
 
         if arb.right_text_final and idx + 1 < len(asr_results):
             if asr_results[idx + 1]:
                 asr_results[idx + 1][0].text = arb.right_text_final
             elif arb.right_text_final:
                 from ..asr.base import TranscriptionSegment
-                asr_results[idx + 1] = [TranscriptionSegment(
-                    text=arb.right_text_final,
-                    start=0.0,
-                    end=segments[idx + 1].end - segments[idx + 1].start,
-                )]
+
+                asr_results[idx + 1] = [
+                    TranscriptionSegment(
+                        text=arb.right_text_final,
+                        start=0.0,
+                        end=segments[idx + 1].end - segments[idx + 1].start,
+                    )
+                ]
 
         # 更新时间边界
         if arb.left_end_time is not None:
@@ -675,7 +733,8 @@ def apply_arbitration_results(
     if applied > 0 or review > 0:
         logger.info(
             "Boundary arbitration: %d auto-applied, %d flagged for review",
-            applied, review,
+            applied,
+            review,
         )
 
     return asr_results, segments

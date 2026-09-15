@@ -25,6 +25,22 @@
   },
   {
     "method": "GET",
+    "path": "/editor-sync/capability"
+  },
+  {
+    "method": "POST",
+    "path": "/editor-sync/subtitle"
+  },
+  {
+    "method": "GET",
+    "path": "/editor-sync/subtitles"
+  },
+  {
+    "method": "GET",
+    "path": "/editor-sync/subtitles/{doc_id}/download"
+  },
+  {
+    "method": "GET",
     "path": "/feedback/conflicts/{profile_name}"
   },
   {
@@ -34,6 +50,14 @@
   {
     "method": "POST",
     "path": "/feedback/d3-sample"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/dataset/export"
+  },
+  {
+    "method": "GET",
+    "path": "/feedback/dataset/preview"
   },
   {
     "method": "GET",
@@ -62,6 +86,14 @@
   {
     "method": "POST",
     "path": "/feedback/learn"
+  },
+  {
+    "method": "GET",
+    "path": "/feedback/overrides-apply"
+  },
+  {
+    "method": "POST",
+    "path": "/feedback/overrides-apply"
   },
   {
     "method": "POST",
@@ -120,12 +152,24 @@
     "path": "/history"
   },
   {
+    "method": "GET",
+    "path": "/history/by-hash/{file_hash}"
+  },
+  {
     "method": "DELETE",
     "path": "/history/{task_id}"
   },
   {
     "method": "GET",
     "path": "/history/{task_id}"
+  },
+  {
+    "method": "GET",
+    "path": "/journal/sink"
+  },
+  {
+    "method": "POST",
+    "path": "/journal/sink"
   },
   {
     "method": "POST",
@@ -200,16 +244,8 @@
     "path": "/subtitle/{task_id}"
   },
   {
-    "method": "PUT",
-    "path": "/subtitle/{task_id}/batch"
-  },
-  {
     "method": "GET",
     "path": "/subtitle/{task_id}/export"
-  },
-  {
-    "method": "PUT",
-    "path": "/subtitle/{task_id}/{index}"
   },
   {
     "method": "GET",
@@ -226,6 +262,10 @@
   {
     "method": "GET",
     "path": "/tasks/{task_id}/audio/stream"
+  },
+  {
+    "method": "GET",
+    "path": "/tasks/{task_id}/manifest"
   },
   {
     "method": "GET",

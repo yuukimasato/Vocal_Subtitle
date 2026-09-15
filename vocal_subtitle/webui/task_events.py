@@ -8,8 +8,9 @@ completion)的有序发布:每个事件带单调递增 sequence,可按任务检�
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 EVENT_KINDS = (
     "start",
@@ -27,14 +28,14 @@ class TaskEvent:
 
     task_id: str
     kind: str
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
     sequence: int = 0
 
     def __post_init__(self) -> None:
         if self.kind not in EVENT_KINDS:
             raise ValueError(f"unsupported task event kind: {self.kind}")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "kind": self.kind,
@@ -49,14 +50,14 @@ class TaskEventPublisher:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._sequence = 0
-        self._events: List[TaskEvent] = []
-        self._subscribers: List[Callable[[TaskEvent], None]] = []
+        self._events: list[TaskEvent] = []
+        self._subscribers: list[Callable[[TaskEvent], None]] = []
 
     def publish(
         self,
         task_id: str,
         kind: str,
-        payload: Optional[Dict[str, Any]] = None,
+        payload: dict[str, Any] | None = None,
     ) -> TaskEvent:
         event = TaskEvent(
             task_id=task_id,
@@ -80,11 +81,9 @@ class TaskEventPublisher:
         with self._lock:
             self._subscribers.append(callback)
 
-    def events_for(self, task_id: str) -> Tuple[TaskEvent, ...]:
+    def events_for(self, task_id: str) -> tuple[TaskEvent, ...]:
         with self._lock:
-            return tuple(
-                event for event in self._events if event.task_id == task_id
-            )
+            return tuple(event for event in self._events if event.task_id == task_id)
 
     def clear(self) -> None:
         with self._lock:

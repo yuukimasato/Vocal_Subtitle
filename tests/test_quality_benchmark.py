@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from scripts.run_quality_benchmark import _reference_content_coverage, load_manifest
 from scripts.compare_timeline import TimelineEvent, _ass_time_to_seconds, match_events
+from scripts.run_quality_benchmark import _reference_content_coverage, load_manifest
 
 
 @pytest.mark.parametrize(
@@ -61,7 +61,9 @@ def test_quality_manifest_contains_existing_fixture_pairs():
     manifest_path = root / "test/quality_manifest.yaml"
     if not manifest_path.exists():
         # 真实素材清单被 .gitignore 排除（本地 fixture），无素材的环境跳过而非失败
-        pytest.skip("本地质量基准 fixture 缺失（test/quality_manifest.yaml，见 .gitignore）")
+        pytest.skip(
+            "本地质量基准 fixture 缺失（test/quality_manifest.yaml，见 .gitignore）"
+        )
     scenes = load_manifest(manifest_path, root)
 
     assert len(scenes) == 10
@@ -74,19 +76,17 @@ def test_quality_manifest_contains_existing_fixture_pairs():
     assert sum(scene["ground_truth_path"] is not None for scene in scenes) == 8
     assert sum(scene["ground_truth_path"] is None for scene in scenes) == 2
     assert all(
-        scene["ground_truth_path"] is None
-        or scene["ground_truth_path"].is_file()
+        scene["ground_truth_path"] is None or scene["ground_truth_path"].is_file()
         for scene in scenes
     )
-    assert all(scene.get("language") in {"zh", "en", "mixed", "none"} for scene in scenes)
     assert all(
-        scene.get("speaker_count", 0) >= 1
-        or scene.get("category") == "non_speech"
+        scene.get("language") in {"zh", "en", "mixed", "none"} for scene in scenes
+    )
+    assert all(
+        scene.get("speaker_count", 0) >= 1 or scene.get("category") == "non_speech"
         for scene in scenes
     )
-    assert any(
-        "overlap_or_interruption" in scene.get("tags", []) for scene in scenes
-    )
+    assert any("overlap_or_interruption" in scene.get("tags", []) for scene in scenes)
     assert {"中文朗读双人", "巧乐兹"} <= {scene["name"] for scene in scenes}
     assert {"合成非语音-纯音与噪声", "合成重复短语-我"} <= {
         scene["name"] for scene in scenes

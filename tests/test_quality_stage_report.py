@@ -29,9 +29,14 @@ def test_aggregate_run_diagnostics_folds_context_entries():
 
     context = RunContext(input_path=Path("in.wav"))
     context.add_diagnostic("preflight", {"status": "ok", "elapsed_seconds": 0.2})
-    context.add_diagnostic("asr", {
-        "status": "failed", "elapsed_seconds": 1.0, "category": "asr_execution",
-    })
+    context.add_diagnostic(
+        "asr",
+        {
+            "status": "failed",
+            "elapsed_seconds": 1.0,
+            "category": "asr_execution",
+        },
+    )
 
     payload = aggregate_run_diagnostics(context)
 

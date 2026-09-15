@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any
 
 from .common import CONTRACT_VERSION, ErrorInfo, jsonable
 from .task import TaskRequest, TaskSnapshot, TaskState
@@ -31,13 +31,13 @@ class RunRequest:
 @dataclass
 class RunResult:
     task: TaskSnapshot
-    subtitle_path: Optional[str] = None
+    subtitle_path: str | None = None
     events: tuple[Any, ...] = ()
     stats: Any = None
     report: Any = None
     artifacts: dict[str, str] = field(default_factory=dict)
     diagnostics: dict[str, Any] = field(default_factory=dict)
-    error: Optional[ErrorInfo] = None
+    error: ErrorInfo | None = None
     from_cache: bool = False
     contract_version: str = CONTRACT_VERSION
 
@@ -64,7 +64,7 @@ class RunResult:
         cls,
         payload: Mapping[str, Any],
         request: RunRequest,
-    ) -> "RunResult":
+    ) -> RunResult:
         stats = payload.get("stats")
         stat_value = (
             stats.get("status")
@@ -76,15 +76,24 @@ class RunResult:
             state = TaskState(status)
         except ValueError:
             state = TaskState.FAILED
-        stat_task_id = stats.get("task_id", "") if isinstance(stats, Mapping) else getattr(stats, "task_id", "")
-        stat_run_id = stats.get("run_id", "") if isinstance(stats, Mapping) else getattr(stats, "run_id", "")
+        stat_task_id = (
+            stats.get("task_id", "")
+            if isinstance(stats, Mapping)
+            else getattr(stats, "task_id", "")
+        )
+        stat_run_id = (
+            stats.get("run_id", "")
+            if isinstance(stats, Mapping)
+            else getattr(stats, "run_id", "")
+        )
         task_id = request.task.task_id or stat_task_id or ""
         run_id = stat_run_id or None
         error = payload.get("error")
         error_info = error if isinstance(error, ErrorInfo) else None
         if error and error_info is None:
             error_info = ErrorInfo(
-                category=getattr(stats, "error_category", "") or "unrecoverable_failure",
+                category=getattr(stats, "error_category", "")
+                or "unrecoverable_failure",
                 message=str(error),
                 recoverable=state == TaskState.DEGRADED_COMPLETED,
             )

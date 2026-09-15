@@ -3,8 +3,8 @@
 import pytest
 
 import vocal_subtitle.asr.whisper_cpp_engine as whisper_cpp_module
-from vocal_subtitle.asr.whisper_cpp_engine import WhisperCppEngine
 from vocal_subtitle.asr.base import ASRDependencyError, ASRModelError
+from vocal_subtitle.asr.whisper_cpp_engine import WhisperCppEngine
 
 
 class TestWhisperCppEngine:

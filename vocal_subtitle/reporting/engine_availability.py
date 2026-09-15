@@ -6,12 +6,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
 
 from .run_report_schema import EngineStatusEntry
 
@@ -21,6 +19,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EngineAvailabilitySnapshot:
     """引擎可用性快照"""
+
     entries: dict[str, EngineStatusEntry] = field(default_factory=dict)
     host_info: dict = field(default_factory=dict)
 
@@ -41,48 +40,129 @@ class EngineAvailabilityChecker:
     # 引擎检查注册表
     _CHECKS: list[dict] = [
         # ---- 人声分离 ----
-        {"key": "separation_uvr", "label": "UVR (BS-RoFormer)", "engine": "uvr",
-         "model": "bs_roformer", "category": "separation"},
-        {"key": "separation_spleeter", "label": "Spleeter", "engine": "spleeter",
-         "model": "2stems", "category": "separation"},
-        {"key": "separation_open_unmix", "label": "Open-Unmix", "engine": "open-unmix",
-         "model": "umxhq", "category": "separation"},
-
+        {
+            "key": "separation_uvr",
+            "label": "UVR (BS-RoFormer)",
+            "engine": "uvr",
+            "model": "bs_roformer",
+            "category": "separation",
+        },
+        {
+            "key": "separation_spleeter",
+            "label": "Spleeter",
+            "engine": "spleeter",
+            "model": "2stems",
+            "category": "separation",
+        },
+        {
+            "key": "separation_open_unmix",
+            "label": "Open-Unmix",
+            "engine": "open-unmix",
+            "model": "umxhq",
+            "category": "separation",
+        },
         # ---- VAD ----
-        {"key": "vad_silero", "label": "Silero VAD", "engine": "silero",
-         "model": "silero_vad", "category": "vad"},
-        {"key": "vad_webrtc", "label": "WebRTC VAD", "engine": "webrtc",
-         "model": "", "category": "vad"},
-
+        {
+            "key": "vad_silero",
+            "label": "Silero VAD",
+            "engine": "silero",
+            "model": "silero_vad",
+            "category": "vad",
+        },
+        {
+            "key": "vad_webrtc",
+            "label": "WebRTC VAD",
+            "engine": "webrtc",
+            "model": "",
+            "category": "vad",
+        },
         # ---- ASR 主引擎 ----
-        {"key": "asr_faster_whisper", "label": "faster-whisper", "engine": "faster-whisper",
-         "model": "large-v3", "category": "asr"},
-        {"key": "asr_funasr", "label": "FunASR", "engine": "funasr",
-         "model": "paraformer-zh", "category": "asr"},
-        {"key": "asr_qwen", "label": "Qwen3-ASR", "engine": "qwen-asr",
-         "model": "Qwen3-ASR-1.7B", "category": "asr"},
-        {"key": "asr_whisper_cpp", "label": "whisper.cpp", "engine": "whisper.cpp",
-         "model": "ggml-medium", "category": "asr"},
-
+        {
+            "key": "asr_faster_whisper",
+            "label": "faster-whisper",
+            "engine": "faster-whisper",
+            "model": "large-v3",
+            "category": "asr",
+        },
+        {
+            "key": "asr_funasr",
+            "label": "FunASR",
+            "engine": "funasr",
+            "model": "paraformer-zh",
+            "category": "asr",
+        },
+        {
+            "key": "asr_qwen",
+            "label": "Qwen3-ASR",
+            "engine": "qwen-asr",
+            "model": "Qwen3-ASR-1.7B",
+            "category": "asr",
+        },
+        {
+            "key": "asr_whisper_cpp",
+            "label": "whisper.cpp",
+            "engine": "whisper.cpp",
+            "model": "ggml-medium",
+            "category": "asr",
+        },
         # ---- 复核引擎 ----
-        {"key": "review_global_evidence", "label": "Global ASR Evidence", "engine": "faster-whisper",
-         "model": "large-v3", "category": "review"},
-        {"key": "review_context_reasr", "label": "Context Re-ASR", "engine": "faster-whisper",
-         "model": "large-v3", "category": "review"},
-        {"key": "review_qwen", "label": "Qwen3-ASR Review", "engine": "qwen-asr",
-         "model": "Qwen3-ASR-1.7B", "category": "review"},
-        {"key": "review_forced_aligner", "label": "ForcedAligner", "engine": "qwen-forced-aligner",
-         "model": "Qwen3-ForcedAligner-0.6B", "category": "review"},
-        {"key": "review_sed", "label": "SED (AST-AudioSet)", "engine": "ast-audioset",
-         "model": "MIT/ast-finetuned-audioset", "category": "review"},
-        {"key": "review_semantic", "label": "Semantic Review", "engine": "semantic",
-         "model": "", "category": "review"},
-
+        {
+            "key": "review_global_evidence",
+            "label": "Global ASR Evidence",
+            "engine": "faster-whisper",
+            "model": "large-v3",
+            "category": "review",
+        },
+        {
+            "key": "review_context_reasr",
+            "label": "Context Re-ASR",
+            "engine": "faster-whisper",
+            "model": "large-v3",
+            "category": "review",
+        },
+        {
+            "key": "review_qwen",
+            "label": "Qwen3-ASR Review",
+            "engine": "qwen-asr",
+            "model": "Qwen3-ASR-1.7B",
+            "category": "review",
+        },
+        {
+            "key": "review_forced_aligner",
+            "label": "ForcedAligner",
+            "engine": "qwen-forced-aligner",
+            "model": "Qwen3-ForcedAligner-0.6B",
+            "category": "review",
+        },
+        {
+            "key": "review_sed",
+            "label": "SED (AST-AudioSet)",
+            "engine": "ast-audioset",
+            "model": "MIT/ast-finetuned-audioset",
+            "category": "review",
+        },
+        {
+            "key": "review_semantic",
+            "label": "Semantic Review",
+            "engine": "semantic",
+            "model": "",
+            "category": "review",
+        },
         # ---- 说话人分离 ----
-        {"key": "diarization_speechbrain", "label": "ECAPA (SpeechBrain)", "engine": "agglomerative",
-         "model": "speechbrain/ecapa", "category": "diarization"},
-        {"key": "diarization_pyannote", "label": "pyannote 全局聚类", "engine": "pyannote",
-         "model": "speaker-diarization-3.1", "category": "diarization"},
+        {
+            "key": "diarization_speechbrain",
+            "label": "ECAPA (SpeechBrain)",
+            "engine": "agglomerative",
+            "model": "speechbrain/ecapa",
+            "category": "diarization",
+        },
+        {
+            "key": "diarization_pyannote",
+            "label": "pyannote 全局聚类",
+            "engine": "pyannote",
+            "model": "speaker-diarization-3.1",
+            "category": "diarization",
+        },
     ]
 
     def __init__(self, config=None):
@@ -163,6 +243,7 @@ class EngineAvailabilityChecker:
                 from audio_separator.separator.architectures import (  # noqa: F401
                     mdxc_separator,
                 )
+
                 return "ready_default", "", "cpu", ""
             except (ImportError, ModuleNotFoundError, OSError, RuntimeError) as exc:
                 missing = getattr(exc, "name", None) or str(exc)
@@ -177,6 +258,7 @@ class EngineAvailabilityChecker:
         elif engine == "open-unmix":
             try:
                 import openunmix  # noqa: F401
+
                 return "ready_shadow", "", "cpu", ""
             except (ImportError, ModuleNotFoundError) as exc:
                 missing = getattr(exc, "name", None) or "openunmix"
@@ -204,6 +286,7 @@ class EngineAvailabilityChecker:
         elif engine == "webrtc":
             try:
                 import webrtcvad  # noqa: F401
+
                 return "ready_shadow", "", "cpu", ""
             except ImportError:
                 return "unavailable", "webrtcvad not installed", "", ""
@@ -212,8 +295,9 @@ class EngineAvailabilityChecker:
     def _check_asr(self, engine: str, key: str) -> tuple[str, str, str, str]:
         if key == "asr_faster_whisper":
             try:
-                import faster_whisper  # noqa: F401
                 import ctranslate2  # noqa: F401
+                import faster_whisper  # noqa: F401
+
                 device = self._detect_device()
                 return "ready_default", "", device, ""
             except ImportError:
@@ -221,16 +305,23 @@ class EngineAvailabilityChecker:
         elif key == "asr_funasr":
             try:
                 import funasr  # noqa: F401
+
                 return "ready_shadow", "", "cpu", ""
             except ImportError:
                 return "unavailable", "funasr not installed", "", ""
         elif key == "asr_qwen":
             try:
                 import qwen_asr  # noqa: F401
+
                 model_dir = self._cache_root / "review-models" / "qwen3-asr-1.7b"
                 if model_dir.exists():
                     return "ready_shadow", "", self._detect_device(), str(model_dir)
-                return "model_missing", "Qwen3-ASR model not downloaded", self._detect_device(), ""
+                return (
+                    "model_missing",
+                    "Qwen3-ASR model not downloaded",
+                    self._detect_device(),
+                    "",
+                )
             except ImportError:
                 return "unavailable", "qwen-asr not installed", "", ""
         elif key == "asr_whisper_cpp":
@@ -249,6 +340,7 @@ class EngineAvailabilityChecker:
         elif key == "review_qwen":
             try:
                 import qwen_asr  # noqa: F401
+
                 model_dir = self._cache_root / "review-models" / "qwen3-asr-1.7b"
                 if model_dir.exists():
                     return "ready_shadow", "", self._detect_device(), str(model_dir)
@@ -258,7 +350,10 @@ class EngineAvailabilityChecker:
         elif key == "review_forced_aligner":
             try:
                 import qwen_asr  # noqa: F401
-                model_dir = self._cache_root / "review-models" / "qwen3-forced-aligner-0.6b"
+
+                model_dir = (
+                    self._cache_root / "review-models" / "qwen3-forced-aligner-0.6b"
+                )
                 if model_dir.exists():
                     return "ready_shadow", "", self._detect_device(), str(model_dir)
                 return "model_missing", "model not downloaded", "", ""
@@ -267,6 +362,7 @@ class EngineAvailabilityChecker:
         elif key == "review_sed":
             try:
                 import transformers  # noqa: F401
+
                 model_path = self._cache_root / "review-models" / "ast-audioset"
                 if model_path.exists():
                     return "ready_shadow", "", self._detect_device(), str(model_path)
@@ -281,12 +377,14 @@ class EngineAvailabilityChecker:
         if engine == "agglomerative":
             try:
                 import speechbrain  # noqa: F401
+
                 return "ready_default", "", "cpu", ""
             except ImportError:
                 return "unavailable", "speechbrain not installed", "", ""
         elif engine == "pyannote":
             try:
                 import pyannote.audio  # noqa: F401
+
                 return "ready_shadow", "", self._detect_device(), ""
             except ImportError:
                 return "unavailable", "pyannote not installed", "", ""
@@ -297,12 +395,14 @@ class EngineAvailabilityChecker:
         """检测可用设备。"""
         try:
             import ctranslate2
+
             if ctranslate2.get_cuda_device_count() > 0:
                 return "cuda"
         except Exception:
             pass
         try:
             import torch
+
             if torch.cuda.is_available():
                 return "cuda"
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -315,6 +415,7 @@ class EngineAvailabilityChecker:
     def _collect_host_info() -> dict:
         """收集主机信息。"""
         import platform
+
         info = {
             "platform": platform.system(),
             "python": platform.python_version(),
@@ -325,9 +426,12 @@ class EngineAvailabilityChecker:
             info["cpu_count"] = 0
         try:
             import torch
+
             if torch.cuda.is_available():
                 info["gpu"] = torch.cuda.get_device_name(0)
-                info["vram_gb"] = round(torch.cuda.get_device_properties(0).total_mem / 1024**3, 1)
+                info["vram_gb"] = round(
+                    torch.cuda.get_device_properties(0).total_mem / 1024**3, 1
+                )
         except Exception:
             pass
         return info

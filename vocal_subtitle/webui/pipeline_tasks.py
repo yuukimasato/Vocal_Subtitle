@@ -7,36 +7,44 @@ history database, WebSocket events, and persistence hooks unchanged.
 
 from __future__ import annotations
 
-import json
-import hashlib
-import logging
 import asyncio
+import hashlib
+import json
+import logging
 import sys
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any
 
+from ..application.preflight import SUPPORTED_AUDIO_SUFFIXES
 from ..asr.funasr_manager import FunASRPrepareError, ensure_funasr_ready
 from ..config import ConfigLoader
+from ..contracts.common import CONTRACT_VERSION
+from ..pipeline import Pipeline
 from ..utils.audio_utils import AudioUtils
 from ..utils.file_hasher import compute_config_hash, compute_file_hash
 from ..utils.session_manager import SessionManager
-from ..pipeline import Pipeline
 from .runtime_state import state
 from .websocket import ws_manager
-from ..contracts.common import CONTRACT_VERSION
 
 logger = logging.getLogger(__name__)
 
+# 服务端上传白名单（2026-09-15 修复）：音频后缀 ∪ 视频容器后缀。
+# 前端 <input accept> 只是提示、可被拖拽/API 绕过；.ass/.srt 等字幕
+# 文件曾一路进到 pydub 才崩（IndexError），必须在提交时拒绝。
+_SUPPORTED_INPUT_SUFFIXES = SUPPORTED_AUDIO_SUFFIXES | AudioUtils.VIDEO_EXTENSIONS
+
 # 任务生命周期事件总线(重构计划 Task 8):与 WS 广播并存,供
 # TaskExecutor/前端订阅者按序消费。
-from .task_events import TaskEventPublisher
+from .task_events import TaskEventPublisher  # noqa: E402 (置于状态定义后，见上注释)
+
 task_event_bus = TaskEventPublisher()
 
 
-def _pipeline_class() -> Type[Pipeline]:
+def _pipeline_class() -> type[Pipeline]:
     """Resolve the legacy API override before falling back to the real class."""
     api = sys.modules.get("vocal_subtitle.webui.api")
     candidate = getattr(api, "Pipeline", None)
@@ -45,7 +53,7 @@ def _pipeline_class() -> Type[Pipeline]:
     return Pipeline
 
 
-def _serialize_events(events: List[Any]) -> List[Dict[str, Any]]:
+def _serialize_events(events: list[Any]) -> list[dict[str, Any]]:
     serialized = []
     for event in events:
         payload = {
@@ -124,7 +132,9 @@ def _apply_active_profile_overrides(config):
     try:
         profile = UserProfileManager(feedback_cfg).load(profile_name)
     except Exception as exc:
-        logger.warning("Failed to load user profile '%s' for overrides: %s", profile_name, exc)
+        logger.warning(
+            "Failed to load user profile '%s' for overrides: %s", profile_name, exc
+        )
         return config
     learned = profile.get("overrides") or {}
     if not learned:
@@ -137,7 +147,7 @@ def _apply_active_profile_overrides(config):
     return UserProfileManager.merge_with_base(config, learned)
 
 
-def _build_run_config(loader: ConfigLoader, profile: str, overrides: Dict[str, Any]):
+def _build_run_config(loader: ConfigLoader, profile: str, overrides: dict[str, Any]):
     """构建一次任务运行的最终配置。
 
     顺序：场景模板 → （可选）active_profile 学习参数 → 单次任务显式 overrides，
@@ -147,7 +157,7 @@ def _build_run_config(loader: ConfigLoader, profile: str, overrides: Dict[str, A
     return loader.merge_with_overrides(config, **overrides)
 
 
-def _ensure_task_entry(task_id: str, session_dir: Optional[Path] = None) -> Dict[str, Any]:
+def _ensure_task_entry(task_id: str, session_dir: Path | None = None) -> dict[str, Any]:
     """取回任务条目；条目已从 store 消失时重建最小结构。
 
     运行线程与 HTTP 侧（清空历史等清理操作）并发访问 task_store，条目可能在
@@ -180,9 +190,9 @@ def run_pipeline_in_thread(
     profile: str,
     output_format: str,
     skip_separation: bool,
-    overrides: Dict[str, Any],
-    session_dir: Optional[Path] = None,
-    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    overrides: dict[str, Any],
+    session_dir: Path | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> None:
     """Run one pipeline task and publish the legacy WebUI task contract.
 
@@ -249,8 +259,12 @@ def run_pipeline_in_thread(
             "status": stats.status,
             "input_path": str(input_path),
             "subtitle_path": str(result["subtitle_path"]),
-            "clean_subtitle_path": str(result["clean_subtitle_path"]) if result.get("clean_subtitle_path") else None,
-            "llm_subtitle_path": str(result["llm_subtitle_path"]) if result.get("llm_subtitle_path") else None,
+            "clean_subtitle_path": str(result["clean_subtitle_path"])
+            if result.get("clean_subtitle_path")
+            else None,
+            "llm_subtitle_path": str(result["llm_subtitle_path"])
+            if result.get("llm_subtitle_path")
+            else None,
             "stats": stats.to_dict(),
             "events": events,
             "from_cache": result.get("from_cache", False),
@@ -270,11 +284,13 @@ def run_pipeline_in_thread(
             "diagnostics": diagnostics,
         }
 
-        _ensure_task_entry(task_id, session_dir).update({
-            "status": stats.status,
-            "run_id": run_id,
-            "result": task_result,
-        })
+        _ensure_task_entry(task_id, session_dir).update(
+            {
+                "status": stats.status,
+                "run_id": run_id,
+                "result": task_result,
+            }
+        )
         state.task_history.update(
             task_id,
             run_id=run_id,
@@ -283,7 +299,9 @@ def run_pipeline_in_thread(
             total_duration_seconds=stats.duration_seconds,
             completed_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
         )
-        ws_manager.broadcast_from_thread(task_id, {"type": "complete", "result": task_result})
+        ws_manager.broadcast_from_thread(
+            task_id, {"type": "complete", "result": task_result}
+        )
         task_event_bus.publish(task_id, "completion", {"result": task_result})
         ws_manager.store_task_result(task_id, task_result)
         try:
@@ -296,14 +314,18 @@ def run_pipeline_in_thread(
         if task_id in state.task_store:
             state.task_store[task_id].update({"status": "failed", "error": error_msg})
         else:
-            logger.warning("Task %s was already removed from store before error handler", task_id)
+            logger.warning(
+                "Task %s was already removed from store before error handler", task_id
+            )
         state.task_history.update(
             task_id,
             status="failed",
             error=error_msg,
             completed_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
         )
-        ws_manager.broadcast_from_thread(task_id, {"type": "error", "message": error_msg})
+        ws_manager.broadcast_from_thread(
+            task_id, {"type": "error", "message": error_msg}
+        )
         task_event_bus.publish(task_id, "failure", {"error": error_msg})
 
 
@@ -321,9 +343,17 @@ class PipelineTaskService:
         output_format: str = "srt",
         skip_separation: bool = False,
         overrides_text: str = "{}",
-        thread_target: Optional[Callable[..., None]] = None,
-    ) -> Dict[str, Any]:
+        thread_target: Callable[..., None] | None = None,
+    ) -> dict[str, Any]:
         """Validate, cache-check, persist, and enqueue one uploaded input."""
+        suffix = Path(original_filename).suffix.lower()
+        if suffix not in _SUPPORTED_INPUT_SUFFIXES:
+            raise PipelineSubmissionError(
+                400,
+                f"不支持的输入格式: {suffix or '(无扩展名)'}。"
+                "请上传音频或视频文件，支持 mp3/wav/m4a/flac/aac/ogg/opus/wma"
+                "/mp4/mkv/mov/webm 等常见格式",
+            )
         task_id = str(uuid.uuid4())[:8]
         session_mgr = SessionManager(state.upload_dir)
         session_key = SessionManager.compute_session_key_from_bytes(contents)
@@ -346,7 +376,9 @@ class PipelineTaskService:
         pipeline_input = input_path
         if AudioUtils.is_video_file(input_path):
             try:
-                pipeline_input = AudioUtils.extract_audio_from_video(input_path, session_dir)
+                pipeline_input = AudioUtils.extract_audio_from_video(
+                    input_path, session_dir
+                )
             except Exception as exc:
                 raise ValueError(f"Failed to extract audio from video: {exc}") from exc
 
@@ -385,7 +417,9 @@ class PipelineTaskService:
                 try:
                     cached_result = json.loads(cached_task["result_json"])
                     cached_stats = cached_result.get("stats") or {}
-                    cached_run_id = cached_result.get("run_id") or cached_stats.get("run_id", "")
+                    cached_run_id = cached_result.get("run_id") or cached_stats.get(
+                        "run_id", ""
+                    )
                     cached_result.setdefault("contract_version", CONTRACT_VERSION)
                     cached_result.setdefault("task_id", task_id)
                     cached_result.setdefault("run_id", cached_run_id)
@@ -394,15 +428,24 @@ class PipelineTaskService:
                         cached_result["artifacts"] = {}
                     cached_result["artifacts"].setdefault("input", str(pipeline_input))
                     if cached_result.get("subtitle_path"):
-                        cached_result["artifacts"].setdefault("subtitle", str(cached_result["subtitle_path"]))
-                    cached_result.setdefault("diagnostics", cached_stats if isinstance(cached_stats, dict) else {})
+                        cached_result["artifacts"].setdefault(
+                            "subtitle", str(cached_result["subtitle_path"])
+                        )
+                    cached_result.setdefault(
+                        "diagnostics",
+                        cached_stats if isinstance(cached_stats, dict) else {},
+                    )
                     cached_subtitle_path = Path(cached_result.get("subtitle_path", ""))
                     if cached_subtitle_path.exists():
-                        output_path.write_text(cached_subtitle_path.read_text(encoding="utf-8"), encoding="utf-8")
+                        output_path.write_text(
+                            cached_subtitle_path.read_text(encoding="utf-8"),
+                            encoding="utf-8",
+                        )
                         state.task_store[task_id] = {
                             "task_id": task_id,
                             "status": cached_result.get("status", "completed"),
-                            "run_id": cached_result.get("run_id") or (cached_result.get("stats") or {}).get("run_id", ""),
+                            "run_id": cached_result.get("run_id")
+                            or (cached_result.get("stats") or {}).get("run_id", ""),
                             "result": cached_result,
                             "from_cache": True,
                             "input_file_name": original_filename,
@@ -490,11 +533,13 @@ ASYNC_LEARN_SCENARIOS = ("existing-subtitle", "from-scratch-timing")
 
 # 进程内学习任务登记表：幂等键 → task_id，配合 task_history 哈希查询实现
 # "同一音频+同一参考字幕+同一场景"重复提交去重
-_active_learn_tasks: Dict[str, str] = {}
+_active_learn_tasks: dict[str, str] = {}
 _learn_registry_lock = threading.Lock()
 
 
-def _learn_dedupe_hash(base_config_hash: str, reference_hash: str, scenario: str) -> str:
+def _learn_dedupe_hash(
+    base_config_hash: str, reference_hash: str, scenario: str
+) -> str:
     """学习请求幂等键：管线配置哈希 + 参考字幕哈希 + 场景标签。
 
     存入 task_history 的 config_hash 列，使学习任务的幂等去重直接复用
@@ -505,7 +550,9 @@ def _learn_dedupe_hash(base_config_hash: str, reference_hash: str, scenario: str
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _learn_envelope(task_id: str, status: str, scenario: str, deduplicated: bool) -> Dict[str, Any]:
+def _learn_envelope(
+    task_id: str, status: str, scenario: str, deduplicated: bool
+) -> dict[str, Any]:
     """学习任务提交响应（不阻塞请求，任务标识供进度订阅与详情查询）"""
     return {
         "task_id": task_id,
@@ -516,10 +563,12 @@ def _learn_envelope(task_id: str, status: str, scenario: str, deduplicated: bool
     }
 
 
-def _finalize_learn_phase(task_id: str, report: Dict[str, Any], scenario: str) -> None:
+def _finalize_learn_phase(task_id: str, report: dict[str, Any], scenario: str) -> None:
     """学习阶段收尾：报告挂任务详情并广播；失败则任务状态与错误可见"""
     if report.get("status") != "ok":
-        _mark_learn_failed(task_id, str(report.get("message") or "学习阶段失败"), scenario)
+        _mark_learn_failed(
+            task_id, str(report.get("message") or "学习阶段失败"), scenario
+        )
         return
     task = state.task_store.get(task_id)
     if task is not None:
@@ -533,7 +582,9 @@ def _finalize_learn_phase(task_id: str, report: Dict[str, Any], scenario: str) -
             result = {}
         if isinstance(result, dict):
             result["learn_report"] = report
-            state.task_history.update(task_id, result_json=json.dumps(result, default=str))
+            state.task_history.update(
+                task_id, result_json=json.dumps(result, default=str)
+            )
     ws_manager.broadcast_from_thread(
         task_id,
         {
@@ -583,8 +634,8 @@ def run_learn_task_in_thread(
     scenario: str = "",
     feedback_profile: str = "user_default",
     consent: str = "anonymous",
-    session_dir: Optional[Path] = None,
-    overrides: Optional[Dict[str, Any]] = None,
+    session_dir: Path | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> None:
     """内部学习任务线程：管线冷重跑 → 对齐 → diff → 入库（D28）。
 
@@ -608,7 +659,7 @@ def run_learn_task_in_thread(
         )
         base_callback = ws_manager.create_progress_callback(task_id)
 
-        def marked_callback(event: Dict[str, Any]) -> None:
+        def marked_callback(event: dict[str, Any]) -> None:
             # 进度推送注入"学习"标记与场景标签（契约只追加可选字段）
             payload = dict(event)
             payload.setdefault("task_type", LEARN_TASK_TYPE)
@@ -659,8 +710,8 @@ async def submit_learn_task(
     profile: str = "default",
     feedback_profile: str = "user_default",
     consent: str = "anonymous",
-    thread_target: Optional[Callable[..., None]] = None,
-) -> Dict[str, Any]:
+    thread_target: Callable[..., None] | None = None,
+) -> dict[str, Any]:
     """提交内部学习任务：不阻塞请求，返回任务标识（D28）。
 
     幂等/去重（同一音频+同一参考字幕+同一场景）：
@@ -686,7 +737,9 @@ async def submit_learn_task(
     pipeline_input = input_path
     if AudioUtils.is_video_file(input_path):
         try:
-            pipeline_input = AudioUtils.extract_audio_from_video(input_path, session_dir)
+            pipeline_input = AudioUtils.extract_audio_from_video(
+                input_path, session_dir
+            )
         except Exception as exc:
             raise ValueError(f"Failed to extract audio from video: {exc}") from exc
 
@@ -710,13 +763,24 @@ async def submit_learn_task(
     if cached and cached.get("result_json"):
         with _learn_registry_lock:
             inflight = _active_learn_tasks.get(dedupe_hash)
-            inflight_status = (state.task_store.get(inflight) or {}).get("status") if inflight else None
+            inflight_status = (
+                (state.task_store.get(inflight) or {}).get("status")
+                if inflight
+                else None
+            )
             if inflight is not None and inflight_status in ("pending", "running"):
                 return _learn_envelope(inflight, inflight_status, scenario, True)
-            done_sync = state.task_history.find_by_hash(audio_hash, dedupe_hash, task_type=LEARN_TASK_TYPE)
+            done_sync = state.task_history.find_by_hash(
+                audio_hash, dedupe_hash, task_type=LEARN_TASK_TYPE
+            )
         if done_sync:
             # 同一学习请求已完成：幂等返回原任务，不重复学/入库
-            return _learn_envelope(done_sync["id"], str(done_sync.get("status") or "completed"), scenario, True)
+            return _learn_envelope(
+                done_sync["id"],
+                str(done_sync.get("status") or "completed"),
+                scenario,
+                True,
+            )
         try:
             report = FeedbackLearningService().learn(
                 pipeline_input,
@@ -748,11 +812,17 @@ async def submit_learn_task(
                     config_hash=dedupe_hash,
                 )
             except Exception as exc:
-                logger.warning("Failed to record cache-hit learn for idempotency: %s", exc)
+                logger.warning(
+                    "Failed to record cache-hit learn for idempotency: %s", exc
+                )
             return report
         except TaskBaselineError as exc:
             # 缓存记录的会话产物已清理：回退为冷重跑内部任务
-            logger.info("Cached task %s unusable for learn (%s); falling back to rerun", cached["id"], exc)
+            logger.info(
+                "Cached task %s unusable for learn (%s); falling back to rerun",
+                cached["id"],
+                exc,
+            )
 
     if config.asr.engine == "funasr":
         try:
@@ -769,10 +839,14 @@ async def submit_learn_task(
             if existing_status in ("pending", "running"):
                 return _learn_envelope(existing, existing_status, scenario, True)
             _active_learn_tasks.pop(dedupe_hash, None)
-        done = state.task_history.find_by_hash(audio_hash, dedupe_hash, task_type=LEARN_TASK_TYPE)
+        done = state.task_history.find_by_hash(
+            audio_hash, dedupe_hash, task_type=LEARN_TASK_TYPE
+        )
         if done:
             # 同一学习请求已完成：幂等返回原任务，不重复跑管线/入库
-            return _learn_envelope(done["id"], str(done.get("status") or "completed"), scenario, True)
+            return _learn_envelope(
+                done["id"], str(done.get("status") or "completed"), scenario, True
+            )
 
         task_id = str(uuid.uuid4())[:8]
         state.task_store[task_id] = {

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, Mapping, Optional
+from typing import Any
 
 from .common import CONTRACT_VERSION, ErrorInfo, jsonable
 
@@ -23,15 +24,15 @@ class TaskState(str, Enum):
 @dataclass(frozen=True)
 class TaskRequest:
     input_path: str
-    output_path: Optional[str] = None
+    output_path: str | None = None
     profile: str = "default"
     mode: str = "offline"
     overrides: Mapping[str, Any] = field(default_factory=dict)
     requested_by: str = ""
-    task_id: Optional[str] = None
+    task_id: str | None = None
     contract_version: str = CONTRACT_VERSION
 
-    def with_task_id(self, task_id: str) -> "TaskRequest":
+    def with_task_id(self, task_id: str) -> TaskRequest:
         return replace(self, task_id=task_id)
 
     def to_dict(self) -> dict[str, Any]:
@@ -47,7 +48,7 @@ class TaskRequest:
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "TaskRequest":
+    def from_dict(cls, payload: Mapping[str, Any]) -> TaskRequest:
         return cls(
             task_id=payload.get("task_id"),
             input_path=str(payload.get("input_path", "")),
@@ -63,12 +64,12 @@ class TaskRequest:
 @dataclass
 class TaskSnapshot:
     task_id: str
-    run_id: Optional[str] = None
+    run_id: str | None = None
     state: TaskState = TaskState.PENDING
     progress: float = 0.0
     stage: str = ""
     status: str = ""
-    error: Optional[ErrorInfo] = None
+    error: ErrorInfo | None = None
     created_at: str = ""
     updated_at: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -97,7 +98,7 @@ class TaskSnapshot:
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "TaskSnapshot":
+    def from_dict(cls, payload: Mapping[str, Any]) -> TaskSnapshot:
         state = payload.get("state", payload.get("status", TaskState.PENDING.value))
         return cls(
             task_id=str(payload.get("task_id", payload.get("id", ""))),
@@ -114,15 +115,19 @@ class TaskSnapshot:
         )
 
     @classmethod
-    def from_legacy_row(cls, row: Mapping[str, Any]) -> "TaskSnapshot":
+    def from_legacy_row(cls, row: Mapping[str, Any]) -> TaskSnapshot:
         progress_payload = row.get("progress_json") or "{}"
         if isinstance(progress_payload, str):
             try:
                 progress_payload = json.loads(progress_payload)
             except (TypeError, ValueError):
                 progress_payload = {}
-        progress_payload = progress_payload if isinstance(progress_payload, Mapping) else {}
-        raw_progress = progress_payload.get("progress", progress_payload.get("percent", 0.0))
+        progress_payload = (
+            progress_payload if isinstance(progress_payload, Mapping) else {}
+        )
+        raw_progress = progress_payload.get(
+            "progress", progress_payload.get("percent", 0.0)
+        )
         progress = float(raw_progress or 0.0)
         if progress > 1:
             progress /= 100.0

@@ -15,11 +15,11 @@ boundary_refiner 与 AcousticValidator 提供候选或校验,不再各自覆盖�
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any
 
 from .boundary_arbiter import BoundaryDecision
-
 
 WORD_TIME_SOURCE_PRECEDENCE = (
     "whisperx_alignment",
@@ -78,7 +78,7 @@ def _crosses_hard_silence(
     raw_time: float,
     candidate: float,
     hard_silences: Sequence[tuple[float, float]],
-) -> Optional[tuple[float, float]]:
+) -> tuple[float, float] | None:
     for silence in hard_silences:
         start, end = float(silence[0]), float(silence[1])
         if end <= start:
@@ -89,7 +89,7 @@ def _crosses_hard_silence(
     return None
 
 
-def large_snap_allowed(evidence: Optional[Mapping[str, bool]]) -> bool:
+def large_snap_allowed(evidence: Mapping[str, bool] | None) -> bool:
     """Escape hatch for moves beyond ``LARGE_SNAP_LIMIT`` (方案 4.2)."""
     if not evidence:
         return False
@@ -108,7 +108,7 @@ def enforce_snap_policy(
     raw_time: float,
     tier: str,
     hard_silences: Sequence[tuple[float, float]] = (),
-    large_snap_evidence: Optional[Mapping[str, bool]] = None,
+    large_snap_evidence: Mapping[str, bool] | None = None,
 ) -> BoundaryDecision:
     """Apply the tier snap limits to one boundary decision.
 
@@ -124,7 +124,7 @@ def enforce_snap_policy(
         base: BoundaryDecision,
         applied_time: float,
         reason: str,
-        extra: Optional[dict[str, Any]] = None,
+        extra: dict[str, Any] | None = None,
         **overrides: Any,
     ) -> BoundaryDecision:
         entry = {

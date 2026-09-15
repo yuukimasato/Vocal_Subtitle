@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 
-from vocal_subtitle.asr.evidence import CandidateEvidence, DecisionEvidenceBundle, EvidenceWord
+from vocal_subtitle.asr.evidence import (
+    CandidateEvidence,
+    DecisionEvidenceBundle,
+    EvidenceWord,
+)
 from vocal_subtitle.asr.evidence_decision import EvidenceDecisionEngine
 from vocal_subtitle.asr.risk_scoring import RiskAssessment
 
@@ -51,8 +55,10 @@ def test_secondary_drop_requires_independent_sources_and_physical_blank():
     ]
 
     decision = EvidenceDecisionEngine().decide_bundle(
-        [candidate], assessments=[_high(candidate.id)],
-        physical_timeline=timeline, secondary_bundles=bundles,
+        [candidate],
+        assessments=[_high(candidate.id)],
+        physical_timeline=timeline,
+        secondary_bundles=bundles,
     )[0]
 
     assert decision.decision == "drop"
@@ -64,17 +70,26 @@ def test_secondary_split_requires_multiple_timed_parts():
     candidate = _candidate("main", "hello world", 1.0, 2.0)
     parts = [
         _candidate(
-            "part-1", "hello", 1.0, 1.4, source="qwen",
+            "part-1",
+            "hello",
+            1.0,
+            1.4,
+            source="qwen",
             words=(EvidenceWord("w1", "hello", 1.0, 1.4, 0.9),),
         ),
         _candidate(
-            "part-2", "world", 1.5, 2.0, source="qwen",
+            "part-2",
+            "world",
+            1.5,
+            2.0,
+            source="qwen",
             words=(EvidenceWord("w2", "world", 1.5, 2.0, 0.9),),
         ),
     ]
 
     decisions = EvidenceDecisionEngine().decide_bundle(
-        [candidate], review=parts,
+        [candidate],
+        review=parts,
         assessments=[_high(candidate.id)],
     )
 

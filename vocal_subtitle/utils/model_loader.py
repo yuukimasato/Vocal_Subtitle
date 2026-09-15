@@ -76,7 +76,9 @@ def is_model_cached(model_name: str) -> bool:
                     snap_path = os.path.join(model_path, entry)
                     if os.path.isdir(snap_path):
                         if any(
-                            f.endswith((".safetensors", ".bin", ".pt", ".h5", ".msgpack"))
+                            f.endswith(
+                                (".safetensors", ".bin", ".pt", ".h5", ".msgpack")
+                            )
                             or f == "config.json"
                             for f in os.listdir(snap_path)
                         ):
@@ -132,12 +134,16 @@ def load_sentence_transformer(
         except Exception as e:
             logger.warning(
                 "Failed to load cached model '%s': %s.",
-                model_name, e,
+                model_name,
+                e,
             )
 
     if allow_download is None:
         allow_download = os.environ.get(ALLOW_DOWNLOAD_ENV, "0").lower() in {
-            "1", "true", "yes", "on",
+            "1",
+            "true",
+            "yes",
+            "on",
         }
     if not allow_download:
         logger.info(
@@ -229,6 +235,7 @@ def _download_model(
     # 后续修改 os.environ 不会生效 → 必须直接操作常量
     try:
         import huggingface_hub.constants as hf_constants
+
         _saved_hf_offline = hf_constants.HF_HUB_OFFLINE
         hf_constants.HF_HUB_OFFLINE = False
     except ImportError:
@@ -236,6 +243,7 @@ def _download_model(
 
     try:
         import transformers.utils.hub as tf_hub
+
         _saved_tf_offline = tf_hub._is_offline_mode
         tf_hub._is_offline_mode = False
     except ImportError:
@@ -246,12 +254,14 @@ def _download_model(
         if _saved_hf_offline is not None:
             try:
                 import huggingface_hub.constants as hf_c
+
                 hf_c.HF_HUB_OFFLINE = _saved_hf_offline
             except ImportError:
                 pass
         if _saved_tf_offline is not None:
             try:
                 import transformers.utils.hub as tf_h
+
                 tf_h._is_offline_mode = _saved_tf_offline
             except ImportError:
                 pass
@@ -269,7 +279,8 @@ def _download_model(
     except Exception as e:
         logger.warning(
             "Network download failed for '%s': %s. Trying HF mirror...",
-            model_name, e,
+            model_name,
+            e,
         )
 
         # ── 第三路径：HF 镜像站 ──────────────────────────────
@@ -284,7 +295,8 @@ def _download_model(
             logger.warning(
                 "All loading strategies failed for '%s': %s. "
                 "Semantic NLP features will use rule-only fallback.",
-                model_name, e2,
+                model_name,
+                e2,
             )
             return None
         finally:

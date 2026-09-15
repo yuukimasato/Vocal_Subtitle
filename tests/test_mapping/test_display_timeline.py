@@ -8,8 +8,8 @@ from vocal_subtitle.mapping.display_timeline import (
     map_to_display_timeline,
 )
 
-
 # ── DisplayTimelineConfig ────────────────────────────────────────────
+
 
 def test_config_defaults():
     cfg = DisplayTimelineConfig()
@@ -26,10 +26,13 @@ def test_config_rejects_negative_lead():
 
 def test_config_rejects_invalid_reading_range():
     with pytest.raises(ValueError):
-        DisplayTimelineConfig(min_reading_duration_ms=5000, max_reading_duration_ms=1000)
+        DisplayTimelineConfig(
+            min_reading_duration_ms=5000, max_reading_duration_ms=1000
+        )
 
 
 # ── DisplayCue ───────────────────────────────────────────────────────
+
 
 def test_cue_validates_physical_envelope():
     cue = DisplayCue(
@@ -118,6 +121,7 @@ def test_cue_to_dict():
 
 # ── map_to_display_timeline ──────────────────────────────────────────
 
+
 def test_map_simple_group():
     groups = [
         {
@@ -139,7 +143,7 @@ def test_map_simple_group():
     assert cue.physical_end == 2.5
     # display snaps to projected boundaries, clamped by max_lead/trail
     assert cue.display_start <= 1.0  # must cover physical start
-    assert cue.display_end >= 2.5    # must cover physical end
+    assert cue.display_end >= 2.5  # must cover physical end
 
 
 def test_map_respects_audio_duration():

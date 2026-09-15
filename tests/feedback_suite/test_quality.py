@@ -1,32 +1,46 @@
 """Feedback tests: test_quality."""
 
-from .common import *
+from .common import _make_events
+
 
 class TestHealthScorer:
     """健康度评分器测试"""
 
     def test_perfect_health_score(self):
         """完全对齐 → 健康度接近 100"""
-        from vocal_subtitle.feedback.aligner import AlignmentPair, _time_iou, _levenshtein_similarity
-        from vocal_subtitle.feedback.health_scorer import compute_health_score_from_pairs
+        from vocal_subtitle.feedback.aligner import (
+            AlignmentPair,
+            _levenshtein_similarity,
+            _time_iou,
+        )
+        from vocal_subtitle.feedback.health_scorer import (
+            compute_health_score_from_pairs,
+        )
 
-        auto = _make_events([
-            (0.0, 2.0, "今天天气真不错"),
-            (2.5, 5.0, "我们去看电影吧"),
-            (5.5, 8.0, "你觉得怎么样"),
-        ])
-        manual = _make_events([
-            (0.0, 2.0, "今天天气真不错"),
-            (2.5, 5.0, "我们去看电影吧"),
-            (5.5, 8.0, "你觉得怎么样"),
-        ])
+        auto = _make_events(
+            [
+                (0.0, 2.0, "今天天气真不错"),
+                (2.5, 5.0, "我们去看电影吧"),
+                (5.5, 8.0, "你觉得怎么样"),
+            ]
+        )
+        manual = _make_events(
+            [
+                (0.0, 2.0, "今天天气真不错"),
+                (2.5, 5.0, "我们去看电影吧"),
+                (5.5, 8.0, "你觉得怎么样"),
+            ]
+        )
 
         pairs = [
             AlignmentPair(
-                auto_events=[a], manual_events=[m], match_type="1:1",
+                auto_events=[a],
+                manual_events=[m],
+                match_type="1:1",
                 time_iou=_time_iou(a.start, a.end, m.start, m.end),
                 text_similarity=_levenshtein_similarity(a.text, m.text),
-                semantic_similarity=1.0, composite_score=1.0,
+                semantic_similarity=1.0,
+                composite_score=1.0,
             )
             for a, m in zip(auto, manual)
         ]
@@ -63,6 +77,7 @@ class TestHealthScorer:
 #  7. ImpactEstimator 测试
 # ============================================================================
 
+
 class TestImpactEstimator:
     """参数变更影响预估器测试"""
 
@@ -82,7 +97,9 @@ class TestImpactEstimator:
             reason="结束时间后移",
         )
 
-        impacts = estimator.estimate({"merging.padding": adj}, {"merging": {"padding": 0.10}})
+        impacts = estimator.estimate(
+            {"merging.padding": adj}, {"merging": {"padding": 0.10}}
+        )
         assert len(impacts) == 1
         impact = impacts[0]
 
@@ -145,6 +162,7 @@ class TestImpactEstimator:
 #  8. ConflictDetector 测试
 # ============================================================================
 
+
 class TestConflictDetector:
     """参数冲突检测器测试"""
 
@@ -154,14 +172,26 @@ class TestConflictDetector:
 
         detector = ConflictDetector(window=5)
         history = [
-            {"adjustments": {"merging.padding": [0.10, 0.14]},
-             "timestamp": "2026-07-01T10:00:00", "diff_report_summary": "增大"},
-            {"adjustments": {"merging.padding": [0.14, 0.09]},
-             "timestamp": "2026-07-02T10:00:00", "diff_report_summary": "减小"},
-            {"adjustments": {"merging.padding": [0.09, 0.13]},
-             "timestamp": "2026-07-03T10:00:00", "diff_report_summary": "增大"},
-            {"adjustments": {"merging.padding": [0.13, 0.08]},
-             "timestamp": "2026-07-04T10:00:00", "diff_report_summary": "减小"},
+            {
+                "adjustments": {"merging.padding": [0.10, 0.14]},
+                "timestamp": "2026-07-01T10:00:00",
+                "diff_report_summary": "增大",
+            },
+            {
+                "adjustments": {"merging.padding": [0.14, 0.09]},
+                "timestamp": "2026-07-02T10:00:00",
+                "diff_report_summary": "减小",
+            },
+            {
+                "adjustments": {"merging.padding": [0.09, 0.13]},
+                "timestamp": "2026-07-03T10:00:00",
+                "diff_report_summary": "增大",
+            },
+            {
+                "adjustments": {"merging.padding": [0.13, 0.08]},
+                "timestamp": "2026-07-04T10:00:00",
+                "diff_report_summary": "减小",
+            },
         ]
 
         report = detector.detect_oscillation("merging.padding", history)
@@ -177,12 +207,21 @@ class TestConflictDetector:
 
         detector = ConflictDetector(window=5)
         history = [
-            {"adjustments": {"merging.padding": [0.10, 0.12]},
-             "timestamp": "2026-07-01T10:00:00", "diff_report_summary": "增大"},
-            {"adjustments": {"merging.padding": [0.12, 0.15]},
-             "timestamp": "2026-07-02T10:00:00", "diff_report_summary": "增大"},
-            {"adjustments": {"merging.padding": [0.15, 0.18]},
-             "timestamp": "2026-07-03T10:00:00", "diff_report_summary": "增大"},
+            {
+                "adjustments": {"merging.padding": [0.10, 0.12]},
+                "timestamp": "2026-07-01T10:00:00",
+                "diff_report_summary": "增大",
+            },
+            {
+                "adjustments": {"merging.padding": [0.12, 0.15]},
+                "timestamp": "2026-07-02T10:00:00",
+                "diff_report_summary": "增大",
+            },
+            {
+                "adjustments": {"merging.padding": [0.15, 0.18]},
+                "timestamp": "2026-07-03T10:00:00",
+                "diff_report_summary": "增大",
+            },
         ]
 
         report = detector.detect_oscillation("merging.padding", history)
@@ -196,19 +235,37 @@ class TestConflictDetector:
 
         detector = ConflictDetector(window=5)
         history = [
-            {"adjustments": {"merging.padding": [0.10, 0.14]},
-             "timestamp": "2026-07-01T10:00:00", "diff_report_summary": "增大"},
-            {"adjustments": {"merging.padding": [0.14, 0.09]},
-             "timestamp": "2026-07-02T10:00:00", "diff_report_summary": "减小"},
-            {"adjustments": {"merging.padding": [0.09, 0.13]},
-             "timestamp": "2026-07-03T10:00:00", "diff_report_summary": "增大"},
-            {"adjustments": {"merging.padding": [0.13, 0.08]},
-             "timestamp": "2026-07-04T10:00:00", "diff_report_summary": "减小"},
+            {
+                "adjustments": {"merging.padding": [0.10, 0.14]},
+                "timestamp": "2026-07-01T10:00:00",
+                "diff_report_summary": "增大",
+            },
+            {
+                "adjustments": {"merging.padding": [0.14, 0.09]},
+                "timestamp": "2026-07-02T10:00:00",
+                "diff_report_summary": "减小",
+            },
+            {
+                "adjustments": {"merging.padding": [0.09, 0.13]},
+                "timestamp": "2026-07-03T10:00:00",
+                "diff_report_summary": "增大",
+            },
+            {
+                "adjustments": {"merging.padding": [0.13, 0.08]},
+                "timestamp": "2026-07-04T10:00:00",
+                "diff_report_summary": "减小",
+            },
             # 另一个参数稳定
-            {"adjustments": {"merge_decision.fast_merge_max_gap": [0.20, 0.22]},
-             "timestamp": "2026-07-01T10:00:00", "diff_report_summary": "增大"},
-            {"adjustments": {"merge_decision.fast_merge_max_gap": [0.22, 0.24]},
-             "timestamp": "2026-07-02T10:00:00", "diff_report_summary": "增大"},
+            {
+                "adjustments": {"merge_decision.fast_merge_max_gap": [0.20, 0.22]},
+                "timestamp": "2026-07-01T10:00:00",
+                "diff_report_summary": "增大",
+            },
+            {
+                "adjustments": {"merge_decision.fast_merge_max_gap": [0.22, 0.24]},
+                "timestamp": "2026-07-02T10:00:00",
+                "diff_report_summary": "增大",
+            },
         ]
 
         reports = detector.detect_all_oscillations(history)
@@ -219,7 +276,10 @@ class TestConflictDetector:
 
     def test_resolve_lock_action(self):
         """选择 lock → 参数被冻结"""
-        from vocal_subtitle.feedback.conflict_detector import ConflictDetector, ConflictReport
+        from vocal_subtitle.feedback.conflict_detector import (
+            ConflictDetector,
+            ConflictReport,
+        )
 
         detector = ConflictDetector()
         report = ConflictReport(
@@ -235,5 +295,3 @@ class TestConflictDetector:
 # ============================================================================
 #  9. AudioFingerprint 测试
 # ============================================================================
-
-

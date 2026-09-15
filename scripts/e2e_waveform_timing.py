@@ -10,9 +10,11 @@
 [ / ] 播放头打点、方向键微调、Enter 保存跳行、Ctrl+滚轮缩放、
 审核工作区波形实例与保存、SRT 文件写回持久化。
 """
+
 """最终端到端回归：Aegisub 打轴全链路。"""
 import os
 import sys
+
 from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:8642"
@@ -20,9 +22,11 @@ BASE = "http://127.0.0.1:8642"
 CHROME = os.environ.get("CHROME", "")
 results = []
 
+
 def check(name, ok, detail=""):
     results.append((name, ok, detail))
     print(("PASS" if ok else "FAIL"), name, detail)
+
 
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=CHROME or None, headless=True)
@@ -58,19 +62,37 @@ with sync_playwright() as p:
       return {red, blue, w: c.width};
     }""")
     dur = 3.0
-    check("红线位置=start", mk["red"] and abs(mk["red"] / mk["w"] * dur - st["start"]) < 0.05, str(mk))
-    check("蓝线位置=end", mk["blue"] and abs(mk["blue"] / mk["w"] * dur - st["end"]) < 0.05, str(mk))
+    check(
+        "红线位置=start",
+        mk["red"] and abs(mk["red"] / mk["w"] * dur - st["start"]) < 0.05,
+        str(mk),
+    )
+    check(
+        "蓝线位置=end",
+        mk["blue"] and abs(mk["blue"] / mk["w"] * dur - st["end"]) < 0.05,
+        str(mk),
+    )
 
     rect = page.locator("#waveform-canvas").bounding_box()
     # 左键设开始（区域内）
-    page.mouse.click(rect["x"] + 0.4 / 3 * rect["width"], rect["y"] + rect["height"] / 2)
+    page.mouse.click(
+        rect["x"] + 0.4 / 3 * rect["width"], rect["y"] + rect["height"] / 2
+    )
     page.wait_for_timeout(1100)
     # 右键设结束
-    page.mouse.click(rect["x"] + 0.8 / 3 * rect["width"], rect["y"] + rect["height"] / 2, button="right")
+    page.mouse.click(
+        rect["x"] + 0.8 / 3 * rect["width"],
+        rect["y"] + rect["height"] / 2,
+        button="right",
+    )
     page.wait_for_timeout(1100)
     ev = page.evaluate("""() => { const e = window.WaveformUI.view.events.find(e => e.index === 1);
         return {s: e.start, e: e.end}; }""")
-    check("左键0.4/右键0.8", abs(ev["s"] - 0.4) < 0.02 and abs(ev["e"] - 0.8) < 0.02, str(ev))
+    check(
+        "左键0.4/右键0.8",
+        abs(ev["s"] - 0.4) < 0.02 and abs(ev["e"] - 0.8) < 0.02,
+        str(ev),
+    )
 
     # 播放头 [ ]
     page.evaluate("() => window.WaveformUI.view.seekTo(0.25)")
@@ -82,7 +104,11 @@ with sync_playwright() as p:
     ev = page.evaluate("""() => { const v = window.WaveformUI.view;
         const e = v.events.find(e => e.index === 1);
         return {s: e.start, e: e.end, idx: v.activeIndex}; }""")
-    check("[0.25 ]0.75 Enter跳行2", abs(ev["s"] - 0.25) < 0.015 and abs(ev["e"] - 0.75) < 0.015 and ev["idx"] == 2, str(ev))
+    check(
+        "[0.25 ]0.75 Enter跳行2",
+        abs(ev["s"] - 0.25) < 0.015 and abs(ev["e"] - 0.75) < 0.015 and ev["idx"] == 2,
+        str(ev),
+    )
 
     # ↑ 回行1
     page.keyboard.press("ArrowUp")
@@ -104,18 +130,28 @@ with sync_playwright() as p:
     page.wait_for_timeout(1200)
     ev = page.evaluate("""() => { const e = window.WaveformUI.view.events.find(e => e.index === 1);
         return {s: e.start, e: e.end}; }""")
-    check("拖拽区域整体平移 (+0.3s)", abs(ev["s"] - 0.55) < 0.06 and abs(ev["e"] - 1.05) < 0.06, str(ev))
+    check(
+        "拖拽区域整体平移 (+0.3s)",
+        abs(ev["s"] - 0.55) < 0.06 and abs(ev["e"] - 1.05) < 0.06,
+        str(ev),
+    )
 
     # SRT 持久化
-    srt = page.evaluate("fetch('/api/tasks/timtest-2026/subtitle-file?version=clean').then(r => r.text())")
-    lines = [l for l in srt.splitlines() if '-->' in l]
-    ok = any("00:00:00,550" in l and "00:00:01,050" in l for l in lines)
+    srt = page.evaluate(
+        "fetch('/api/tasks/timtest-2026/subtitle-file?version=clean').then(r => r.text())"
+    )
+    lines = [ln for ln in srt.splitlines() if "-->" in ln]
+    ok = any("00:00:00,550" in ln and "00:00:01,050" in ln for ln in lines)
     check("SRT 写回 0.55-1.05", ok, str(lines))
 
     # 表格同步
     cells = page.evaluate("""() => Array.from(document.querySelectorAll('#subtitle-tbody tr')).map(
       tr => Array.from(tr.querySelectorAll('.col-time')).map(td => td.textContent))""")
-    check("表格时间同步", cells[0] == ["0:00.6", "0:01.1"] or cells[0] == ["0:00.5", "0:01.0"], str(cells))
+    check(
+        "表格时间同步",
+        cells[0] == ["0:00.6", "0:01.1"] or cells[0] == ["0:00.5", "0:01.0"],
+        str(cells),
+    )
 
     # 审核工作区
     page.click('nav [data-workspace="review"]')
@@ -128,17 +164,21 @@ with sync_playwright() as p:
     page.wait_for_timeout(700)
     rrect = rc.bounding_box()
     # 左键 0.6 设开始（行1 区域外右侧? 0.6 在区域内）→ 设开始
-    page.mouse.click(rrect["x"] + 0.6 / 3 * rrect["width"], rrect["y"] + rrect["height"] / 2)
+    page.mouse.click(
+        rrect["x"] + 0.6 / 3 * rrect["width"], rrect["y"] + rrect["height"] / 2
+    )
     page.wait_for_timeout(1100)
     rev = page.evaluate("""() => { const e = window.ReviewUI.wave.events.find(e => e.index === 1);
         return {s: e.start}; }""")
     check("审核区左键设开始 0.6", abs(rev["s"] - 0.6) < 0.02, str(rev))
-    srt2 = page.evaluate("fetch('/api/tasks/timtest-2026/subtitle-file?version=clean').then(r => r.text())")
-    ok2 = any("00:00:00,600" in l for l in srt2.splitlines() if '-->' in l)
+    srt2 = page.evaluate(
+        "fetch('/api/tasks/timtest-2026/subtitle-file?version=clean').then(r => r.text())"
+    )
+    ok2 = any("00:00:00,600" in ln for ln in srt2.splitlines() if "-->" in ln)
     check("审核区保存写回 SRT", ok2)
 
     browser.close()
 
 fails = [r for r in results if not r[1]]
-print(f"\n=== {len(results)-len(fails)}/{len(results)} passed ===")
+print(f"\n=== {len(results) - len(fails)}/{len(results)} passed ===")
 sys.exit(1 if fails else 0)

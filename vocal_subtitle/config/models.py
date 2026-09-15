@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
-
 
 # ---------------------------------------------------------------------------
 # 配置数据类
@@ -53,8 +51,8 @@ class FusionConfig:
     """方案二：三方法边界融合配置"""
 
     enabled: bool = False
-    grid_resolution: float = 0.01       # 10ms
-    min_consensus: int = 2               # 最少共识方法数
+    grid_resolution: float = 0.01  # 10ms
+    min_consensus: int = 2  # 最少共识方法数
     high_conf_padding: float = 0.03
     low_conf_padding: float = 0.12
     min_speech_duration: float = 0.25
@@ -65,7 +63,7 @@ class BoundaryRefinementConfig:
     """方案四：ASR 边界双向精修配置"""
 
     enabled: bool = True
-    max_shrink_ms: float = 0          # 默认禁用段尾收缩（由反向能量扫描负责 end 精度）
+    max_shrink_ms: float = 0  # 默认禁用段尾收缩（由反向能量扫描负责 end 精度）
     max_extend_ms: float = 100
     check_frames: int = 3
     frame_ms: int = 10
@@ -88,14 +86,14 @@ class MergeDecisionConfig:
     min_fragment_duration: float = 0.15
 
     # LLM 降本策略：渐进降级间隙范围
-    local_nlp_gap_range: Tuple[float, float] = (0.30, 0.60)  # 此范围内优先本地NLP
-    cloud_llm_gap_range: Tuple[float, float] = (0.60, 1.20)  # 仅此范围调用云端LLM
+    local_nlp_gap_range: tuple[float, float] = (0.30, 0.60)  # 此范围内优先本地NLP
+    cloud_llm_gap_range: tuple[float, float] = (0.60, 1.20)  # 仅此范围调用云端LLM
 
     # LLM 策略
-    llm_tier: str = "cascading"          # "cascading" | "all_llm" | "rule_only"
+    llm_tier: str = "cascading"  # "cascading" | "all_llm" | "rule_only"
     llm_model: str = "deepseek-v4-pro"
-    llm_base_url: Optional[str] = None
-    llm_api_key: Optional[str] = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
     llm_temperature: float = 0.1
     llm_timeout: float = 15.0
     llm_fallback_to_rules: bool = True
@@ -123,7 +121,7 @@ class AcousticValidationConfig:
     skeleton_noise_db: float = -40.0
     skeleton_min_silence: float = 0.1
     skeleton_min_speech: float = 0.05
-    max_snap_distance: float = 0.5   # 扩大声学吸附范围（原 0.25s → 0.5s）
+    max_snap_distance: float = 0.5  # 扩大声学吸附范围（原 0.25s → 0.5s）
     snap_start_margin: float = 0.03
     snap_end_margin: float = 0.01
     confidence_threshold: float = 0.6
@@ -132,7 +130,7 @@ class AcousticValidationConfig:
     flag_threshold_ms: float = 200
     unified_ffmpeg_pass: bool = True
     # 双向修正（默认开启）
-    allow_end_shorten: bool = True         # ★ 允许声学标尺缩短结束时间
+    allow_end_shorten: bool = True  # ★ 允许声学标尺缩短结束时间
     allow_start_pull_earlier: bool = True  # ★ 允许声学标尺将 start 向前吸附
     # ★ 截尾修复：事件 end 落在连续语音骨架段内部时，允许延长到该骨架段
     # 语音终点（同时钳制到下一事件 start 之前，绝不跨静音/吞下一句）。
@@ -188,7 +186,7 @@ class AcousticValidationConfig:
     # evidence 简化为 (start, end, text) 三元组发布到该字段,validator
     # 读取它做区域字符对齐。postprocess_runner 的 validate 调用点不传参,
     # 共享配置对象是管线层到 validator 的唯一通道;None/空时 R1 不触发。
-    arbitration_evidence_regions: Optional[Tuple[Tuple[float, float, str], ...]] = None
+    arbitration_evidence_regions: tuple[tuple[float, float, str], ...] | None = None
 
 
 @dataclass
@@ -215,11 +213,11 @@ class MergingConfig:
     padding_min: float = 0.05
     padding_max: float = 0.20
     pre_split_silence: bool = True
-    pre_split_threshold: float = 0.8   # 减少过度切分（原 0.5s → 0.8s）
+    pre_split_threshold: float = 0.8  # 减少过度切分（原 0.5s → 0.8s）
     min_fragment_duration: float = 0.15
     min_segment_length: float = 0.5
-    protect_single_word: bool = True     # 禁止在单词中间切分
-    min_word_gap_ms: int = 80            # 单词内部允许的最大"静音"（清辅音间隔）
+    protect_single_word: bool = True  # 禁止在单词中间切分
+    min_word_gap_ms: int = 80  # 单词内部允许的最大"静音"（清辅音间隔）
 
 
 @dataclass
@@ -291,18 +289,18 @@ class ASRConfig:
 
     engine: str = "auto"  # auto | faster-whisper | whisper-cpp | funasr | qwen
     model: str = "large-v3"
-    qwen_model_path: Optional[str] = None
+    qwen_model_path: str | None = None
     device: str = "auto"  # auto = 自动检测 GPU/CPU
     compute_type: str = "float16"
-    language: Optional[str] = None
-    whisper_cpp_bin: Optional[str] = None
-    whisper_cpp_model_path: Optional[str] = None
+    language: str | None = None
+    whisper_cpp_bin: str | None = None
+    whisper_cpp_model_path: str | None = None
     beam_size: int = 5
     word_timestamps: bool = True
     condition_on_previous_text: bool = False
     vad_filter: bool = False
     language_mode: str = "single"  # single | mixed | auto
-    global_asr: "GlobalASRConfig" = field(default_factory=GlobalASRConfig)
+    global_asr: GlobalASRConfig = field(default_factory=GlobalASRConfig)
     auto_routing: ASRAutoRoutingConfig = field(default_factory=ASRAutoRoutingConfig)
     engine_pair: ASREnginePairConfig = field(default_factory=ASREnginePairConfig)
     # Hallucination filter thresholds
@@ -338,9 +336,9 @@ class EvidenceReviewConfig:
     local_recovery_min_confidence: float = 0.5
     local_recovery_context_seconds: float = 0.5
     local_recovery_request_tolerance: float = 0.15
-    qwen_model_path: Optional[str] = None
-    forced_aligner_model_path: Optional[str] = None
-    sed_model_path: Optional[str] = None
+    qwen_model_path: str | None = None
+    forced_aligner_model_path: str | None = None
+    sed_model_path: str | None = None
     review_device: str = "auto"
     allow_remote_model_download: bool = False
     left_context: float = 0.8
@@ -351,7 +349,7 @@ class EvidenceReviewConfig:
     high_threshold: float = 0.50
     critical_threshold: float = 0.75
     max_workers: int = 2
-    window_timeout_seconds: Optional[float] = 60.0
+    window_timeout_seconds: float | None = 60.0
     review_policy_version: str = "review-policy-v1"
     cover_policy: str = ""
     engine_policy: str = ""
@@ -381,8 +379,8 @@ class SubtitleBuildConfig:
     gap_handling: GapHandlingConfig = field(default_factory=GapHandlingConfig)
 
     # 帧级无缝衔接（消除字幕闪烁）
-    frame_seamless: bool = True           # 非句尾字幕自动衔接到下一句
-    max_stitch_gap: float = 0.12          # 最多衔接 120ms 的间隙
+    frame_seamless: bool = True  # 非句尾字幕自动衔接到下一句
+    max_stitch_gap: float = 0.12  # 最多衔接 120ms 的间隙
 
 
 @dataclass
@@ -391,11 +389,11 @@ class LLMOptimizeConfig:
 
     enabled: bool = False
     model: str = "deepseek-v4-pro"
-    batch_num: int = 5   # 较小的批次减少 LLM 跨条目混淆
+    batch_num: int = 5  # 较小的批次减少 LLM 跨条目混淆
     thread_num: int = 4
     temperature: float = 0.2
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
+    base_url: str | None = None
+    api_key: str | None = None
 
 
 @dataclass
@@ -432,7 +430,7 @@ class NoiseReductionConfig:
 class DiarizationConfig:
     """Stage 3.5: 说话人分离配置（基于音色聚类）"""
 
-    enabled: bool = True   # 默认启用说话人分离
+    enabled: bool = True  # 默认启用说话人分离
     engine: str = "agglomerative"  # 聚类引擎: agglomerative
     backend: str = "auto"  # 后端: auto | pyannote | legacy
     fusion_mode: str = "auto"  # auto | embedding | dual
@@ -441,7 +439,7 @@ class DiarizationConfig:
     distance_threshold: float = 0.5  # 凝聚聚类合并阈值（余弦距离）
     min_speakers: int = 1  # 最少说话人数
     max_speakers: int = 10  # 最多说话人数
-    expected_speakers: Optional[int] = None  # 已知说话人数（None = 自动推断）
+    expected_speakers: int | None = None  # 已知说话人数（None = 自动推断）
     use_pca: bool = True  # 聚类前是否 PCA 降维
     pca_variance: float = 0.95  # PCA 保留的方差比例
     text_fallback: bool = True  # 声学聚类失败时启用文本模式降级
@@ -469,9 +467,9 @@ class SpeakerRoleConfig:
     enabled: bool = False
     model: str = "deepseek-v4-pro"  # LLM 模型
     temperature: float = 0.2
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    context_hint: Optional[str] = None  # 场景提示: podcast, lecture, interview
+    base_url: str | None = None
+    api_key: str | None = None
+    context_hint: str | None = None  # 场景提示: podcast, lecture, interview
 
 
 @dataclass
@@ -509,27 +507,27 @@ class BoundaryRedundancyConfig:
     enabled: bool = True
 
     # 置信度阈值
-    min_gap_trigger: float = 0.05         # gap < 50ms 触发
+    min_gap_trigger: float = 0.05  # gap < 50ms 触发
     max_energy_slope_trigger: float = 3.0  # 能量斜率 < 3.0 触发
-    confidence_threshold: float = 0.5      # score < 此值触发冗余
+    confidence_threshold: float = 0.5  # score < 此值触发冗余
 
     # 滑动窗口
-    base_overlap_ms: int = 500             # 基础重叠量
-    fast_speech_wps: float = 4.0           # 快速语速阈值（词/秒）
-    fast_overlap_ms: int = 750             # 快速语速重叠量
-    very_fast_overlap_ms: int = 1000       # 极快语速重叠量
-    fusion_window_sec: float = 1.0         # 融合窗半宽
-    max_workers: int = 3                   # 并行 ASR 线程
+    base_overlap_ms: int = 500  # 基础重叠量
+    fast_speech_wps: float = 4.0  # 快速语速阈值（词/秒）
+    fast_overlap_ms: int = 750  # 快速语速重叠量
+    very_fast_overlap_ms: int = 1000  # 极快语速重叠量
+    fusion_window_sec: float = 1.0  # 融合窗半宽
+    max_workers: int = 3  # 并行 ASR 线程
 
     # LLM 仲裁
     llm_model: str = "deepseek-v4-pro"
-    llm_base_url: Optional[str] = None
-    llm_api_key: Optional[str] = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
     llm_temperature: float = 0.1
     llm_timeout: float = 15.0
-    auto_apply_confidence: float = 0.8     # > 此值自动应用
-    review_threshold: float = 0.5          # 50-80% 标记复核
-    fallback_to_rules: bool = True         # 无 LLM 时降级到规则
+    auto_apply_confidence: float = 0.8  # > 此值自动应用
+    review_threshold: float = 0.5  # 50-80% 标记复核
+    fallback_to_rules: bool = True  # 无 LLM 时降级到规则
 
 
 @dataclass
@@ -543,9 +541,9 @@ class DegradationConfig:
     mode="minimal":   仅 VAD + ASR + 规则合并（回退到基线）
     """
 
-    mode: str = "full"                   # "full" | "degraded" | "minimal"
-    preflight_mode: str = "report"       # "report" | "enforce" — 预检失败时仅报告还是阻断
-    per_module_timeout: float = 60.0     # 每个模块最大执行秒数
+    mode: str = "full"  # "full" | "degraded" | "minimal"
+    preflight_mode: str = "report"  # "report" | "enforce" — 预检失败时仅报告还是阻断
+    per_module_timeout: float = 60.0  # 每个模块最大执行秒数
     ffmpeg_timeout: float = 30.0
     llm_api_timeout: float = 15.0
 
@@ -566,12 +564,12 @@ class StreamingConfig:
     控制 Pipeline 离线/流式双模式运行参数。
     """
 
-    chunk_duration: float = 2.0        # 每次处理的音频窗口（秒）
-    overlap_duration: float = 0.5      # 窗口重叠（秒）
-    max_latency: float = 3.0           # 最大允许延迟（秒）
+    chunk_duration: float = 2.0  # 每次处理的音频窗口（秒）
+    overlap_duration: float = 0.5  # 窗口重叠（秒）
+    max_latency: float = 3.0  # 最大允许延迟（秒）
     # 流式降级
-    llm_fallback: str = "local_nlp"   # "local_nlp" | "rule_only"
-    vad_engine: str = "silero"         # 流式模式下只用 Silero（最快）
+    llm_fallback: str = "local_nlp"  # "local_nlp" | "rule_only"
+    vad_engine: str = "silero"  # 流式模式下只用 Silero（最快）
 
 
 @dataclass
@@ -581,35 +579,37 @@ class FeedbackConfig:
     基于用户修订字幕的自适应参数学习引擎配置。
     """
 
-    enabled: bool = True                    # 是否启用反馈学习
+    enabled: bool = True  # 是否启用反馈学习
     user_profile_dir: str = "~/.vocal_subtitle/profiles"
-    active_profile: str = "user_default"    # 当前活跃的用户配置
+    active_profile: str = "user_default"  # 当前活跃的用户配置
 
     # 运行时应用（D38：overrides 接线，默认关——维持纯收集语义）
-    apply_overrides_on_run: bool = False    # 任务提交构建配置时合并 active_profile 的 overrides
+    apply_overrides_on_run: bool = (
+        False  # 任务提交构建配置时合并 active_profile 的 overrides
+    )
 
     # 对齐参数
-    alignment_min_iou: float = 0.3          # 最小时间交并比
-    alignment_min_coverage: float = 0.60    # 最低对齐覆盖率（低于此值拒绝学习）
-    alignment_text_weight: float = 0.30     # 字面文本相似度权重
-    alignment_semantic_weight: float = 0.35 # 语义相似度权重
-    alignment_semantic_enabled: bool = True # 是否启用语义相似度
+    alignment_min_iou: float = 0.3  # 最小时间交并比
+    alignment_min_coverage: float = 0.60  # 最低对齐覆盖率（低于此值拒绝学习）
+    alignment_text_weight: float = 0.30  # 字面文本相似度权重
+    alignment_semantic_weight: float = 0.35  # 语义相似度权重
+    alignment_semantic_enabled: bool = True  # 是否启用语义相似度
 
     # 学习参数
-    min_samples_to_learn: int = 3           # 最少样本数才触发参数更新
-    base_learn_rate: float = 0.10           # 基础学习率
-    max_learn_rate: float = 0.35            # 最大学习率
-    param_isolation_enabled: bool = True    # 是否启用参数隔离调整
+    min_samples_to_learn: int = 3  # 最少样本数才触发参数更新
+    base_learn_rate: float = 0.10  # 基础学习率
+    max_learn_rate: float = 0.35  # 最大学习率
+    param_isolation_enabled: bool = True  # 是否启用参数隔离调整
 
     # 分级衰减 (天)
-    decay_long_term_days: int = 180         # 长期偏好半衰期
-    decay_medium_term_days: int = 90        # 中期偏好半衰期（默认）
-    decay_short_term_days: int = 60         # 短期环境半衰期
+    decay_long_term_days: int = 180  # 长期偏好半衰期
+    decay_medium_term_days: int = 90  # 中期偏好半衰期（默认）
+    decay_short_term_days: int = 60  # 短期环境半衰期
 
     # 指纹匹配
     fingerprint_enabled: bool = True
     fingerprint_distance_method: str = "mahalanobis"  # "mahalanobis" | "cosine"
-    fingerprint_knn_k: int = 3              # 动态阈值 KNN 的 K 值
+    fingerprint_knn_k: int = 3  # 动态阈值 KNN 的 K 值
     fingerprint_min_absolute_similarity: float = 0.70
     fingerprint_relative_margin: float = 0.08
 
@@ -621,26 +621,28 @@ class FeedbackConfig:
 
     # 安全机制
     auto_rollback_on_quality_drop: bool = True
-    quality_drop_threshold: float = 0.3     # 健康度下降 30% 触发回滚
-    oscillation_detection_window: int = 5   # 震荡检测窗口（次）
+    quality_drop_threshold: float = 0.3  # 健康度下降 30% 触发回滚
+    oscillation_detection_window: int = 5  # 震荡检测窗口（次）
 
     # Few-shot
     few_shot_max_examples: int = 3
-    few_shot_max_cache: int = 20            # 最大缓存示例数
+    few_shot_max_cache: int = 20  # 最大缓存示例数
     few_shot_min_weight_to_inject: float = 0.3  # 注入 Prompt 的最低权重
     few_shot_enabled: bool = True
 
     # 编辑日志摄取（edit-journal-v1 第三触发通道）
-    journal_enabled: bool = True            # 是否消费编辑日志数据
+    journal_enabled: bool = True  # 是否消费编辑日志数据
 
     # sink 保留策略（D30：防止 cache/journal_sink/ 在无人 ingest 时无限堆积）
-    journal_sink_retention: str = "archive"  # 消费成功后源文件处理：archive=归档到 consumed/ | delete=直接删除
-    journal_sink_ttl_days: int = 30          # 未消费文件 TTL 兜底清理（天；<=0 禁用清理）
+    journal_sink_retention: str = (
+        "archive"  # 消费成功后源文件处理：archive=归档到 consumed/ | delete=直接删除
+    )
+    journal_sink_ttl_days: int = 30  # 未消费文件 TTL 兜底清理（天；<=0 禁用清理）
 
     # V3 触发机制（D16：只定机制与可配置阈值，不定数值——等 V1 数据分布校准）
-    v3_trigger_min_samples: Optional[int] = None       # D2+journal 样本数下限
-    v3_trigger_min_coverage: Optional[float] = None    # 对齐/出处覆盖率下限 [0,1]
-    v3_trigger_max_conflict_rate: Optional[float] = None  # 参数冲突率上限 [0,1]
+    v3_trigger_min_samples: int | None = None  # D2+journal 样本数下限
+    v3_trigger_min_coverage: float | None = None  # 对齐/出处覆盖率下限 [0,1]
+    v3_trigger_max_conflict_rate: float | None = None  # 参数冲突率上限 [0,1]
 
 
 @dataclass
@@ -648,7 +650,7 @@ class PipelineConfig:
     """完整管道配置"""
 
     # 运行模式
-    mode: str = "offline"              # "offline" | "streaming"
+    mode: str = "offline"  # "offline" | "streaming"
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
 
     separation: SeparationConfig = field(default_factory=SeparationConfig)
@@ -679,9 +681,7 @@ class PipelineConfig:
     boundary_redundancy: BoundaryRedundancyConfig = field(
         default_factory=BoundaryRedundancyConfig
     )
-    noise_reduction: NoiseReductionConfig = field(
-        default_factory=NoiseReductionConfig
-    )
+    noise_reduction: NoiseReductionConfig = field(default_factory=NoiseReductionConfig)
     degradation: DegradationConfig = field(default_factory=DegradationConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)

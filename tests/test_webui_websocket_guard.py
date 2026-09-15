@@ -5,9 +5,8 @@ StaticFiles 断言 scope type 为 http 而抛 AssertionError → 500。
 修复后应被干净拒绝(403),前端正常路径(/ws/tasks/{id})不受影响。
 """
 
-from fastapi.testclient import TestClient
-
 import pytest
+from fastapi.testclient import TestClient
 
 from vocal_subtitle.webui.app import create_app
 

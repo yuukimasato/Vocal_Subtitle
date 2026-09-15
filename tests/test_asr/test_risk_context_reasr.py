@@ -32,7 +32,11 @@ def _timed_word(start, end, confidence=0.9):
 
 def _event(index=1, text="hello", start=1.0, end=2.0, words=()):
     return SimpleNamespace(
-        index=index, start=start, end=end, text=text, words=list(words),
+        index=index,
+        start=start,
+        end=end,
+        text=text,
+        words=list(words),
     )
 
 
@@ -144,9 +148,7 @@ def test_medium_conflict_window_still_gets_reviewed():
 
     assert len(engine.calls) == 1
     risk_codes = {
-        code
-        for item in result.diagnostics["risk"]
-        for code in item["evidence_codes"]
+        code for item in result.diagnostics["risk"] for code in item["evidence_codes"]
     }
     assert "global_text_conflict" in risk_codes
 
@@ -157,13 +159,13 @@ def test_min_level_high_skips_medium_windows():
     high = _event(index=2, text="0123456789abcdefgh", start=5.0, end=6.0)  # high
 
     result = _run(
-        _config(context_reasr_min_level="high"), [medium, high], engine,
+        _config(context_reasr_min_level="high"),
+        [medium, high],
+        engine,
     )
 
     # 只复核了 high 候选(index=2)所在的窗口,medium 窗口被跳过。
-    reviewed_ids = {
-        candidate_id for _, _, ids in engine.calls for candidate_id in ids
-    }
+    reviewed_ids = {candidate_id for _, _, ids in engine.calls for candidate_id in ids}
     assert reviewed_ids == {"segmented:event:000002"}
     assert result.diagnostics["review"]["reviewed_window_count"] == 1
 

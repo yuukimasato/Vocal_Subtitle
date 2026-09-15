@@ -101,7 +101,9 @@ class DecisionEventProjector:
         from .timeline import PhysicalTimeline
 
         if not isinstance(physical_timeline, PhysicalTimeline):
-            raise DecisionProjectionError("physical_timeline must be a PhysicalTimeline")
+            raise DecisionProjectionError(
+                "physical_timeline must be a PhysicalTimeline"
+            )
         if sample_rate <= 0:
             raise DecisionProjectionError("sample_rate must be positive")
 
@@ -121,9 +123,7 @@ class DecisionEventProjector:
             subtitle_bins=bins or None,
         )
         coverage = (
-            audit_physical_coverage(bins, allocation.allocations)
-            if bins
-            else None
+            audit_physical_coverage(bins, allocation.allocations) if bins else None
         )
         physical_events = build_events(
             allocation,
@@ -134,8 +134,7 @@ class DecisionEventProjector:
             1
             for event in physical_events
             if not any(
-                item.get("stage") == "evidence_decision"
-                and item.get("decision_id")
+                item.get("stage") == "evidence_decision" and item.get("decision_id")
                 for item in event.revision_trace
             )
         )
@@ -148,7 +147,10 @@ class DecisionEventProjector:
                 )
                 for span in event.physical_spans
             )
-            if any(start - previous_end > 0.35 for (_, previous_end), (start, _) in zip(spans, spans[1:])):
+            if any(
+                start - previous_end > 0.35
+                for (_, previous_end), (start, _) in zip(spans, spans[1:])
+            ):
                 cross_silence_count += 1
         decision_by_id = {
             f"decision:{index:06d}": decision
@@ -156,8 +158,7 @@ class DecisionEventProjector:
         }
         for event in events:
             evidence_by_id = {
-                span.id: span.source
-                for span in physical_timeline.speech_evidence_spans
+                span.id: span.source for span in physical_timeline.speech_evidence_spans
             }
             for span in event.physical_spans:
                 sources = [
@@ -170,28 +171,23 @@ class DecisionEventProjector:
             decision_ids = [
                 str(item.get("decision_id"))
                 for item in event.revision_trace
-                if item.get("stage") == "evidence_decision"
-                and item.get("decision_id")
+                if item.get("stage") == "evidence_decision" and item.get("decision_id")
             ]
             source_decisions = [
-                decision_by_id[item]
-                for item in decision_ids
-                if item in decision_by_id
+                decision_by_id[item] for item in decision_ids if item in decision_by_id
             ]
             if not source_decisions:
                 continue
             overlaps = [
-                span for span in event.physical_spans
-                if span.get("physical_clip_id")
+                span for span in event.physical_spans if span.get("physical_clip_id")
             ]
             if overlaps:
-                clip_ids = {
-                    str(span["physical_clip_id"]) for span in overlaps
-                }
+                clip_ids = {str(span["physical_clip_id"]) for span in overlaps}
                 if len(clip_ids) == 1:
                     event.physical_region_id = next(iter(clip_ids))
                 timeline_overlaps = [
-                    span for decision in source_decisions
+                    span
+                    for decision in source_decisions
                     for span in physical_timeline.speech_evidence_spans
                     if min(float(decision.end or event.end), span.end)
                     > max(float(decision.start or event.start), span.start)
@@ -239,7 +235,9 @@ class DecisionEventProjector:
             "cross_silence_count": cross_silence_count,
             "decision_trace_missing_count": trace_missing,
             "raw_event_bypass_count": trace_missing,
-            "coverage": coverage.to_dict() if coverage is not None else {
+            "coverage": coverage.to_dict()
+            if coverage is not None
+            else {
                 "complete": False,
                 "status": "no_physical_speech_bins",
             },
@@ -271,16 +269,15 @@ class DecisionEventProjector:
                 speaker_id=word.speaker_id,
             )
             for word in decision.final_words
-            if word.start is not None
-            and word.end is not None
-            and word.end > word.start
+            if word.start is not None and word.end is not None and word.end > word.start
         ]
         source_word_ids = [word.id for word in decision.final_words]
         if not source_word_ids:
             source_word_ids = list(decision.candidate_ids)
 
         speaker_ids = {
-            word.speaker_id for word in decision.final_words
+            word.speaker_id
+            for word in decision.final_words
             if word.speaker_id is not None
         }
         physical = decision.physical_validation or {}
@@ -298,7 +295,9 @@ class DecisionEventProjector:
         if physical_timeline is not None:
             overlaps = [
                 span
-                for span in (getattr(physical_timeline, "speech_evidence_spans", ()) or ())
+                for span in (
+                    getattr(physical_timeline, "speech_evidence_spans", ()) or ()
+                )
                 if min(decision.end, span.end) > max(decision.start, span.start)
             ]
             if not overlaps:
@@ -307,13 +306,9 @@ class DecisionEventProjector:
                 physical_start = max(
                     decision.start, min(span.start for span in overlaps)
                 )
-                physical_end = min(
-                    decision.end, max(span.end for span in overlaps)
-                )
+                physical_end = min(decision.end, max(span.end for span in overlaps))
                 clip_ids = {
-                    span.physical_clip_id
-                    for span in overlaps
-                    if span.physical_clip_id
+                    span.physical_clip_id for span in overlaps if span.physical_clip_id
                 }
                 if physical_region_id is None and len(clip_ids) == 1:
                     physical_region_id = next(iter(clip_ids))
@@ -359,7 +354,8 @@ class DecisionEventProjector:
                 "decision_id": decision.decision_id,
                 "final_event_ids": [f"final:event:{index:06d}"],
                 "physical_span_ids": [
-                    item.get("id") for item in physical_spans
+                    item.get("id")
+                    for item in physical_spans
                     if isinstance(item, dict) and item.get("id")
                 ],
             },

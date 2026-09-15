@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
-import logging
 import asyncio
-from pathlib import Path
-from typing import Any, Dict, List
+import logging
 
 from fastapi import APIRouter, Form, HTTPException, Query
 
+from ..asr.funasr_manager import FunASRPrepareError
 from ..config import ConfigLoader
 from ..utils.gpu_detector import GPUDetector
 from . import api_services as services
-from .models import *
+from .models import (
+    DeviceInfoResponse,
+    FunASRPrepareRequest,
+    ProfileInfo,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-@router.get("/profiles", response_model=List[ProfileInfo])
+
+@router.get("/profiles", response_model=list[ProfileInfo])
 async def list_profiles():
     """获取所有可用场景模板"""
     loader = ConfigLoader()
@@ -146,12 +150,18 @@ async def download_speaker_model(model_id: str, token: str = Form(default="")):
 
             store_hf_token(submitted_token)
         except ImportError:
-            logger.warning("HF Token storage is unavailable; using token for this request only")
+            logger.warning(
+                "HF Token storage is unavailable; using token for this request only"
+            )
         except (OSError, ValueError) as exc:
-            logger.warning("Could not persist HF Token securely: %s", type(exc).__name__)
+            logger.warning(
+                "Could not persist HF Token securely: %s", type(exc).__name__
+            )
 
     try:
-        result = await asyncio.to_thread(download_model, model_id, token=submitted_token or None)
+        result = await asyncio.to_thread(
+            download_model, model_id, token=submitted_token or None
+        )
         result.pop("cache_dir", None)
         return result
     except KeyError as exc:

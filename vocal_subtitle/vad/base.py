@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 
@@ -22,7 +21,7 @@ class SpeechSegment:
     start: float
     end: float
     confidence: float = 1.0
-    audio: Optional[np.ndarray] = field(default=None, repr=False, compare=False)
+    audio: np.ndarray | None = field(default=None, repr=False, compare=False)
 
     @property
     def duration(self) -> float:
@@ -54,7 +53,7 @@ class VADEngine(ABC):
         threshold: float = 0.5,
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 400,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """检测语音区间
 
         Args:
@@ -76,7 +75,7 @@ class VADEngine(ABC):
         threshold: float = 0.5,
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 400,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """在 numpy 数组上检测（避免重复 I/O）
 
         Args:

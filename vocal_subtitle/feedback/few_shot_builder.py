@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +24,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class FewShotExample:
     """一条 Few-shot 示例"""
+
     example_type: str  # "merge" | "split" | "format"
-    fragments: List[str] = field(default_factory=list)
-    decision: str = ""       # "MERGE" | "SPLIT"
+    fragments: list[str] = field(default_factory=list)
+    decision: str = ""  # "MERGE" | "SPLIT"
     reason: str = ""
-    split_after: str = ""    # 拆分点文本
-    rule: str = ""            # 格式规则
-    weight: float = 1.0      # 当前权重 [0, 1]
+    split_after: str = ""  # 拆分点文本
+    rule: str = ""  # 格式规则
+    weight: float = 1.0  # 当前权重 [0, 1]
     created_at: str = ""
     last_hit_at: str = ""
 
@@ -45,9 +46,12 @@ class FewShotExample:
         """更新最近命中时间"""
         self.last_hit_at = datetime.now().isoformat()
 
-    def decayed_weight(self, half_life_days: int = 180, current_time: Optional[datetime] = None) -> float:
+    def decayed_weight(
+        self, half_life_days: int = 180, current_time: datetime | None = None
+    ) -> float:
         """计算衰减后的权重"""
         import math
+
         try:
             record_time = datetime.fromisoformat(self.created_at)
         except (ValueError, TypeError):
@@ -59,7 +63,7 @@ class FewShotExample:
         decay = math.exp(-elapsed_days / half_life_days)
         return self.weight * decay
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.example_type,
             "fragments": self.fragments,
@@ -73,7 +77,7 @@ class FewShotExample:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "FewShotExample":
+    def from_dict(cls, data: dict[str, Any]) -> "FewShotExample":
         return cls(
             example_type=data.get("type", ""),
             fragments=data.get("fragments", []),
@@ -104,7 +108,7 @@ class FewShotCacheManager:
     def __init__(self, max_capacity: int = 20, half_life_days: int = 180):
         self.max_capacity = max_capacity
         self.half_life_days = half_life_days
-        self._cache: List[FewShotExample] = []
+        self._cache: list[FewShotExample] = []
 
     def add(self, example: FewShotExample) -> None:
         """添加示例（含自动淘汰逻辑）"""
@@ -113,7 +117,9 @@ class FewShotCacheManager:
             if self._is_duplicate(existing, example):
                 existing.touch()
                 existing.weight = max(existing.weight, example.weight)
-                logger.debug("FewShot cache: duplicate detected, updated existing example")
+                logger.debug(
+                    "FewShot cache: duplicate detected, updated existing example"
+                )
                 return
 
         # 2. 衰减淘汰
@@ -123,16 +129,23 @@ class FewShotCacheManager:
         if len(self._cache) >= self.max_capacity:
             self._cache.sort(key=lambda ex: ex.last_hit_at)
             removed = self._cache.pop(0)
-            logger.debug("FewShot cache: LRU eviction removed example (last_hit=%s)", removed.last_hit_at)
+            logger.debug(
+                "FewShot cache: LRU eviction removed example (last_hit=%s)",
+                removed.last_hit_at,
+            )
 
         self._cache.append(example)
-        logger.info("FewShot cache: added example (type=%s), total=%d", example.example_type, len(self._cache))
+        logger.info(
+            "FewShot cache: added example (type=%s), total=%d",
+            example.example_type,
+            len(self._cache),
+        )
 
     def get_active_examples(
         self,
         max_count: int = 3,
         min_weight: float = 0.3,
-    ) -> List[FewShotExample]:
+    ) -> list[FewShotExample]:
         """获取当前活跃的示例（按权重排序，取 Top-K）
 
         Args:
@@ -144,7 +157,8 @@ class FewShotCacheManager:
         """
         now = datetime.now()
         active = [
-            ex for ex in self._cache
+            ex
+            for ex in self._cache
             if ex.decayed_weight(self.half_life_days, now) >= min_weight
         ]
         active.sort(
@@ -160,7 +174,9 @@ class FewShotCacheManager:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             self._cache = [FewShotExample.from_dict(item) for item in data]
-            logger.info("FewShot cache: loaded %d examples from %s", len(self._cache), path)
+            logger.info(
+                "FewShot cache: loaded %d examples from %s", len(self._cache), path
+            )
         except Exception as e:
             logger.warning("Failed to load few-shot cache: %s", e)
 
@@ -168,7 +184,9 @@ class FewShotCacheManager:
         """保存缓存到 JSON 文件"""
         path.parent.mkdir(parents=True, exist_ok=True)
         data = [ex.to_dict() for ex in self._cache]
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         logger.debug("FewShot cache: saved %d examples to %s", len(self._cache), path)
 
     def size(self) -> int:
@@ -179,7 +197,8 @@ class FewShotCacheManager:
         now = datetime.now()
         before = len(self._cache)
         self._cache = [
-            ex for ex in self._cache
+            ex
+            for ex in self._cache
             if ex.decayed_weight(self.half_life_days, now) >= 0.15
         ]
         removed = before - len(self._cache)
@@ -219,7 +238,7 @@ class FewShotBuilder:
 
     def __init__(
         self,
-        cache_manager: Optional[FewShotCacheManager] = None,
+        cache_manager: FewShotCacheManager | None = None,
         max_examples: int = 3,
     ):
         self._cache = cache_manager or FewShotCacheManager()
@@ -227,9 +246,9 @@ class FewShotBuilder:
 
     def build_merge_examples(
         self,
-        merge_actions: List[Any],
-        max_examples: Optional[int] = None,
-    ) -> List[FewShotExample]:
+        merge_actions: list[Any],
+        max_examples: int | None = None,
+    ) -> list[FewShotExample]:
         """将合并/拆分动作构建为 Few-shot 示例
 
         Args:
@@ -269,9 +288,9 @@ class FewShotBuilder:
 
     def build_format_examples(
         self,
-        text_edits: List[Any],
-        max_examples: Optional[int] = None,
-    ) -> List[FewShotExample]:
+        text_edits: list[Any],
+        max_examples: int | None = None,
+    ) -> list[FewShotExample]:
         """将文本格式修改构建为 Few-shot 示例
 
         Args:
@@ -299,7 +318,7 @@ class FewShotBuilder:
     def inject_into_prompt(
         self,
         base_prompt: str,
-        max_examples: Optional[int] = None,
+        max_examples: int | None = None,
         min_weight: float = 0.3,
     ) -> str:
         """将 Few-shot 示例注入基础 Prompt
@@ -330,14 +349,14 @@ class FewShotBuilder:
         for i, ex in enumerate(examples, 1):
             if ex.example_type == "merge":
                 fragments_text = " | ".join(ex.fragments)
-                lines.append(f"[示例{i}] 合并: \"{fragments_text}\" → {ex.decision}")
+                lines.append(f'[示例{i}] 合并: "{fragments_text}" → {ex.decision}')
                 if ex.reason:
                     lines.append(f"  理由: {ex.reason}")
             elif ex.example_type == "split":
                 fragments_text = " | ".join(ex.fragments)
-                lines.append(f"[示例{i}] 拆分: \"{fragments_text}\"")
+                lines.append(f'[示例{i}] 拆分: "{fragments_text}"')
                 if ex.split_after:
-                    lines.append(f"  拆分点: \"{ex.split_after}\"")
+                    lines.append(f'  拆分点: "{ex.split_after}"')
                 if ex.reason:
                     lines.append(f"  理由: {ex.reason}")
             elif ex.example_type == "format":
@@ -351,7 +370,10 @@ class FewShotBuilder:
     def get_cache_path(self, profile_name: str) -> Path:
         """获取缓存文件路径"""
         from pathlib import Path
-        return Path.home() / ".vocal_subtitle" / "few_shot_cache" / f"{profile_name}.json"
+
+        return (
+            Path.home() / ".vocal_subtitle" / "few_shot_cache" / f"{profile_name}.json"
+        )
 
     def load_cache(self, profile_name: str = "user_default") -> None:
         """加载缓存"""

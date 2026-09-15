@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from . import merge_constraints, merge_policy
 
@@ -36,7 +37,7 @@ class LLMMergeDecider:
     def __init__(self, config: Any):
         self.config = config
 
-    def decide(self, candidates: List[Dict]) -> List[Dict]:
+    def decide(self, candidates: list[dict]) -> list[dict]:
         try:
             return self.decide_core(candidates)
         except Exception:
@@ -44,9 +45,11 @@ class LLMMergeDecider:
                 return self.fallback_rule_decisions(candidates)
             raise
 
-    def decide_core(self, candidates: List[Dict]) -> List[Dict]:
+    def decide_core(self, candidates: list[dict]) -> list[dict]:
         cfg = self.config
-        api_url = f"{cfg.llm_base_url}/v1/chat/completions" if cfg.llm_base_url else None
+        api_url = (
+            f"{cfg.llm_base_url}/v1/chat/completions" if cfg.llm_base_url else None
+        )
         if not api_url:
             logger.warning("No LLM API URL configured, using fallback rules")
             return self.fallback_rule_decisions(candidates)
@@ -54,24 +57,30 @@ class LLMMergeDecider:
         llm_input = []
         for frag in candidates:
             gap_is_silent = frag.get("gap_is_silent")
-            llm_input.append({
-                "id": frag.get("id", 0),
-                "start": round(float(frag.get("start", 0)), 2),
-                "end": round(float(frag.get("end", 0)), 2),
-                "speaker": str(frag.get("speaker", "unknown")),
-                "text": str(frag.get("text", "")),
-                "gap_to_next_sec": (
-                    round(float(frag.get("gap_to_next_sec", 0)), 3)
-                    if frag.get("gap_to_next_sec") is not None else None
-                ),
-                "gap_is_silent": (
-                    bool(gap_is_silent) if gap_is_silent is not None else None
-                ),
-            })
+            llm_input.append(
+                {
+                    "id": frag.get("id", 0),
+                    "start": round(float(frag.get("start", 0)), 2),
+                    "end": round(float(frag.get("end", 0)), 2),
+                    "speaker": str(frag.get("speaker", "unknown")),
+                    "text": str(frag.get("text", "")),
+                    "gap_to_next_sec": (
+                        round(float(frag.get("gap_to_next_sec", 0)), 3)
+                        if frag.get("gap_to_next_sec") is not None
+                        else None
+                    ),
+                    "gap_is_silent": (
+                        bool(gap_is_silent) if gap_is_silent is not None else None
+                    ),
+                }
+            )
 
         messages = [
             {"role": "system", "content": MERGE_DECISION_PROMPT},
-            {"role": "user", "content": json.dumps(llm_input, ensure_ascii=False, indent=2)},
+            {
+                "role": "user",
+                "content": json.dumps(llm_input, ensure_ascii=False, indent=2),
+            },
         ]
         payload = {
             "model": cfg.llm_model,
@@ -99,15 +108,16 @@ class LLMMergeDecider:
             end = content.index("```", start)
             json_str = content[start:end].strip()
         elif "{" in content:
-            json_str = content[content.index("{"):content.rindex("}") + 1]
+            json_str = content[content.index("{") : content.rindex("}") + 1]
         else:
             json_str = content
         groups = json.loads(json_str).get("merge_groups", [])
-        logger.info("LLM merge: %d candidates -> %d groups", len(candidates), len(groups))
+        logger.info(
+            "LLM merge: %d candidates -> %d groups", len(candidates), len(groups)
+        )
         return groups
 
-    def fallback_rule_decisions(self, candidates: Sequence[Dict]) -> List[Dict]:
-        cfg = self.config
+    def fallback_rule_decisions(self, candidates: Sequence[dict]) -> list[dict]:
         groups = []
         sentence_endings = {".", "!", "?", "。", "！", "？"}
         comma_endings = {",", "，", ";", "；"}
@@ -127,24 +137,29 @@ class LLMMergeDecider:
             curr_speaker = frag.get("speaker", "")
             if curr_speaker and next_speaker and curr_speaker != next_speaker:
                 continue
-            if next_frag is not None and not merge_constraints.physical_owner_compatible(
-                frag, next_frag
+            if (
+                next_frag is not None
+                and not merge_constraints.physical_owner_compatible(frag, next_frag)
             ):
                 continue
             if next_text and merge_policy.detect_semantic_boundary(text, next_text):
                 continue
             if text and text[-1] in comma_endings and gap < 0.6:
-                groups.append({
-                    "ids": [frag["id"], next_id],
-                    "reason": "[fallback] comma + moderate gap -> merge",
-                })
+                groups.append(
+                    {
+                        "ids": [frag["id"], next_id],
+                        "reason": "[fallback] comma + moderate gap -> merge",
+                    }
+                )
             elif text and text[-1] in sentence_endings and gap > 0.4:
                 continue
             elif gap < 0.4:
-                groups.append({
-                    "ids": [frag["id"], next_id],
-                    "reason": "[fallback] short gap -> merge",
-                })
+                groups.append(
+                    {
+                        "ids": [frag["id"], next_id],
+                        "reason": "[fallback] short gap -> merge",
+                    }
+                )
         return groups
 
 

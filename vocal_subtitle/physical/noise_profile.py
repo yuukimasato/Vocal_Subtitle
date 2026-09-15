@@ -14,7 +14,7 @@ from __future__ import annotations
 import copy
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -46,11 +46,11 @@ class LocalNoiseProfile:
         metadata: Additional metadata for caching/diagnostics.
     """
 
-    intervals: List[NoiseInterval] = field(default_factory=list)
+    intervals: list[NoiseInterval] = field(default_factory=list)
     fallback_db: float = -35.0
     fallback_applied: bool = False
-    warnings: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def interval_at(self, time: float) -> NoiseInterval | None:
         """Return the stable interval containing ``time``."""
@@ -79,7 +79,7 @@ class LocalNoiseProfile:
             "noise_fallback": 0.0 if interval.stable else 1.0,
         }
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "intervals": [
                 {
@@ -100,7 +100,7 @@ class LocalNoiseProfile:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "LocalNoiseProfile":
+    def from_dict(cls, payload: dict) -> LocalNoiseProfile:
         return cls(
             intervals=[
                 NoiseInterval(
@@ -130,8 +130,8 @@ def _window_rms(audio: np.ndarray, win_samples: int, hop_samples: int) -> np.nda
     rms_values = np.empty(n_frames, dtype=np.float64)
     for i in range(n_frames):
         start = i * hop_samples
-        frame = audio[start:start + win_samples].astype(np.float64)
-        rms_values[i] = np.sqrt(np.mean(frame ** 2))
+        frame = audio[start : start + win_samples].astype(np.float64)
+        rms_values[i] = np.sqrt(np.mean(frame**2))
     return np.maximum(rms_values, 1e-12)  # avoid log(0)
 
 
@@ -182,7 +182,7 @@ def estimate_noise_profile(
     Returns:
         A LocalNoiseProfile with ordered intervals.
     """
-    warnings: List[str] = []
+    warnings: list[str] = []
     duration = len(audio) / max(sample_rate, 1)
 
     if duration < min_interval_duration:
@@ -193,9 +193,13 @@ def estimate_noise_profile(
         return LocalNoiseProfile(
             intervals=[
                 NoiseInterval(
-                    start=0.0, end=duration,
-                    rms_median=rms_floor, rms_mad=0.0,
-                    noise_db=fallback_db, stable=False, sample_count=0,
+                    start=0.0,
+                    end=duration,
+                    rms_median=rms_floor,
+                    rms_mad=0.0,
+                    noise_db=fallback_db,
+                    stable=False,
+                    sample_count=0,
                 )
             ],
             fallback_db=fallback_db,
@@ -214,9 +218,13 @@ def estimate_noise_profile(
         return LocalNoiseProfile(
             intervals=[
                 NoiseInterval(
-                    start=0.0, end=duration,
-                    rms_median=rms_floor, rms_mad=0.0,
-                    noise_db=fallback_db, stable=False, sample_count=0,
+                    start=0.0,
+                    end=duration,
+                    rms_median=rms_floor,
+                    rms_mad=0.0,
+                    noise_db=fallback_db,
+                    stable=False,
+                    sample_count=0,
                 )
             ],
             fallback_db=fallback_db,
@@ -229,12 +237,13 @@ def estimate_noise_profile(
 
     # Use robust quantile to find the noise floor
     noise_quantile = 0.25  # lower quartile tends to be noise
+
     def _noise_percentile(arr: np.ndarray) -> float:
         return float(np.percentile(arr, noise_quantile * 100))
 
     # Compute per-window noise stats
     window_size = max(1, int(min_interval_duration * sample_rate / hop_samples))
-    intervals: List[NoiseInterval] = []
+    intervals: list[NoiseInterval] = []
     applied_fallback = False
 
     for win_start in range(0, len(rms_db), max(1, window_size // 2)):
@@ -255,21 +264,23 @@ def estimate_noise_profile(
         med = float(np.median(rms_segment)) if len(rms_segment) > 0 else rms_floor
         mad = _median_absolute_deviation(rms_segment) if len(rms_segment) > 1 else 0.0
 
-        intervals.append(NoiseInterval(
-            start=float(t_start),
-            end=float(t_end),
-            rms_median=med,
-            rms_mad=mad,
-            noise_db=float(db_val),
-            stable=stable,
-            sample_count=int(len(segment)),
-        ))
+        intervals.append(
+            NoiseInterval(
+                start=float(t_start),
+                end=float(t_end),
+                rms_median=med,
+                rms_mad=mad,
+                noise_db=float(db_val),
+                stable=stable,
+                sample_count=int(len(segment)),
+            )
+        )
 
         if len(intervals) >= max_intervals:
             break
 
     # Merge adjacent intervals with similar noise floors (hysteresis-gated)
-    merged: List[NoiseInterval] = []
+    merged: list[NoiseInterval] = []
     for iv in intervals:
         if not merged:
             merged.append(iv)
@@ -281,16 +292,24 @@ def estimate_noise_profile(
                 start=last.start,
                 end=iv.end,
                 rms_median=(
-                    last.rms_median * last.sample_count + iv.rms_median * iv.sample_count
-                ) / max(last.sample_count + iv.sample_count, 1),
+                    last.rms_median * last.sample_count
+                    + iv.rms_median * iv.sample_count
+                )
+                / max(last.sample_count + iv.sample_count, 1),
                 rms_mad=max(last.rms_mad, iv.rms_mad),
-                noise_db=(last.noise_db * last.sample_count + iv.noise_db * iv.sample_count)
+                noise_db=(
+                    last.noise_db * last.sample_count + iv.noise_db * iv.sample_count
+                )
                 / max(last.sample_count + iv.sample_count, 1),
                 stable=last.stable and iv.stable,
                 sample_count=last.sample_count + iv.sample_count,
             )
         else:
-            if iv.end - last.end >= min_interval_duration or not merged or iv is intervals[-1]:
+            if (
+                iv.end - last.end >= min_interval_duration
+                or not merged
+                or iv is intervals[-1]
+            ):
                 merged.append(iv)
 
     if applied_fallback:

@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from typing import Any, Callable, Dict, Mapping, Optional, TypeVar
-
+from collections.abc import Callable, Mapping
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 IR_CACHE_VERSION = "ir-cache-v1"
@@ -20,15 +20,19 @@ def _json_safe(value: Any, path: str = "$") -> Any:
             raise ValueError(f"non-finite number at {path}")
         return value
     if isinstance(value, (list, tuple)):
-        return [_json_safe(item, f"{path}[{index}]") for index, item in enumerate(value)]
+        return [
+            _json_safe(item, f"{path}[{index}]") for index, item in enumerate(value)
+        ]
     if isinstance(value, Mapping):
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         for key, item in value.items():
             if not isinstance(key, (str, int, float, bool)):
                 raise ValueError(f"unsupported mapping key at {path}")
             key_text = str(key)
             if key_text in result:
-                raise ValueError(f"duplicate canonical mapping key at {path}: {key_text}")
+                raise ValueError(
+                    f"duplicate canonical mapping key at {path}: {key_text}"
+                )
             result[key_text] = _json_safe(item, f"{path}.{key_text}")
         return result
     raise ValueError(f"value at {path} is not JSON-safe")
@@ -59,7 +63,7 @@ def _required_text(value: Any, name: str) -> str:
     return value
 
 
-def _duration(value: Optional[float]) -> Optional[float]:
+def _duration(value: float | None) -> float | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -70,7 +74,7 @@ def _duration(value: Optional[float]) -> Optional[float]:
     return result
 
 
-def _validate_additional_params(value: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+def _validate_additional_params(value: Mapping[str, Any] | None) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, Mapping):
@@ -91,11 +95,11 @@ def make_ir_cache_key(
     schema_version: str,
     producer_version: str,
     input_sha256: str,
-    audio_duration: Optional[float],
+    audio_duration: float | None,
     timeline_fingerprint: str,
     coordinate_policy: str,
     context_policy: str,
-    additional_params: Optional[Mapping[str, Any]] = None,
+    additional_params: Mapping[str, Any] | None = None,
 ) -> str:
     """Build a versioned key without exposing paths or credentials."""
     payload = {
@@ -105,7 +109,9 @@ def make_ir_cache_key(
         "producer_version": _required_text(producer_version, "producer_version"),
         "input_sha256": _required_text(input_sha256, "input_sha256"),
         "audio_duration": _duration(audio_duration),
-        "timeline_fingerprint": _required_text(timeline_fingerprint, "timeline_fingerprint"),
+        "timeline_fingerprint": _required_text(
+            timeline_fingerprint, "timeline_fingerprint"
+        ),
         "coordinate_policy": _required_text(coordinate_policy, "coordinate_policy"),
         "context_policy": _required_text(context_policy, "context_policy"),
         "additional_params": _validate_additional_params(additional_params),
@@ -113,7 +119,7 @@ def make_ir_cache_key(
     return fingerprint_ir(payload)
 
 
-def encode_ir_value(value: Any) -> Dict[str, Any]:
+def encode_ir_value(value: Any) -> dict[str, Any]:
     """Convert an IR ``to_dict()`` result to a JSON-safe dictionary."""
     if hasattr(value, "to_dict") and callable(value.to_dict):
         value = value.to_dict()
@@ -129,8 +135,8 @@ def decode_ir_value(
     payload: Any,
     loader: Callable[[Mapping[str, Any]], T],
     *,
-    expected_schema_version: Optional[str] = None,
-) -> Optional[T]:
+    expected_schema_version: str | None = None,
+) -> T | None:
     """Load a cache value; all validation/loader failures become a miss."""
     if not isinstance(payload, Mapping):
         return None
@@ -138,7 +144,10 @@ def decode_ir_value(
         safe = _json_safe(payload)
         if not isinstance(safe, dict):
             return None
-        if expected_schema_version is not None and safe.get("schema_version") != expected_schema_version:
+        if (
+            expected_schema_version is not None
+            and safe.get("schema_version") != expected_schema_version
+        ):
             return None
         return loader(safe)
     except Exception:
@@ -151,7 +160,7 @@ def persist_ir_value(
     key: str,
     value: Any,
     *,
-    ttl: Optional[int] = None,
+    ttl: int | None = None,
 ) -> bool:
     """Persist a JSON-safe IR value through a CacheManager-like object."""
     try:
@@ -168,8 +177,8 @@ def load_ir_value(
     key: str,
     loader: Callable[[Mapping[str, Any]], T],
     *,
-    expected_schema_version: Optional[str] = None,
-) -> Optional[T]:
+    expected_schema_version: str | None = None,
+) -> T | None:
     """Load a persisted IR value; malformed entries are cache misses."""
     try:
         payload = cache.get(artifact_type, key)

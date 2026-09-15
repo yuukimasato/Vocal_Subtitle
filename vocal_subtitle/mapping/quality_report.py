@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 
 @dataclass
@@ -22,8 +22,8 @@ class DimensionScore:
     name: str  # acoustic | semantic | speaker | structure
     score: float  # 0.0-1.0
     grade: str  # excellent | good | fair | poor
-    issues: List[str] = field(default_factory=list)
-    metrics: Dict[str, Any] = field(default_factory=dict)
+    issues: list[str] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -37,12 +37,12 @@ class QualityReport:
     semantic: DimensionScore
     speaker: DimensionScore
     structure: DimensionScore
-    pipeline_timing: Dict[str, float] = field(default_factory=dict)
-    resource_usage: Dict[str, Any] = field(default_factory=dict)
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    pipeline_timing: dict[str, float] = field(default_factory=dict)
+    resource_usage: dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
-        def _dim(d: DimensionScore) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        def _dim(d: DimensionScore) -> dict[str, Any]:
             return {
                 "name": d.name,
                 "score": d.score,
@@ -50,6 +50,7 @@ class QualityReport:
                 "issues": list(d.issues),
                 "metrics": dict(d.metrics),
             }
+
         return {
             "acoustic": _dim(self.acoustic),
             "semantic": _dim(self.semantic),
@@ -74,15 +75,15 @@ def _grade(score: float) -> str:
 
 def build_quality_report(
     *,
-    coverage_report: Optional[Dict[str, Any]] = None,
-    noise_profile_diagnostics: Optional[Dict[str, Any]] = None,
-    boundary_decision_stats: Optional[Dict[str, Any]] = None,
-    allocation_diagnostics: Optional[Dict[str, Any]] = None,
-    llm_window_diagnostics: Optional[Dict[str, Any]] = None,
-    projection_diagnostics: Optional[Dict[str, Any]] = None,
-    final_validation_diagnostics: Optional[Dict[str, Any]] = None,
-    speaker_timeline_diagnostics: Optional[Dict[str, Any]] = None,
-    pipeline_timing: Optional[Dict[str, float]] = None,
+    coverage_report: dict[str, Any] | None = None,
+    noise_profile_diagnostics: dict[str, Any] | None = None,
+    boundary_decision_stats: dict[str, Any] | None = None,
+    allocation_diagnostics: dict[str, Any] | None = None,
+    llm_window_diagnostics: dict[str, Any] | None = None,
+    projection_diagnostics: dict[str, Any] | None = None,
+    final_validation_diagnostics: dict[str, Any] | None = None,
+    speaker_timeline_diagnostics: dict[str, Any] | None = None,
+    pipeline_timing: dict[str, float] | None = None,
     event_count: int = 0,
 ) -> QualityReport:
     """从各阶段诊断数据构建质量报告。
@@ -90,8 +91,8 @@ def build_quality_report(
     每个维度独立评分，缺失诊断数据将降级但不阻止报告生成。
     """
     # ── 声学边界健康度 ──────────────────────────────────────────────
-    acoustic_issues: List[str] = []
-    acoustic_metrics: Dict[str, Any] = {"event_count": event_count}
+    acoustic_issues: list[str] = []
+    acoustic_metrics: dict[str, Any] = {"event_count": event_count}
 
     if coverage_report:
         covered = coverage_report.get("covered_physical_bin_count", 0)
@@ -102,9 +103,7 @@ def build_quality_report(
             "uncovered_physical_bin_count", 0
         )
         if coverage_ratio < 0.5:
-            acoustic_issues.append(
-                f"physical_coverage_low: {coverage_ratio:.1%}"
-            )
+            acoustic_issues.append(f"physical_coverage_low: {coverage_ratio:.1%}")
     else:
         acoustic_metrics["physical_coverage_ratio"] = None
         acoustic_issues.append("missing_coverage_report")
@@ -126,9 +125,7 @@ def build_quality_report(
         acoustic_metrics["boundary_acceptance_rate"] = round(acceptance_rate, 3)
         acoustic_metrics["timing_degraded_count"] = degraded
         if acceptance_rate < 0.5:
-            acoustic_issues.append(
-                f"boundary_acceptance_low: {acceptance_rate:.1%}"
-            )
+            acoustic_issues.append(f"boundary_acceptance_low: {acceptance_rate:.1%}")
     else:
         acoustic_metrics["boundary_acceptance_rate"] = None
 
@@ -138,8 +135,8 @@ def build_quality_report(
     )
 
     # ── 语义断句健康度 ──────────────────────────────────────────────
-    semantic_issues: List[str] = []
-    semantic_metrics: Dict[str, Any] = {}
+    semantic_issues: list[str] = []
+    semantic_metrics: dict[str, Any] = {}
 
     if allocation_diagnostics:
         rejected = allocation_diagnostics.get("rejected_count", 0)
@@ -161,9 +158,7 @@ def build_quality_report(
         )
         semantic_metrics["llm_fallback_count"] = len(failed_windows)
         if failed_windows:
-            semantic_issues.append(
-                f"llm_windows_failed: {len(failed_windows)}"
-            )
+            semantic_issues.append(f"llm_windows_failed: {len(failed_windows)}")
     else:
         semantic_metrics["llm_window_success_rate"] = None
 
@@ -184,8 +179,8 @@ def build_quality_report(
     )
 
     # ── 说话人健康度 ────────────────────────────────────────────────
-    speaker_issues: List[str] = []
-    speaker_metrics: Dict[str, Any] = {}
+    speaker_issues: list[str] = []
+    speaker_metrics: dict[str, Any] = {}
 
     if speaker_timeline_diagnostics:
         known = speaker_timeline_diagnostics.get("known_speaker_count", 0)
@@ -197,9 +192,7 @@ def build_quality_report(
         speaker_metrics["confirmed_retention"] = round(confirmed, 3)
         speaker_metrics["unknown_speaker_count"] = unknown
         if confirmed < 1.0:
-            speaker_issues.append(
-                f"confirmed_speaker_loss: {1.0 - confirmed:.1%}"
-            )
+            speaker_issues.append(f"confirmed_speaker_loss: {1.0 - confirmed:.1%}")
     else:
         speaker_metrics["known_speaker_ratio"] = None
         speaker_metrics["confirmed_retention"] = None
@@ -210,15 +203,13 @@ def build_quality_report(
     )
 
     # ── 结构健康度 ──────────────────────────────────────────────────
-    structure_issues: List[str] = []
-    structure_metrics: Dict[str, Any] = {"event_count": event_count}
+    structure_issues: list[str] = []
+    structure_metrics: dict[str, Any] = {"event_count": event_count}
 
     if final_validation_diagnostics:
         removed = final_validation_diagnostics.get("removed_count", 0)
         overlaps = final_validation_diagnostics.get("overlap_count", 0)
-        overlap_trimmed = final_validation_diagnostics.get(
-            "overlap_trimmed_count", 0
-        )
+        overlap_trimmed = final_validation_diagnostics.get("overlap_trimmed_count", 0)
         structure_metrics["validation_removed"] = removed
         structure_metrics["non_genuine_overlap_count"] = overlaps
         if overlaps > 0:
@@ -280,7 +271,7 @@ def build_quality_report(
 
 def _dimension_score(
     *,
-    issues: List[str],
+    issues: list[str],
     bonus: float,
 ) -> float:
     """计算单个维度的得分。

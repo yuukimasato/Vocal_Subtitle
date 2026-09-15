@@ -44,17 +44,11 @@ def load_manifest(path: Path, repo_root: Path | None = None) -> list[dict[str, A
             raise ValueError(f"duplicate or empty scene name: {name!r}")
         audio = root / str(item.get("audio", ""))
         ground_truth_value = item.get("ground_truth")
-        ground_truth = (
-            root / str(ground_truth_value)
-            if ground_truth_value
-            else None
-        )
+        ground_truth = root / str(ground_truth_value) if ground_truth_value else None
         if not audio.is_file():
             raise FileNotFoundError(f"{name}: audio not found: {audio}")
         if ground_truth is not None and not ground_truth.is_file():
-            raise FileNotFoundError(
-                f"{name}: ground truth not found: {ground_truth}"
-            )
+            raise FileNotFoundError(f"{name}: ground truth not found: {ground_truth}")
         category = str(item.get("category", "")).strip()
         if not category:
             raise ValueError(f"{name}: category is required")
@@ -83,7 +77,9 @@ def _reference_content_coverage(auto_events, ground_truth_events) -> float:
     checked separately through physical/source-word diagnostics.
     """
     auto_text = _normalized_text("".join(event.text for event in auto_events))
-    reference_text = _normalized_text("".join(event.text for event in ground_truth_events))
+    reference_text = _normalized_text(
+        "".join(event.text for event in ground_truth_events)
+    )
     if not reference_text:
         return 1.0
     matcher = SequenceMatcher(None, reference_text, auto_text, autojunk=False)
@@ -117,13 +113,15 @@ def _text_metrics(auto_path: Path, gt_path: Path) -> dict[str, Any]:
         "matched_event_count": len(matches),
         "unmatched_auto_event_count": len(auto_events) - len(matches),
         "unmatched_ground_truth_event_count": len(gt_events) - len(matches),
-        "mean_text_similarity": round(
-            sum(similarities) / len(similarities), 4
-        ) if similarities else 0.0,
-        "char_error_rate_proxy": round(
-            1.0 - sum(similarities) / len(similarities), 4
-        ) if similarities else 1.0,
-        "reference_content_coverage": _reference_content_coverage(auto_events, gt_events),
+        "mean_text_similarity": round(sum(similarities) / len(similarities), 4)
+        if similarities
+        else 0.0,
+        "char_error_rate_proxy": round(1.0 - sum(similarities) / len(similarities), 4)
+        if similarities
+        else 1.0,
+        "reference_content_coverage": _reference_content_coverage(
+            auto_events, gt_events
+        ),
     }
 
 
@@ -153,7 +151,8 @@ def _run_scene(
         "audio": str(scene["audio_path"].relative_to(repo_root)),
         "ground_truth": (
             str(scene["ground_truth_path"].relative_to(repo_root))
-            if scene["ground_truth_path"] is not None else None
+            if scene["ground_truth_path"] is not None
+            else None
         ),
         "category": scene["category"],
         "expected_speaker_count": scene.get("speaker_count"),
@@ -171,7 +170,11 @@ def _run_scene(
         if no_cache:
             config.cache.enabled = False
         existing_diagnostics = scene_dir / "diagnostic_report.json"
-        if reuse_existing and subtitle_path.is_file() and existing_diagnostics.is_file():
+        if (
+            reuse_existing
+            and subtitle_path.is_file()
+            and existing_diagnostics.is_file()
+        ):
             stats_dict = json.loads(existing_diagnostics.read_text(encoding="utf-8"))
             produced = subtitle_path
             result["reused_existing_output"] = True
@@ -213,9 +216,8 @@ def _run_scene(
         result.update(
             {
                 "success": True,
-                "actual_asr_path": stats_dict.get("asr_path") or (
-                    "global" if stats_dict.get("global_attempted") else "segmented"
-                ),
+                "actual_asr_path": stats_dict.get("asr_path")
+                or ("global" if stats_dict.get("global_attempted") else "segmented"),
                 "global_attempted": stats_dict.get("global_attempted", False),
                 "fallback_category": stats_dict.get("fallback_category"),
                 "fallback_reason": stats_dict.get("fallback_reason"),
@@ -262,16 +264,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--asr-model",
-        choices=("tiny", "base", "small", "medium", "large-v2", "large-v3", "distil-large-v3"),
+        choices=(
+            "tiny",
+            "base",
+            "small",
+            "medium",
+            "large-v2",
+            "large-v3",
+            "distil-large-v3",
+        ),
         default=None,
         help="覆盖配置中的 ASR 模型，用于高精度真实素材验收",
     )
     parser.add_argument(
         "--output-dir", type=Path, default=Path("test/benchmark_results/real_material")
     )
-    parser.add_argument(
-        "--scene", action="append", help="只运行指定场景，可重复传入"
-    )
+    parser.add_argument("--scene", action="append", help="只运行指定场景，可重复传入")
     parser.add_argument(
         "--with-separation",
         action="store_true",
@@ -339,7 +347,9 @@ def main(argv: list[str] | None = None) -> int:
     start_mae = [item["statistics"]["start"]["mae_ms"] for item in comparisons]
     end_mae = [item["statistics"]["end"]["mae_ms"] for item in comparisons]
     content_coverages = [
-        item["comparison"].get("text_metrics", {}).get("reference_content_coverage", 0.0)
+        item["comparison"]
+        .get("text_metrics", {})
+        .get("reference_content_coverage", 0.0)
         for item in successful
         if item.get("comparison")
     ]
@@ -378,8 +388,10 @@ def main(argv: list[str] | None = None) -> int:
         if diagnostic.get("physical_violation_count", 0):
             reasons.append(f"physical_violation:{item['scene']}")
         if item.get("comparison"):
-            coverage = item["comparison"].get("text_metrics", {}).get(
-                "reference_content_coverage", 0.0
+            coverage = (
+                item["comparison"]
+                .get("text_metrics", {})
+                .get("reference_content_coverage", 0.0)
             )
             if coverage < 0.99:
                 reasons.append(f"reference_content_coverage:{item['scene']}")
@@ -392,9 +404,13 @@ def main(argv: list[str] | None = None) -> int:
         "success_count": len(successful),
         "actual_asr_paths": actual_paths,
         "aggregate": {
-            "start_mae_ms": round(sum(start_mae) / len(start_mae), 1) if start_mae else None,
+            "start_mae_ms": round(sum(start_mae) / len(start_mae), 1)
+            if start_mae
+            else None,
             "end_mae_ms": round(sum(end_mae) / len(end_mae), 1) if end_mae else None,
-            "min_reference_content_coverage": min(content_coverages) if content_coverages else None,
+            "min_reference_content_coverage": min(content_coverages)
+            if content_coverages
+            else None,
         },
         "publishable": not reasons,
         "reasons": reasons,

@@ -12,7 +12,11 @@
 
 退出码: 有红色症状 = 1, 全绿 = 0。--json 输出机器可读结果。
 """
-import sys, json, wave
+
+import json
+import sys
+import wave
+
 import numpy as np
 
 ISLAND_THRESH = 0.04
@@ -29,33 +33,60 @@ def parse_cues(path):
             if not line.startswith("Dialogue:"):
                 continue
             p = line.split(",", 9)
-            t = lambda s: (lambda h, m, r: int(h) * 3600 + int(m) * 60 + float(r))(*s.strip().split(":"))
-            cues.append({"start": t(p[1]), "end": t(p[2]), "speaker": p[4].strip(), "text": p[9].strip()})
+
+            def t(s):
+                h, m, r = s.strip().split(":")
+                return int(h) * 3600 + int(m) * 60 + float(r)
+
+            cues.append(
+                {
+                    "start": t(p[1]),
+                    "end": t(p[2]),
+                    "speaker": p[4].strip(),
+                    "text": p[9].strip(),
+                }
+            )
     else:  # srt
         block = []
         for line in text + [""]:
             if line.strip().isdigit() or not line.strip():
                 if len(block) >= 2:
                     t0, t1 = block[0].split("-->")
-                    t = lambda s: (lambda h, m, r: int(h) * 3600 + int(m) * 60 + float(r.replace(",", ".")))(*s.strip().split(":"))
-                    cues.append({"start": t(t0), "end": t(t1), "speaker": "", "text": " ".join(block[1:])})
+
+                    def t(s):
+                        h, m, r = s.strip().split(":")
+                        return int(h) * 3600 + int(m) * 60 + float(r.replace(",", "."))
+
+                    cues.append(
+                        {
+                            "start": t(t0),
+                            "end": t(t1),
+                            "speaker": "",
+                            "text": " ".join(block[1:]),
+                        }
+                    )
                 block = []
             else:
                 block.append(line)
-        # 提取说话人前缀 [说话人E] / 说话人E: 
+        # 提取说话人前缀 [说话人E] / 说话人E:
         import re
+
         for c in cues:
-            m = re.match(r"^\[?((?:说话人|Speaker)[A-Za-z0-9]+)\]?\s*[::]?\s*", c["text"])
+            m = re.match(
+                r"^\[?((?:说话人|Speaker)[A-Za-z0-9]+)\]?\s*[::]?\s*", c["text"]
+            )
             if m:
                 c["speaker"] = m.group(1)
-                c["text"] = c["text"][m.end():]
+                c["text"] = c["text"][m.end() :]
     return cues
 
 
 def speech_islands(wav_path):
     w = wave.open(wav_path)
     sr = w.getframerate()
-    data = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32)
+    data = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(
+        np.float32
+    )
     if w.getnchannels() == 2:
         data = data.reshape(-1, 2).mean(axis=1)
     data /= np.abs(data).max() + 1e-9
@@ -93,10 +124,18 @@ def main():
     # A 幻听碎片
     phantom = []
     for c in cues:
-        cov = sum(overlap(c["start"], c["end"], a, b) for a, b in islands) / max(1e-6, c["end"] - c["start"])
+        cov = sum(overlap(c["start"], c["end"], a, b) for a, b in islands) / max(
+            1e-6, c["end"] - c["start"]
+        )
         if cov < COVERAGE_MIN:
-            phantom.append({"start": round(c["start"], 3), "end": round(c["end"], 3),
-                            "coverage": round(cov, 2), "text": c["text"][:20]})
+            phantom.append(
+                {
+                    "start": round(c["start"], 3),
+                    "end": round(c["end"], 3),
+                    "coverage": round(cov, 2),
+                    "text": c["text"][:20],
+                }
+            )
     red["A_phantom_fragments"] = phantom
 
     # B 语音内截尾: 每个语音区间尾部未被任何 cue 覆盖(union 口径)的长度
@@ -108,8 +147,13 @@ def main():
         )
         uncovered = b - min(last_end, b)
         if uncovered > TRUNCATION_MS / 1000 and last_end > a:
-            truncated.append({"island": [round(a, 2), round(b, 2)],
-                              "cut_at": round(min(last_end, b), 3), "lost_ms": round(uncovered * 1000)})
+            truncated.append(
+                {
+                    "island": [round(a, 2), round(b, 2)],
+                    "cut_at": round(min(last_end, b), 3),
+                    "lost_ms": round(uncovered * 1000),
+                }
+            )
     red["B_truncated_tails"] = truncated
 
     # C 吞并静音: cue 开头后 120ms 窗口基本无能量, 且真实语音起点比 cue.start 晚 > 150ms
@@ -117,23 +161,41 @@ def main():
     win = int(0.02 * sr)
     for c in cues:
         i0 = int(c["start"] * sr)
-        lead = data[i0 + int(0.02 * sr): i0 + int(0.14 * sr)]
+        lead = data[i0 + int(0.02 * sr) : i0 + int(0.14 * sr)]
         if lead.size == 0:
             continue
-        if (np.abs(lead[: len(lead) // win * win].reshape(-1, win)).max(axis=1) > ISLAND_THRESH).mean() > 0.2:
+        if (
+            np.abs(lead[: len(lead) // win * win].reshape(-1, win)).max(axis=1)
+            > ISLAND_THRESH
+        ).mean() > 0.2:
             continue  # 开头就有语音
-        onset = next((a for a, b in islands if a >= c["start"] - 0.001 and a < c["end"]), None)
+        onset = next(
+            (a for a, b in islands if a >= c["start"] - 0.001 and a < c["end"]), None
+        )
         if onset is not None and (onset - c["start"]) * 1000 > SWALLOW_MS:
-            swallowed.append({"start": round(c["start"], 3), "real_onset": round(onset, 3),
-                              "swallowed_ms": round((onset - c["start"]) * 1000), "text": c["text"][:16]})
+            swallowed.append(
+                {
+                    "start": round(c["start"], 3),
+                    "real_onset": round(onset, 3),
+                    "swallowed_ms": round((onset - c["start"]) * 1000),
+                    "text": c["text"][:16],
+                }
+            )
     red["C_swallowed_silence"] = swallowed
 
     # D 说话人空缺
-    no_spk = [{"start": round(c["start"], 3), "text": c["text"][:16]}
-              for c in cues if not c["speaker"]]
+    no_spk = [
+        {"start": round(c["start"], 3), "text": c["text"][:16]}
+        for c in cues
+        if not c["speaker"]
+    ]
     red["D_missing_speaker"] = no_spk
 
-    red["_summary"] = {"cues": len(cues), "islands": len(islands), "duration": round(duration, 2)}
+    red["_summary"] = {
+        "cues": len(cues),
+        "islands": len(islands),
+        "duration": round(duration, 2),
+    }
     red["_red"] = bool(phantom or truncated or swallowed or no_spk)
 
     if as_json:
@@ -141,8 +203,12 @@ def main():
     else:
         print(f"== {sub_path} ==")
         print(f"cues={red['_summary']['cues']} islands={red['_summary']['islands']}")
-        for key, label in [("A_phantom_fragments", "幻听碎片"), ("B_truncated_tails", "语音内截尾"),
-                           ("C_swallowed_silence", "吞并静音"), ("D_missing_speaker", "说话人空缺")]:
+        for key, label in [
+            ("A_phantom_fragments", "幻听碎片"),
+            ("B_truncated_tails", "语音内截尾"),
+            ("C_swallowed_silence", "吞并静音"),
+            ("D_missing_speaker", "说话人空缺"),
+        ]:
             items = red[key]
             status = "RED" if items else "green"
             print(f"[{status}] {key} {label}: {len(items)}")

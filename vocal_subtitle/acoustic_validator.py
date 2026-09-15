@@ -13,7 +13,10 @@ warnings.warn(
     stacklevel=2,
 )
 
-from .acoustic.validator import (
+# 本模块的唯一职责是兼容再导出（含测试依赖的私有名），导入未直接
+# 使用是预期行为，不做 F401 清理。
+from .acoustic.diagnostics import generate_diagnostic_report  # noqa: F401
+from .acoustic.validator import (  # noqa: F401
     AcousticValidationConfig,
     AcousticValidator,
     _boundary_confidence,
@@ -28,7 +31,6 @@ from .acoustic.validator import (
     classify_acoustic_events,
     export_skeleton_segments,
 )
-from .acoustic.diagnostics import generate_diagnostic_report
 
 __all__ = [
     "AcousticValidationConfig",

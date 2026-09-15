@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from . import merge_constraints, merge_policy
 
@@ -41,7 +41,8 @@ class LocalMergeDecider:
             import numpy as np
 
             embeddings = model.encode(
-                [text_a, text_b], convert_to_numpy=True,
+                [text_a, text_b],
+                convert_to_numpy=True,
             )
             dot = float(np.dot(embeddings[0], embeddings[1]))
             norm_a = float(np.linalg.norm(embeddings[0]))
@@ -51,7 +52,7 @@ class LocalMergeDecider:
             logger.debug("Similarity computation failed: %s", exc)
             return 0.5
 
-    def decide(self, candidates: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    def decide(self, candidates: list[dict]) -> tuple[list[dict], list[dict]]:
         """Return local decisions and candidates requiring cloud review."""
         comma_endings = {",", "，", "、", ";", "；"}
         sentence_endings = {".", "!", "?", "。", "！", "？"}
@@ -76,30 +77,37 @@ class LocalMergeDecider:
 
             if curr_speaker and next_speaker and curr_speaker != next_speaker:
                 continue
-            if next_frag is not None and not merge_constraints.physical_owner_compatible(
-                frag, next_frag
+            if (
+                next_frag is not None
+                and not merge_constraints.physical_owner_compatible(frag, next_frag)
             ):
                 continue
             if next_text and merge_policy.detect_semantic_boundary(text, next_text):
                 continue
 
             if text and text[-1] in comma_endings:
-                decided_groups.append({
-                    "ids": [frag_id, next_id],
-                    "reason": "[local] comma/clause continuation -> merge",
-                })
+                decided_groups.append(
+                    {
+                        "ids": [frag_id, next_id],
+                        "reason": "[local] comma/clause continuation -> merge",
+                    }
+                )
                 continue
             if text and text[-1] in sentence_endings and gap > 0.35:
                 continue
 
             local_min, local_max = self.config.local_nlp_gap_range
             if local_min <= gap <= local_max:
-                similarity = self.compute_similarity(text, next_text) if next_text else 0.5
+                similarity = (
+                    self.compute_similarity(text, next_text) if next_text else 0.5
+                )
                 if similarity > 0.8:
-                    decided_groups.append({
-                        "ids": [frag_id, next_id],
-                        "reason": f"[local] high similarity ({similarity:.2f}) -> merge",
-                    })
+                    decided_groups.append(
+                        {
+                            "ids": [frag_id, next_id],
+                            "reason": f"[local] high similarity ({similarity:.2f}) -> merge",
+                        }
+                    )
                     continue
                 if similarity < 0.3:
                     continue
@@ -108,7 +116,9 @@ class LocalMergeDecider:
         if decided_groups:
             logger.info(
                 "Local NLP: %d candidates -> %d merged, %d -> cloud LLM",
-                len(candidates), len(decided_groups), len(unresolved),
+                len(candidates),
+                len(decided_groups),
+                len(unresolved),
             )
         return decided_groups, unresolved
 

@@ -1,7 +1,5 @@
 """测试 GPUDetector GPU 检测模块"""
 
-import pytest
-
 from vocal_subtitle.utils.gpu_detector import DeviceType, GPUDetector
 
 

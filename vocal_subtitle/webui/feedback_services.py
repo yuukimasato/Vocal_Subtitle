@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 from ..config import ConfigLoader
 from ..feedback import (
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 LOW_COVERAGE_WARN_THRESHOLD = 0.5
 
 
-def _pipeline_class() -> Type[Pipeline]:
+def _pipeline_class() -> type[Pipeline]:
     api = sys.modules.get("vocal_subtitle.webui.api")
     return getattr(api, "Pipeline", None) or Pipeline
 
@@ -51,8 +51,8 @@ class TaskBaseline:
     """从任务历史解析出的可复用管线基线（已存事件 + 统计）"""
 
     task_id: str
-    events: List[SubtitleEvent]
-    stats: Dict[str, Any]
+    events: list[SubtitleEvent]
+    stats: dict[str, Any]
     session_dir: Path
     run_id: str = ""
 
@@ -68,7 +68,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _audio_sha256_from_session(session_dir: Optional[Path]) -> str:
+def _audio_sha256_from_session(session_dir: Path | None) -> str:
     """从任务会话目录解析输入音频完整 sha256（metadata.json → 目录名前缀回退）"""
     if session_dir is None:
         return ""
@@ -91,24 +91,26 @@ def _words_from_payload(raw: Any) -> list:
     converted = []
     for item in raw:
         if isinstance(item, dict):
-            converted.append(SimpleNamespace(
-                word=str(item.get("word", "")),
-                start=float(item.get("start", 0.0)),
-                end=float(item.get("end", 0.0)),
-                confidence=item.get("confidence"),
-            ))
+            converted.append(
+                SimpleNamespace(
+                    word=str(item.get("word", "")),
+                    start=float(item.get("start", 0.0)),
+                    end=float(item.get("end", 0.0)),
+                    confidence=item.get("confidence"),
+                )
+            )
         else:
             converted.append(item)
     return converted
 
 
-def _events_from_task_result(payload_events: list) -> List[SubtitleEvent]:
+def _events_from_task_result(payload_events: list) -> list[SubtitleEvent]:
     """任务历史 result_json 的序列化事件 → 对齐器可用的 SubtitleEvent。
 
     走 SubtitleEvent.from_dict 全量反序列化：词级时间戳、说话人溯源、物理时间轴等
     可选字段不再被静默丢弃（工单 01 基线复用的完整性要求）；个别残缺事件回退最小构造。
     """
-    events: List[SubtitleEvent] = []
+    events: list[SubtitleEvent] = []
     for position, item in enumerate(payload_events, 1):
         try:
             event = SubtitleEvent.from_dict(item)
@@ -131,7 +133,7 @@ def _events_from_task_result(payload_events: list) -> List[SubtitleEvent]:
     return events
 
 
-def _stats_to_dict(stats: Any) -> Dict[str, Any]:
+def _stats_to_dict(stats: Any) -> dict[str, Any]:
     """Pipeline.run 返回的 stats（对象或字典）→ 字典"""
     if isinstance(stats, dict):
         return stats
@@ -139,7 +141,7 @@ def _stats_to_dict(stats: Any) -> Dict[str, Any]:
     return to_dict() if callable(to_dict) else {}
 
 
-def _metadata_from_stats(stats: Dict[str, Any]) -> Dict[str, Any]:
+def _metadata_from_stats(stats: dict[str, Any]) -> dict[str, Any]:
     """从任务 stats 补全 D2 入库元数据（修复 F5 的 unknown/0/空）"""
     return {
         "language": str(stats.get("detected_language") or "unknown"),
@@ -158,7 +160,9 @@ class FeedbackLearningService:
         self._task_history = task_history
 
     def _history(self):
-        return self._task_history if self._task_history is not None else state.task_history
+        return (
+            self._task_history if self._task_history is not None else state.task_history
+        )
 
     def resolve_task_baseline(self, task_id: str) -> TaskBaseline:
         """解析 task_id 引用任务已存的管线输出作为对照基线（D25，不重跑管线）。
@@ -184,7 +188,9 @@ class FeedbackLearningService:
                 status_code=410,
             )
         artifacts = (result or {}).get("artifacts") or {}
-        input_path = str((result or {}).get("input_path") or artifacts.get("input") or "")
+        input_path = str(
+            (result or {}).get("input_path") or artifacts.get("input") or ""
+        )
         session_dir = Path(input_path).parent if input_path else None
         if session_dir is None or not session_dir.exists():
             raise TaskBaselineError(
@@ -202,7 +208,7 @@ class FeedbackLearningService:
 
     def learn(
         self,
-        audio_path: Optional[Path],
+        audio_path: Path | None,
         reference_path: Path,
         *,
         task_id: str = "",
@@ -212,7 +218,7 @@ class FeedbackLearningService:
         run_pipeline_first: bool = True,
         dry_run: bool = False,
         consent: str = "anonymous",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """执行一次学习。
 
         基线三源分支（定案 §4）：带 task_id 时复用任务历史已存 events（秒级）；
@@ -225,8 +231,8 @@ class FeedbackLearningService:
             return {"status": "error", "message": "未从修订文件中解析到字幕事件"}
 
         baseline_source = "pipeline_rerun" if run_pipeline_first else "none"
-        task_stats: Dict[str, Any] = {}
-        auto_events: List[SubtitleEvent] = []
+        task_stats: dict[str, Any] = {}
+        auto_events: list[SubtitleEvent] = []
         if task_id:
             baseline = self.resolve_task_baseline(task_id)
             auto_events = baseline.events
@@ -254,8 +260,11 @@ class FeedbackLearningService:
             # 其余场景维持默认 raise——传错文件/片源不符的学习应明确失败而非静默学入。
             # 未匹配行由对齐器标 INSERT/DELETE（重构行），不参与时间轴维度学习
             pairs = aligner.align(
-                auto_events, manual_events,
-                on_low_coverage="warn" if scenario == "external-correction" else "raise",
+                auto_events,
+                manual_events,
+                on_low_coverage="warn"
+                if scenario == "external-correction"
+                else "raise",
             )
         except AlignmentError as exc:
             return {
@@ -275,7 +284,7 @@ class FeedbackLearningService:
         diff_report = DiffAnalyzer(
             param_isolation_enabled=feedback_cfg.param_isolation_enabled,
         ).analyze(pairs)
-        response: Dict[str, Any] = {
+        response: dict[str, Any] = {
             "status": "ok",
             "alignment_coverage": round(diff_report.alignment_coverage, 3),
             "total_pairs": diff_report.total_pairs,
@@ -324,7 +333,9 @@ class FeedbackLearningService:
                 profile_name=feedback_profile,
             )
             if feedback_cfg.few_shot_enabled:
-                few_shot = FewShotBuilder(max_examples=feedback_cfg.few_shot_max_examples)
+                few_shot = FewShotBuilder(
+                    max_examples=feedback_cfg.few_shot_max_examples
+                )
                 few_shot.load_cache(feedback_profile)
                 few_shot.build_merge_examples(diff_report.merge_actions)
                 if diff_report.text_edits:
@@ -347,7 +358,9 @@ class FeedbackLearningService:
             else:
                 provenance = {
                     "task_id": "",
-                    "audio_sha256": _sha256_file(audio_path) if audio_path is not None else "",
+                    "audio_sha256": _sha256_file(audio_path)
+                    if audio_path is not None
+                    else "",
                     "run_id": str(task_stats.get("run_id") or ""),
                 }
             _ingest_feedback_d2_sample(
@@ -372,8 +385,8 @@ def _ingest_feedback_d2_sample(
     diff_report,
     *,
     scenario: str = "",
-    metadata: Optional[Dict[str, Any]] = None,
-    provenance: Optional[Dict[str, str]] = None,
+    metadata: dict[str, Any] | None = None,
+    provenance: dict[str, str] | None = None,
 ) -> None:
     """将反馈学习结果自动入库到 D2 候选反馈集。非致命操作。
 
@@ -414,7 +427,9 @@ def _ingest_feedback_d2_sample(
             alignment={
                 "method": "dtw",
                 "coverage_ratio": alignment_coverage,
-                "confidence": getattr(diff_report, "confidence", 0.8) if diff_report else 0.8,
+                "confidence": getattr(diff_report, "confidence", 0.8)
+                if diff_report
+                else 0.8,
             },
             consent_level=consent,
             language=str(metadata.get("language") or "unknown"),

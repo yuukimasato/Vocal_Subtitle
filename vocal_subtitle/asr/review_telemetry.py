@@ -30,7 +30,9 @@ def resource_snapshot() -> dict[str, Any]:
     return snapshot
 
 
-def timed_call(callback, *args: Any, **kwargs: Any) -> tuple[Any, float, dict[str, Any]]:
+def timed_call(
+    callback, *args: Any, **kwargs: Any
+) -> tuple[Any, float, dict[str, Any]]:
     """Execute one stage and return its result, wall time and resource snapshot."""
     started = time.perf_counter()
     result = callback(*args, **kwargs)

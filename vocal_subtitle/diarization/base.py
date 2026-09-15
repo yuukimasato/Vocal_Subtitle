@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 import numpy as np
 
@@ -18,7 +17,7 @@ class ClusteredSegment:
     end: float
     confidence: float = 1.0
     speaker_id: int = -1  # -1 = 未分配
-    audio: Optional[np.ndarray] = field(default=None, repr=False, compare=False)
+    audio: np.ndarray | None = field(default=None, repr=False, compare=False)
 
     @property
     def duration(self) -> float:
@@ -41,8 +40,8 @@ class SpeakerTurn:
     start: float
     end: float
     speaker_id: int
-    speaker: Optional[str] = None
-    confidence: Optional[float] = None
+    speaker: str | None = None
+    confidence: float | None = None
     overlapped: bool = False
 
     @property
@@ -63,8 +62,8 @@ class DiarizationResult:
         diagnostics: 诊断信息
     """
 
-    turns: List[SpeakerTurn] = field(default_factory=list)
-    exclusive_turns: List[SpeakerTurn] = field(default_factory=list)
+    turns: list[SpeakerTurn] = field(default_factory=list)
+    exclusive_turns: list[SpeakerTurn] = field(default_factory=list)
     speaker_count: int = 0
     backend: str = "unknown"
     status: str = "unknown"
@@ -83,10 +82,10 @@ class SpeakerRole:
     """
 
     speaker_id: int
-    name: Optional[str] = None       # 从上下文挖掘的名字: "张三"
-    role: Optional[str] = None       # 推断的角色类型: "嘉宾"
-    label: str = ""                  # 最终显示标签: "张三(嘉宾)"
-    confidence: str = "fallback"     # "identity" | "role" | "fallback"
+    name: str | None = None  # 从上下文挖掘的名字: "张三"
+    role: str | None = None  # 推断的角色类型: "嘉宾"
+    label: str = ""  # 最终显示标签: "张三(嘉宾)"
+    confidence: str = "fallback"  # "identity" | "role" | "fallback"
 
 
 @dataclass
@@ -104,7 +103,7 @@ class AtomicSpeechSpan:
 
     start: float
     end: float
-    speaker_id: Optional[int] = None
+    speaker_id: int | None = None
     physical_source: str = ""
     speaker_source: str = "unknown"
     overlapped: bool = False
@@ -125,10 +124,10 @@ class DiarizationEngine(ABC):
     @abstractmethod
     def diarize(
         self,
-        segments: List,
+        segments: list,
         audio: np.ndarray,
         sample_rate: int,
-    ) -> List[int]:
+    ) -> list[int]:
         """为每个语音片段分配 speaker_id
 
         Args:

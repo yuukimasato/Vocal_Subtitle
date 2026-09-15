@@ -21,9 +21,18 @@ SHA_B = "b" * 64
 
 # dataset-v1 条目字段（顺序以定案 §4 条目示例为准）
 EXPECTED_ENTRY_KEYS = [
-    "schema", "sample_id", "scenario", "language", "speaker_count",
-    "audio_duration", "run_id", "task_id", "auto_subtitle", "human_revision",
-    "edit_types", "audio_ref",
+    "schema",
+    "sample_id",
+    "scenario",
+    "language",
+    "speaker_count",
+    "audio_duration",
+    "run_id",
+    "task_id",
+    "auto_subtitle",
+    "human_revision",
+    "edit_types",
+    "audio_ref",
 ]
 
 
@@ -33,9 +42,20 @@ def library(tmp_path) -> FeedbackSampleManager:
     return FeedbackSampleManager(tmp_path)
 
 
-def _ingest(manager, text, *, scene="inline-review", language="zh", speaker_count=2,
-            duration=12.5, status="accepted", task_id="task-1", sha256=SHA_A,
-            run_id="run-1", edit_types=None):
+def _ingest(
+    manager,
+    text,
+    *,
+    scene="inline-review",
+    language="zh",
+    speaker_count=2,
+    duration=12.5,
+    status="accepted",
+    task_id="task-1",
+    sha256=SHA_A,
+    run_id="run-1",
+    edit_types=None,
+):
     """入库一条样本并置为指定审核状态"""
     sample = manager.ingest(
         auto_subtitle=f"1\n00:00:00,000 --> 00:00:02,000\n自动{text}\n",
@@ -52,7 +72,9 @@ def _ingest(manager, text, *, scene="inline-review", language="zh", speaker_coun
         run_id=run_id,
     )
     assert sample is not None
-    if status != "pending":  # 入库默认即 pending；review 只接受 accepted/rejected/disputed
+    if (
+        status != "pending"
+    ):  # 入库默认即 pending；review 只接受 accepted/rejected/disputed
         manager.review(sample.sample_id, status, reviewer="tester")
     return sample
 
@@ -82,7 +104,9 @@ class TestCollectAccepted:
 
     def test_scenario_filter(self, library):
         inline = _ingest(library, "甲", scene="inline-review")
-        _ingest(library, "乙", scene="from-scratch-timing", task_id="task-2", sha256=SHA_B)
+        _ingest(
+            library, "乙", scene="from-scratch-timing", task_id="task-2", sha256=SHA_B
+        )
         filtered = collect_accepted_samples(library, ["inline-review"])
         assert [item["sample_id"] for item in filtered] == [inline.sample_id]
         assert len(collect_accepted_samples(library)) == 2
@@ -110,7 +134,11 @@ class TestEntryFormat:
         assert "自动甲" in entry["auto_subtitle"]
         assert "人工甲" in entry["human_revision"]
         assert entry["edit_types"] == {"text_correction": 1}
-        assert entry["audio_ref"] == {"task_id": "task-1", "sha256": SHA_A, "duration": 12.5}
+        assert entry["audio_ref"] == {
+            "task_id": "task-1",
+            "sha256": SHA_A,
+            "duration": 12.5,
+        }
 
     def test_old_sample_without_text_builds_no_entry(self, library):
         """旧版样本库只落字幕哈希不存全文：无法物化文本对，条目应为 None"""
@@ -145,9 +173,15 @@ class TestLicenseGate:
     def test_cli_non_interactive_without_license_rejected(self, tmp_path, monkeypatch):
         from vocal_subtitle.feedback import sample_manager as module
 
-        monkeypatch.setattr(module, "FeedbackSampleManager", lambda: FeedbackSampleManager(tmp_path / "lib"))
+        monkeypatch.setattr(
+            module,
+            "FeedbackSampleManager",
+            lambda: FeedbackSampleManager(tmp_path / "lib"),
+        )
         runner = CliRunner()
-        result = runner.invoke(feedback, ["export-dataset", "--out", str(tmp_path / "ds")])
+        result = runner.invoke(
+            feedback, ["export-dataset", "--out", str(tmp_path / "ds")]
+        )
         assert result.exit_code == 1
         assert "许可" in result.output
 
@@ -169,16 +203,27 @@ class TestAppendOnlyExport:
         assert first.shards == ["data/shard-0001.jsonl"]
         first_bytes = (out_dir / "data/shard-0001.jsonl").read_bytes()
 
-        _ingest(library, "丙", scene="external-correction", task_id="task-3", sha256=SHA_B, run_id="run-3")
+        _ingest(
+            library,
+            "丙",
+            scene="external-correction",
+            task_id="task-3",
+            sha256=SHA_B,
+            run_id="run-3",
+        )
         second = export_dataset(library, out_dir, license="CC-BY-4.0")
         assert second.shards == ["data/shard-0002.jsonl"]
-        assert (out_dir / "data/shard-0001.jsonl").read_bytes() == first_bytes  # 已存在分片未被改写
+        assert (
+            out_dir / "data/shard-0001.jsonl"
+        ).read_bytes() == first_bytes  # 已存在分片未被改写
         assert _shard_files(out_dir) == ["shard-0001.jsonl", "shard-0002.jsonl"]
 
         manifest = _read_manifest(out_dir)
         assert manifest["total_samples"] == 3
         assert manifest["schema"] == "dataset-v1"
-        assert [shard["file"] for shard in manifest["shards"]] == first.shards + second.shards
+        assert [
+            shard["file"] for shard in manifest["shards"]
+        ] == first.shards + second.shards
         assert all(shard["sha256"] for shard in manifest["shards"])
 
     def test_repeat_export_is_idempotent(self, library, tmp_path):
@@ -201,8 +246,14 @@ class TestAppendOnlyExport:
     def test_readme_card_contains_schema_stats_license(self, library, tmp_path):
         out_dir = tmp_path / "ds"
         _ingest(library, "甲", scene="inline-review", language="zh")
-        _ingest(library, "乙", scene="from-scratch-timing", language="ja",
-                task_id="task-2", sha256=SHA_B)
+        _ingest(
+            library,
+            "乙",
+            scene="from-scratch-timing",
+            language="ja",
+            task_id="task-2",
+            sha256=SHA_B,
+        )
         export_dataset(library, out_dir, license="CC0-1.0")
         readme = (out_dir / "README.md").read_text(encoding="utf-8")
         assert "dataset-v1" in readme
@@ -222,8 +273,13 @@ class TestBundleAudio:
         _ingest(library, "甲")
 
         out_dir = tmp_path / "ds"
-        outcome = export_dataset(library, out_dir, license="CC-BY-4.0", bundle_audio=True,
-                                 session_root=session_root)
+        outcome = export_dataset(
+            library,
+            out_dir,
+            license="CC-BY-4.0",
+            bundle_audio=True,
+            session_root=session_root,
+        )
         bundled = out_dir / "audio" / SHA_A[:16] / "input.wav"
         assert outcome.bundled_audio == [SHA_A[:16]]
         assert bundled.read_bytes() == b"RIFFfake"
@@ -233,12 +289,21 @@ class TestBundleAudio:
         session_root = tmp_path / "uploads"  # 会话目录不存在
         _ingest(library, "甲")
         out_dir = tmp_path / "ds"
-        outcome = export_dataset(library, out_dir, license="CC-BY-4.0", bundle_audio=True,
-                                 session_root=session_root)
+        outcome = export_dataset(
+            library,
+            out_dir,
+            license="CC-BY-4.0",
+            bundle_audio=True,
+            session_root=session_root,
+        )
         assert outcome.bundled_audio == []
         assert outcome.missing_audio == [SHA_A[:16]]
         assert outcome.exported_count == 1  # 引用照写，导出不阻塞
-        entry = json.loads((out_dir / "data/shard-0001.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        entry = json.loads(
+            (out_dir / "data/shard-0001.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()[0]
+        )
         assert entry["audio_ref"]["sha256"] == SHA_A
 
     def test_bundle_off_by_default(self, library, tmp_path):
@@ -262,26 +327,40 @@ class TestCli:
         from vocal_subtitle.feedback import sample_manager as module
 
         monkeypatch.setattr(
-            module, "FeedbackSampleManager", lambda: FeedbackSampleManager(tmp_path / "lib"),
+            module,
+            "FeedbackSampleManager",
+            lambda: FeedbackSampleManager(tmp_path / "lib"),
         )
         return tmp_path / "lib"
 
     def test_cli_export_with_scenario_filter(self, cli_library, tmp_path):
         manager = FeedbackSampleManager(cli_library)
         _ingest(manager, "甲")
-        _ingest(manager, "乙", scene="from-scratch-timing", task_id="task-2", sha256=SHA_B)
+        _ingest(
+            manager, "乙", scene="from-scratch-timing", task_id="task-2", sha256=SHA_B
+        )
         out_dir = tmp_path / "ds"
         runner = CliRunner()
-        result = runner.invoke(feedback, [
-            "export-dataset", "--out", str(out_dir),
-            "--scenarios", "inline-review", "--license", "CC-BY-4.0",
-        ])
+        result = runner.invoke(
+            feedback,
+            [
+                "export-dataset",
+                "--out",
+                str(out_dir),
+                "--scenarios",
+                "inline-review",
+                "--license",
+                "CC-BY-4.0",
+            ],
+        )
         assert result.exit_code == 0, result.output
         assert "shard-0001.jsonl" in result.output
         assert "CC-BY-4.0" in result.output
         assert (out_dir / "README.md").exists()
         assert (out_dir / "manifest.json").exists()
-        lines = (out_dir / "data/shard-0001.jsonl").read_text(encoding="utf-8").splitlines()
+        lines = (
+            (out_dir / "data/shard-0001.jsonl").read_text(encoding="utf-8").splitlines()
+        )
         assert len(lines) == 1
         entry = json.loads(lines[0])
         assert entry["scenario"] == "inline-review"
@@ -289,18 +368,33 @@ class TestCli:
 
     def test_cli_rejects_unknown_scenario(self, cli_library, tmp_path):
         runner = CliRunner()
-        result = runner.invoke(feedback, [
-            "export-dataset", "--out", str(tmp_path / "ds"),
-            "--scenarios", "bogus", "--license", "CC-BY-4.0",
-        ])
+        result = runner.invoke(
+            feedback,
+            [
+                "export-dataset",
+                "--out",
+                str(tmp_path / "ds"),
+                "--scenarios",
+                "bogus",
+                "--license",
+                "CC-BY-4.0",
+            ],
+        )
         assert result.exit_code == 1
         assert "未知场景标签" in result.output
 
     def test_cli_reports_empty_library(self, cli_library, tmp_path):
         runner = CliRunner()
-        result = runner.invoke(feedback, [
-            "export-dataset", "--out", str(tmp_path / "ds"), "--license", "CC-BY-4.0",
-        ])
+        result = runner.invoke(
+            feedback,
+            [
+                "export-dataset",
+                "--out",
+                str(tmp_path / "ds"),
+                "--license",
+                "CC-BY-4.0",
+            ],
+        )
         assert result.exit_code == 1
         assert "accepted" in result.output
 
@@ -309,10 +403,19 @@ class TestCli:
         _ingest(manager, "甲")
         out_dir = tmp_path / "ds"
         runner = CliRunner()
-        result = runner.invoke(feedback, [
-            "export-dataset", "--out", str(out_dir), "--license", "CC-BY-4.0", "--bundle-audio",
-        ])
+        result = runner.invoke(
+            feedback,
+            [
+                "export-dataset",
+                "--out",
+                str(out_dir),
+                "--license",
+                "CC-BY-4.0",
+                "--bundle-audio",
+            ],
+        )
         assert result.exit_code == 0, result.output
         assert "不建议" in result.output
-        assert (out_dir / "audio" / SHA_A[:16] / "input.wav").exists() or \
-            "找不到实体文件" in result.output
+        assert (
+            out_dir / "audio" / SHA_A[:16] / "input.wav"
+        ).exists() or "找不到实体文件" in result.output

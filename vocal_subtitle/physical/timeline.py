@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import copy
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple
-
+from typing import Any
 
 SCHEMA_VERSION = "physical-timeline-v1"
 
@@ -25,7 +25,9 @@ def _finite(value: Any, name: str) -> float:
     return result
 
 
-def _range(start: Any, end: Any, *, duration: Optional[float] = None) -> Tuple[float, float]:
+def _range(
+    start: Any, end: Any, *, duration: float | None = None
+) -> tuple[float, float]:
     start_value = _finite(start, "start")
     end_value = _finite(end, "end")
     if start_value < 0 or end_value <= start_value:
@@ -41,7 +43,7 @@ def _text(value: Any, name: str) -> str:
     return value
 
 
-def _metadata(value: Any) -> Dict[str, Any]:
+def _metadata(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, Mapping):
@@ -49,7 +51,7 @@ def _metadata(value: Any) -> Dict[str, Any]:
     return copy.deepcopy(dict(value))
 
 
-def _confidence(value: Any) -> Optional[float]:
+def _confidence(value: Any) -> float | None:
     if value is None:
         return None
     result = _finite(value, "confidence")
@@ -64,7 +66,7 @@ class PhysicalClip:
     start: float
     end: float
     source: str = "input"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _text(self.id, "id"))
@@ -81,9 +83,9 @@ class SpeechEvidenceSpan:
     start: float
     end: float
     source: str
-    confidence: Optional[float] = None
-    physical_clip_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    confidence: float | None = None
+    physical_clip_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _text(self.id, "id"))
@@ -109,7 +111,7 @@ class ContextWindow:
     physical_clip_id: str
     left_context: float
     right_context: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _text(self.id, "id"))
@@ -137,10 +139,10 @@ class PhysicalTimeline:
         self,
         duration: float,
         *,
-        physical_clips: Optional[List[PhysicalClip]] = None,
-        speech_evidence_spans: Optional[List[SpeechEvidenceSpan]] = None,
-        context_windows: Optional[List[ContextWindow]] = None,
-        diagnostics: Optional[Mapping[str, Any]] = None,
+        physical_clips: list[PhysicalClip] | None = None,
+        speech_evidence_spans: list[SpeechEvidenceSpan] | None = None,
+        context_windows: list[ContextWindow] | None = None,
+        diagnostics: Mapping[str, Any] | None = None,
     ) -> None:
         self.duration = _finite(duration, "duration")
         if self.duration <= 0:
@@ -152,7 +154,7 @@ class PhysicalTimeline:
         self._sort_and_validate()
 
     @classmethod
-    def from_duration(cls, duration: float) -> "PhysicalTimeline":
+    def from_duration(cls, duration: float) -> PhysicalTimeline:
         timeline = cls(duration)
         timeline.add_clip(0.0, timeline.duration, source="input", clip_id="clip-000001")
         return timeline
@@ -162,8 +164,8 @@ class PhysicalTimeline:
         start: float,
         end: float,
         source: str = "input",
-        clip_id: Optional[str] = None,
-        metadata: Optional[Mapping[str, Any]] = None,
+        clip_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> PhysicalClip:
         start_value, end_value = _range(start, end, duration=self.duration)
         selected_id = clip_id or self._next_clip_id()
@@ -188,10 +190,10 @@ class PhysicalTimeline:
         start: float,
         end: float,
         source: str,
-        confidence: Optional[float] = None,
-        physical_clip_id: Optional[str] = None,
-        metadata: Optional[Mapping[str, Any]] = None,
-        evidence_id: Optional[str] = None,
+        confidence: float | None = None,
+        physical_clip_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        evidence_id: str | None = None,
     ) -> SpeechEvidenceSpan:
         raw_start, raw_end = _range(start, end)
         clip = self._resolve_clip(raw_start, raw_end, physical_clip_id)
@@ -201,12 +203,16 @@ class PhysicalTimeline:
             raise ValueError("evidence is outside its physical clip")
         evidence_metadata = dict(metadata or {})
         if clipped_start != raw_start or clipped_end != raw_end:
-            evidence_metadata.update({
-                "clipped": True,
-                "original_start": raw_start,
-                "original_end": raw_end,
-            })
-        selected_id = evidence_id or f"evidence-{len(self.speech_evidence_spans) + 1:06d}"
+            evidence_metadata.update(
+                {
+                    "clipped": True,
+                    "original_start": raw_start,
+                    "original_end": raw_end,
+                }
+            )
+        selected_id = (
+            evidence_id or f"evidence-{len(self.speech_evidence_spans) + 1:06d}"
+        )
         evidence = SpeechEvidenceSpan(
             id=selected_id,
             start=clipped_start,
@@ -219,7 +225,9 @@ class PhysicalTimeline:
         if any(item.id == evidence.id for item in self.speech_evidence_spans):
             raise ValueError(f"duplicate evidence id: {evidence.id}")
         self.speech_evidence_spans.append(evidence)
-        self.speech_evidence_spans.sort(key=lambda item: (item.start, item.end, item.id))
+        self.speech_evidence_spans.sort(
+            key=lambda item: (item.start, item.end, item.id)
+        )
         return evidence
 
     def add_context_window(
@@ -228,8 +236,8 @@ class PhysicalTimeline:
         left_context: float,
         right_context: float,
         *,
-        window_id: Optional[str] = None,
-        metadata: Optional[Mapping[str, Any]] = None,
+        window_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> ContextWindow:
         clip = self._clip_by_id(physical_clip_id)
         left = _finite(left_context, "left_context")
@@ -240,7 +248,10 @@ class PhysicalTimeline:
         end = min(self.duration, clip.end + right)
         if end <= start:
             raise ValueError("context window must have positive duration")
-        selected_id = window_id or f"ctx:{clip.id}:l{round(left * 1000):04d}:r{round(right * 1000):04d}"
+        selected_id = (
+            window_id
+            or f"ctx:{clip.id}:l{round(left * 1000):04d}:r{round(right * 1000):04d}"
+        )
         window = ContextWindow(
             id=selected_id,
             start=start,
@@ -260,27 +271,30 @@ class PhysicalTimeline:
         self,
         start: float,
         end: float,
-        clip_id: Optional[str] = None,
-    ) -> Optional[Tuple[float, float]]:
+        clip_id: str | None = None,
+    ) -> tuple[float, float] | None:
         start_value, end_value = _range(start, end)
         matches = [
-            clip for clip in self.physical_clips
-            if clip.start < end_value and clip.end > start_value
+            clip
+            for clip in self.physical_clips
+            if clip.start < end_value
+            and clip.end > start_value
             and (clip_id is None or clip.id == clip_id)
         ]
         if len(matches) != 1:
             return None
         return matches[0].start, matches[0].end
 
-    def intersections(self, start: float, end: float) -> List[SpeechEvidenceSpan]:
+    def intersections(self, start: float, end: float) -> list[SpeechEvidenceSpan]:
         start_value, end_value = _range(start, end)
         return [
-            item for item in self.speech_evidence_spans
+            item
+            for item in self.speech_evidence_spans
             if item.start < end_value and item.end > start_value
         ]
 
-    def validate(self) -> List[str]:
-        errors: List[str] = []
+    def validate(self) -> list[str]:
+        errors: list[str] = []
         try:
             duration = _finite(self.duration, "duration")
             if duration <= 0:
@@ -330,7 +344,7 @@ class PhysicalTimeline:
                 errors.append(f"context {window.id}: unknown physical clip")
         return errors
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         errors = self.validate()
         if errors:
             raise ValueError("invalid physical timeline: " + "; ".join(errors))
@@ -338,13 +352,17 @@ class PhysicalTimeline:
             "schema_version": SCHEMA_VERSION,
             "duration": self.duration,
             "physical_clips": [self._clip_dict(item) for item in self.physical_clips],
-            "speech_evidence_spans": [self._evidence_dict(item) for item in self.speech_evidence_spans],
-            "context_windows": [self._context_dict(item) for item in self.context_windows],
+            "speech_evidence_spans": [
+                self._evidence_dict(item) for item in self.speech_evidence_spans
+            ],
+            "context_windows": [
+                self._context_dict(item) for item in self.context_windows
+            ],
             "diagnostics": copy.deepcopy(self.diagnostics),
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "PhysicalTimeline":
+    def from_dict(cls, payload: Mapping[str, Any]) -> PhysicalTimeline:
         if not isinstance(payload, Mapping):
             raise ValueError("physical timeline payload must be a mapping")
         if payload.get("schema_version") != SCHEMA_VERSION:
@@ -352,41 +370,61 @@ class PhysicalTimeline:
         clips_payload = payload.get("physical_clips", [])
         evidence_payload = payload.get("speech_evidence_spans", [])
         context_payload = payload.get("context_windows", [])
-        if not all(isinstance(value, list) for value in (clips_payload, evidence_payload, context_payload)):
+        if not all(
+            isinstance(value, list)
+            for value in (clips_payload, evidence_payload, context_payload)
+        ):
             raise ValueError("timeline collections must be lists")
         timeline = cls(payload.get("duration"))
         for item in clips_payload:
             if not isinstance(item, Mapping):
                 raise ValueError("physical clip must be a mapping")
             timeline.add_clip(
-                item.get("start"), item.get("end"), item.get("source", "input"),
-                item.get("id"), item.get("metadata"),
+                item.get("start"),
+                item.get("end"),
+                item.get("source", "input"),
+                item.get("id"),
+                item.get("metadata"),
             )
         for item in evidence_payload:
             if not isinstance(item, Mapping):
                 raise ValueError("evidence span must be a mapping")
             timeline.add_evidence(
-                item.get("start"), item.get("end"), item.get("source"),
-                item.get("confidence"), item.get("physical_clip_id"),
-                item.get("metadata"), item.get("id"),
+                item.get("start"),
+                item.get("end"),
+                item.get("source"),
+                item.get("confidence"),
+                item.get("physical_clip_id"),
+                item.get("metadata"),
+                item.get("id"),
             )
         for item in context_payload:
             if not isinstance(item, Mapping):
                 raise ValueError("context window must be a mapping")
             window = timeline.add_context_window(
-                item.get("physical_clip_id"), item.get("left_context"),
-                item.get("right_context"), window_id=item.get("id"),
+                item.get("physical_clip_id"),
+                item.get("left_context"),
+                item.get("right_context"),
+                window_id=item.get("id"),
                 metadata=item.get("metadata"),
             )
             if (window.start, window.end) != (item.get("start"), item.get("end")):
-                raise ValueError("context window range does not match its context values")
+                raise ValueError(
+                    "context window range does not match its context values"
+                )
         timeline.diagnostics = _metadata(payload.get("diagnostics", {}))
         return timeline
 
-    def _resolve_clip(self, start: float, end: float, clip_id: Optional[str]) -> PhysicalClip:
+    def _resolve_clip(
+        self, start: float, end: float, clip_id: str | None
+    ) -> PhysicalClip:
         if clip_id is not None:
             return self._clip_by_id(clip_id)
-        matches = [clip for clip in self.physical_clips if clip.start < end and clip.end > start]
+        matches = [
+            clip
+            for clip in self.physical_clips
+            if clip.start < end and clip.end > start
+        ]
         if len(matches) != 1:
             raise ValueError("evidence must match exactly one physical clip")
         return matches[0]
@@ -406,20 +444,44 @@ class PhysicalTimeline:
 
     def _sort_and_validate(self) -> None:
         self.physical_clips.sort(key=lambda item: (item.start, item.end, item.id))
-        self.speech_evidence_spans.sort(key=lambda item: (item.start, item.end, item.id))
+        self.speech_evidence_spans.sort(
+            key=lambda item: (item.start, item.end, item.id)
+        )
         self.context_windows.sort(key=lambda item: (item.start, item.end, item.id))
         errors = self.validate()
         if errors:
             raise ValueError("invalid physical timeline: " + "; ".join(errors))
 
     @staticmethod
-    def _clip_dict(item: PhysicalClip) -> Dict[str, Any]:
-        return {"id": item.id, "start": item.start, "end": item.end, "source": item.source, "metadata": copy.deepcopy(item.metadata)}
+    def _clip_dict(item: PhysicalClip) -> dict[str, Any]:
+        return {
+            "id": item.id,
+            "start": item.start,
+            "end": item.end,
+            "source": item.source,
+            "metadata": copy.deepcopy(item.metadata),
+        }
 
     @staticmethod
-    def _evidence_dict(item: SpeechEvidenceSpan) -> Dict[str, Any]:
-        return {"id": item.id, "start": item.start, "end": item.end, "source": item.source, "confidence": item.confidence, "physical_clip_id": item.physical_clip_id, "metadata": copy.deepcopy(item.metadata)}
+    def _evidence_dict(item: SpeechEvidenceSpan) -> dict[str, Any]:
+        return {
+            "id": item.id,
+            "start": item.start,
+            "end": item.end,
+            "source": item.source,
+            "confidence": item.confidence,
+            "physical_clip_id": item.physical_clip_id,
+            "metadata": copy.deepcopy(item.metadata),
+        }
 
     @staticmethod
-    def _context_dict(item: ContextWindow) -> Dict[str, Any]:
-        return {"id": item.id, "start": item.start, "end": item.end, "physical_clip_id": item.physical_clip_id, "left_context": item.left_context, "right_context": item.right_context, "metadata": copy.deepcopy(item.metadata)}
+    def _context_dict(item: ContextWindow) -> dict[str, Any]:
+        return {
+            "id": item.id,
+            "start": item.start,
+            "end": item.end,
+            "physical_clip_id": item.physical_clip_id,
+            "left_context": item.left_context,
+            "right_context": item.right_context,
+            "metadata": copy.deepcopy(item.metadata),
+        }

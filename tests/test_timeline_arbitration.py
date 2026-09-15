@@ -26,15 +26,14 @@ from vocal_subtitle.asr.local_recovery import (
 )
 from vocal_subtitle.config import AcousticValidationConfig, PipelineConfig
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
+from vocal_subtitle.physical.allocator import WordAllocation
 from vocal_subtitle.physical.coverage import (
     audit_physical_coverage,
     speaker_change_boundaries,
 )
 from vocal_subtitle.physical.ir import GlobalWord
-from vocal_subtitle.physical.allocator import WordAllocation
 from vocal_subtitle.physical.subtitle_bins import PhysicalSubtitleBin
 from vocal_subtitle.pipeline import Pipeline
-
 
 SAMPLE_RATE = 16000
 
@@ -66,7 +65,8 @@ def _audio_with_spans(total: float, spans) -> np.ndarray:
     audio = np.zeros(int(SAMPLE_RATE * total), dtype=np.float32)
     for start, end, kind in spans:
         slice_obj = slice(
-            int(start * SAMPLE_RATE), int(end * SAMPLE_RATE),
+            int(start * SAMPLE_RATE),
+            int(end * SAMPLE_RATE),
         )
         width = slice_obj.stop - slice_obj.start
         if kind == "tone":
@@ -90,7 +90,9 @@ class TestR1Consensus:
 
     def _drifted_event(self) -> SubtitleEvent:
         return SubtitleEvent(
-            index=1, start=1.8, end=3.35,
+            index=1,
+            start=1.8,
+            end=3.35,
             text="今天天气怎么样我们出去走走吧",
         )
 
@@ -99,16 +101,15 @@ class TestR1Consensus:
         validator = _validator(timeline_arbitration=True)
         events = [self._drifted_event()]
         result, report = validator.validate(
-            events, evidence_candidates=self.EVIDENCE,
+            events,
+            evidence_candidates=self.EVIDENCE,
             ffmpeg_unified_result={"skeleton": self.SKELETON},
         )
         # 端点解除 0.15s 限幅,直接钳到成员段 (0,3) 端点
         assert result[0].start == pytest.approx(0.03)
         assert result[0].end == pytest.approx(3.0 - 0.003)
         assert report["r1_applied"] == 1
-        reasons = {
-            item["reason"] for item in report["boundary_diagnostics"]
-        }
+        reasons = {item["reason"] for item in report["boundary_diagnostics"]}
         assert "r1_consensus_skeleton_start" in reasons
         assert "r1_consensus_skeleton_end" in reasons
 
@@ -117,11 +118,15 @@ class TestR1Consensus:
         validator = _validator(timeline_arbitration=True)
         event = self._drifted_event()
         word = WordTimestamp(
-            word="今", start=1.75, end=1.8, confidence=0.9,
+            word="今",
+            start=1.75,
+            end=1.8,
+            confidence=0.9,
         )
         event.words = [word]
         result, _ = validator.validate(
-            [event], evidence_candidates=self.EVIDENCE,
+            [event],
+            evidence_candidates=self.EVIDENCE,
             ffmpeg_unified_result={"skeleton": self.SKELETON},
         )
         # 词时间保持原样(相对坐标不被改写)
@@ -136,7 +141,8 @@ class TestR1Consensus:
             WordTimestamp(word="今", start=1.75, end=1.8, confidence=0.95),
         ]
         result, report = validator.validate(
-            [event], evidence_candidates=self.EVIDENCE,
+            [event],
+            evidence_candidates=self.EVIDENCE,
             ffmpeg_unified_result={"skeleton": self.SKELETON},
         )
         assert report["skipped_high_confidence"] == 0
@@ -159,8 +165,7 @@ class TestR1Consensus:
         assert result[0].end == pytest.approx(3.35)
         assert report.get("r1_applied", 0) == 0
         assert any(
-            item["issue"] == "end_deviation"
-            for item in report["events_flagged"]
+            item["issue"] == "end_deviation" for item in report["events_flagged"]
         )
 
     def test_not_triggered_when_similarity_insufficient(self):
@@ -186,15 +191,15 @@ class TestR1Consensus:
         validator = _validator(timeline_arbitration=False)
         events = [self._drifted_event()]
         result, report = validator.validate(
-            events, evidence_candidates=self.EVIDENCE,
+            events,
+            evidence_candidates=self.EVIDENCE,
             ffmpeg_unified_result={"skeleton": self.SKELETON},
         )
         assert result[0].start == pytest.approx(1.8)
         assert result[0].end == pytest.approx(3.35)
         assert "r1_applied" not in report
         assert any(
-            item["issue"] == "end_deviation"
-            for item in report["events_flagged"]
+            item["issue"] == "end_deviation" for item in report["events_flagged"]
         )
 
     def test_multi_event_group_clamps_outer_boundaries_only(self):
@@ -202,11 +207,15 @@ class TestR1Consensus:
         validator = _validator(timeline_arbitration=True)
         events = [
             SubtitleEvent(
-                index=1, start=1.0, end=1.5,
+                index=1,
+                start=1.0,
+                end=1.5,
                 text="第一句一共六个字",
             ),
             SubtitleEvent(
-                index=2, start=2.0, end=3.35,
+                index=2,
+                start=2.0,
+                end=3.35,
                 text="第二句一共六个字",
             ),
         ]
@@ -215,7 +224,8 @@ class TestR1Consensus:
             (1.9, 8.0, "第二句一共六个字"),
         )
         result, report = validator.validate(
-            events, evidence_candidates=evidence,
+            events,
+            evidence_candidates=evidence,
             ffmpeg_unified_result={"skeleton": self.SKELETON},
         )
         assert report["r1_applied"] == 2
@@ -246,7 +256,10 @@ class TestR2BlindZone:
 
     def _event(self, word_text="嘿", confidence=0.9) -> SubtitleEvent:
         return SubtitleEvent(
-            index=1, start=0.05, end=0.44, text=word_text + "盲区词",
+            index=1,
+            start=0.05,
+            end=0.44,
+            text=word_text + "盲区词",
             words=[WordTimestamp(word_text, 0.30, 0.38, confidence=confidence)],
         )
 
@@ -260,7 +273,8 @@ class TestR2BlindZone:
         """词时刻能量高 → 保留 ASR 词时间,事件覆盖到词,标 skeleton_blind。"""
         validator = _validator(timeline_arbitration=True)
         result, report = validator.validate(
-            [self._event()], audio=self._audio(with_tone=True),
+            [self._event()],
+            audio=self._audio(with_tone=True),
             sample_rate=SAMPLE_RATE,
             ffmpeg_unified_result={"skeleton": self.SKELETON},
         )
@@ -274,8 +288,7 @@ class TestR2BlindZone:
         # start 侧提议同样被 R2 否决并标记,skeleton_blind 两侧各计 1 次
         assert report["skeleton_blind"] == 2
         assert any(
-            item["issue"] == "skeleton_blind"
-            for item in report["events_flagged"]
+            item["issue"] == "skeleton_blind" for item in report["events_flagged"]
         )
 
     def test_blind_word_trimmed_when_energy_low(self):
@@ -306,35 +319,45 @@ class TestR2BlindZone:
         音乐残留填满 → 噪声底抬到词能量之上 → 拒绝确认。
         """
         # 音乐残留铺满 [0, 3.8];全局静音占比 >20%,把全局噪声底拉低
-        audio = _audio_with_spans(5.5, [
-            (0.0, 3.8, "tone"),
-            (3.8, 5.5, "silence"),
-        ])
+        audio = _audio_with_spans(
+            5.5,
+            [
+                (0.0, 3.8, "tone"),
+                (3.8, 5.5, "silence"),
+            ],
+        )
 
         def _residue_event() -> SubtitleEvent:
             # 低置信词:不走 reliable-boundary 跳过,让 R2 裁决可见
             return SubtitleEvent(
-                index=1, start=0.05, end=0.44, text="残留词",
+                index=1,
+                start=0.05,
+                end=0.44,
+                text="残留词",
                 words=[WordTimestamp("残留", 0.0, 0.55, confidence=0.3)],
             )
 
         kept_validator = _validator(
-            timeline_arbitration=True, arbitration_r2_local_noise=False,
+            timeline_arbitration=True,
+            arbitration_r2_local_noise=False,
         )
         _, global_report = kept_validator.validate(
             [_residue_event()],
-            audio=audio, sample_rate=SAMPLE_RATE,
+            audio=audio,
+            sample_rate=SAMPLE_RATE,
             ffmpeg_unified_result={"skeleton": self.SKELETON},
         )
         # 全局噪声底(远端静音)→ 误确认为真语音 → kept
         assert global_report["r2_blind_kept"] == 1
 
         local_validator = _validator(
-            timeline_arbitration=True, arbitration_r2_local_noise=True,
+            timeline_arbitration=True,
+            arbitration_r2_local_noise=True,
         )
         result, local_report = local_validator.validate(
             [_residue_event()],
-            audio=audio, sample_rate=SAMPLE_RATE,
+            audio=audio,
+            sample_rate=SAMPLE_RATE,
             ffmpeg_unified_result={"skeleton": self.SKELETON},
         )
         # 局部噪声底(残留铺满窗口)→ 无法确认为真语音 → 不标 kept;
@@ -353,17 +376,25 @@ class TestR2BlindZone:
         本用例的词头 [0.0,0.26] 有 tone 能量 → start 保持不动。
         """
         skeleton = [(0.3, 1.0), (2.0, 3.0)]
-        audio = _audio_with_spans(3.0, [
-            (0.0, 3.0, "silence"),
-            (0.18, 0.26, "tone"),
-        ])
+        audio = _audio_with_spans(
+            3.0,
+            [
+                (0.0, 3.0, "silence"),
+                (0.18, 0.26, "tone"),
+            ],
+        )
         event = SubtitleEvent(
-            index=1, start=0.2, end=0.9, text="嘿前导词",
+            index=1,
+            start=0.2,
+            end=0.9,
+            text="嘿前导词",
             words=[WordTimestamp("嘿", 0.0, 0.05, confidence=0.9)],
         )
         validator = _validator(timeline_arbitration=True)
         result, report = validator.validate(
-            [event], audio=audio, sample_rate=SAMPLE_RATE,
+            [event],
+            audio=audio,
+            sample_rate=SAMPLE_RATE,
             ffmpeg_unified_result={"skeleton": skeleton},
         )
         assert result[0].start == pytest.approx(0.2)
@@ -397,8 +428,7 @@ class TestR2BlindZone:
         assert "r2_blind_kept" not in report
         assert "r2_trimmed" not in report
         assert not any(
-            item["issue"] == "skeleton_blind"
-            for item in report["events_flagged"]
+            item["issue"] == "skeleton_blind" for item in report["events_flagged"]
         )
 
 
@@ -410,7 +440,8 @@ class TestR2BlindZone:
 class TestArbitrationHelpers:
     def test_char_overlap_normalizes_punct_and_case(self):
         overlap, similarity = char_overlap(
-            "你好,世界!", "你好世界",
+            "你好,世界!",
+            "你好世界",
         )
         assert overlap == 4
         assert similarity == pytest.approx(1.0)
@@ -422,15 +453,23 @@ class TestArbitrationHelpers:
     def test_event_word_spans_relative_and_absolute(self):
         # 相对坐标契约:词时间相对 event.start
         relative = SubtitleEvent(
-            index=1, start=10.0, end=12.0, text="t",
+            index=1,
+            start=10.0,
+            end=12.0,
+            text="t",
             words=[WordTimestamp("词", 0.5, 0.8, confidence=0.9)],
         )
         assert event_word_spans(relative) == [(10.5, 10.8)]
         # 绝对坐标契约:物理路径词带 raw_start/raw_end
         absolute = SubtitleEvent(index=1, start=10.0, end=12.0, text="t")
-        absolute.words = [SimpleNamespaceWord(
-            raw_start=3.0, raw_end=3.4, start=0.0, end=0.0,
-        )]
+        absolute.words = [
+            SimpleNamespaceWord(
+                raw_start=3.0,
+                raw_end=3.4,
+                start=0.0,
+                end=0.0,
+            )
+        ]
         assert event_word_spans(absolute) == [(3.0, 3.4)]
 
     def test_words_beyond_sides(self):
@@ -473,10 +512,18 @@ class TestR3SpeakerHole:
     def _bins(self):
         return [
             PhysicalSubtitleBin(
-                "bin-1", 0.0, 1.0, "skeleton", physical_clip_id="clip-a",
+                "bin-1",
+                0.0,
+                1.0,
+                "skeleton",
+                physical_clip_id="clip-a",
             ),
             PhysicalSubtitleBin(
-                "bin-2", 2.0, 3.0, "skeleton", physical_clip_id="clip-a",
+                "bin-2",
+                2.0,
+                3.0,
+                "skeleton",
+                physical_clip_id="clip-a",
             ),
         ]
 
@@ -506,8 +553,7 @@ class TestR3SpeakerHole:
         assert report.recovery_ranges[0].possible_speaker_hole is False
         assert report.possible_speaker_holes == ()
         assert not any(
-            alert.startswith("possible_speaker_hole")
-            for alert in report.alerts
+            alert.startswith("possible_speaker_hole") for alert in report.alerts
         )
 
     def test_same_speaker_boundary_not_flagged(self):
@@ -540,13 +586,15 @@ class TestR3SpeakerHole:
             turns=turns,
         )
         requests = make_recovery_requests_from_coverage(
-            report.recovery_ranges, turns=turns,
+            report.recovery_ranges,
+            turns=turns,
         )
         assert requests[0].metadata["possible_speaker_hole"] is True
 
         plain = make_recovery_requests_from_coverage(
             audit_physical_coverage(
-                self._bins(), [_allocation("covered", 0.2, 0.5)],
+                self._bins(),
+                [_allocation("covered", 0.2, 0.5)],
             ).recovery_ranges,
         )
         assert "possible_speaker_hole" not in plain[0].metadata
@@ -579,9 +627,14 @@ class _RecoveryEngine(ASREngine):
                 text="被吞的话轮",
                 start=0.5,
                 end=0.8,
-                words=[WordTimestamp(
-                    "被吞的话轮", 0.5, 0.8, confidence=0.9,
-                )],
+                words=[
+                    WordTimestamp(
+                        "被吞的话轮",
+                        0.5,
+                        0.8,
+                        confidence=0.9,
+                    )
+                ],
             )
         ]
 
@@ -594,14 +647,23 @@ class TestR3CoverageRecoveryWiring:
         """
         bins = [
             PhysicalSubtitleBin(
-                "bin-1", 0.0, 1.0, "skeleton", physical_clip_id="clip-a",
+                "bin-1",
+                0.0,
+                1.0,
+                "skeleton",
+                physical_clip_id="clip-a",
             ),
             PhysicalSubtitleBin(
-                "bin-2", 1.2, 2.0, "skeleton", physical_clip_id="clip-a",
+                "bin-2",
+                1.2,
+                2.0,
+                "skeleton",
+                physical_clip_id="clip-a",
             ),
         ]
         report = audit_physical_coverage(
-            bins, [_allocation("covered", 0.1, 0.5)],
+            bins,
+            [_allocation("covered", 0.1, 0.5)],
         )
         assert report.complete is False
         requests = make_recovery_requests_from_coverage(
@@ -610,7 +672,8 @@ class TestR3CoverageRecoveryWiring:
         assert requests
         engine = LocalRecoveryEngine(_RecoveryEngine())
         results = engine.process_requests(
-            requests, np.zeros(int(SAMPLE_RATE * 2.5), dtype=np.float32),
+            requests,
+            np.zeros(int(SAMPLE_RATE * 2.5), dtype=np.float32),
             sample_rate=SAMPLE_RATE,
         )
         assert any(result.success for result in results)
@@ -648,14 +711,9 @@ class TestEvidenceChannelAndRegression:
         config = PipelineConfig()
         assert config.acoustic_validation.timeline_arbitration is False
         pipeline = Pipeline(config)
-        pipeline._global_evidence = (
-            SimpleNamespaceCandidate(0.5, 1.5, "共识文本"),
-        )
+        pipeline._global_evidence = (SimpleNamespaceCandidate(0.5, 1.5, "共识文本"),)
         pipeline._publish_arbitration_evidence()
-        assert (
-            pipeline.config.acoustic_validation.arbitration_evidence_regions
-            is None
-        )
+        assert pipeline.config.acoustic_validation.arbitration_evidence_regions is None
 
     def test_config_loader_reads_arbitration_fields(self, tmp_path):
         """default.yaml 的仲裁开关能被 ConfigLoader 读入(缺口补齐验证)。"""

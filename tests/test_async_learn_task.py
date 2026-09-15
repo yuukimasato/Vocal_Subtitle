@@ -30,7 +30,6 @@ from vocal_subtitle.webui.pipeline_tasks import (
     run_learn_task_in_thread,
 )
 
-
 AUDIO_BYTES = b"fake audio bytes for cold-rerun learn"
 
 REFERENCE_SRT = (
@@ -87,10 +86,24 @@ class FakeTaskHistory:
         self.records = {}
 
     def _sorted(self):
-        return sorted(self.records.values(), key=lambda r: r["created_at"], reverse=True)
+        return sorted(
+            self.records.values(), key=lambda r: r["created_at"], reverse=True
+        )
 
-    def create(self, task_id, file_name, file_hash, file_size, profile, config, *,
-               run_id="", task_type="", scenario="", config_hash=""):
+    def create(
+        self,
+        task_id,
+        file_name,
+        file_hash,
+        file_size,
+        profile,
+        config,
+        *,
+        run_id="",
+        task_type="",
+        scenario="",
+        config_hash="",
+    ):
         self.records[task_id] = {
             "id": task_id,
             "run_id": run_id,
@@ -120,20 +133,27 @@ class FakeTaskHistory:
 
     def find_by_hash(self, file_hash, config_hash, task_type=None):
         for rec in self._sorted():
-            if (rec["input_file_hash"] == file_hash
-                    and rec["config_hash"] == config_hash
-                    and rec["status"] in ("completed", "degraded_completed")
-                    and (task_type is None or rec.get("task_type") == task_type)):
+            if (
+                rec["input_file_hash"] == file_hash
+                and rec["config_hash"] == config_hash
+                and rec["status"] in ("completed", "degraded_completed")
+                and (task_type is None or rec.get("task_type") == task_type)
+            ):
                 return rec
         return None
 
     def list(self, limit=50, offset=0, status=None):
         rows = [r for r in self._sorted() if status is None or r["status"] == status]
-        return rows[offset:offset + limit]
+        return rows[offset : offset + limit]
 
     def count(self, status=None):
-        return len([r for r in self.records.values()
-                    if status is None or r["status"] == status])
+        return len(
+            [
+                r
+                for r in self.records.values()
+                if status is None or r["status"] == status
+            ]
+        )
 
 
 class WsSpy:
@@ -148,6 +168,7 @@ class WsSpy:
     def create_progress_callback(self, task_id):
         def callback(event):
             self.messages.append({"task_id": task_id, "channel": "progress", **event})
+
         return callback
 
     def broadcast_from_thread(self, task_id, message):
@@ -186,8 +207,17 @@ class FakeSyncPipeline:
 def _make_fake_pipeline_run(store, history, captured, *, fail=False):
     """替身 run_pipeline_in_thread：模拟管线冷重跑的落库行为"""
 
-    def fake_run(task_id, input_path, output_path, profile, output_format,
-                 skip_separation, overrides, session_dir=None, progress_callback=None):
+    def fake_run(
+        task_id,
+        input_path,
+        output_path,
+        profile,
+        output_format,
+        skip_separation,
+        overrides,
+        session_dir=None,
+        progress_callback=None,
+    ):
         captured["skip_separation"] = skip_separation
         captured["progress_callback"] = progress_callback
         if fail:
@@ -197,8 +227,14 @@ def _make_fake_pipeline_run(store, history, captured, *, fail=False):
             return
         store[task_id]["status"] = "running"
         if progress_callback is not None:
-            progress_callback({"type": "stage_start", "stage": "pipeline",
-                               "total": 1, "description": "Pipeline 启动"})
+            progress_callback(
+                {
+                    "type": "stage_start",
+                    "stage": "pipeline",
+                    "total": 1,
+                    "description": "Pipeline 启动",
+                }
+            )
         result = {
             "task_id": task_id,
             "run_id": "run-learn",
@@ -213,7 +249,9 @@ def _make_fake_pipeline_run(store, history, captured, *, fail=False):
         }
         store[task_id]["status"] = "completed"
         store[task_id]["result"] = result
-        history.update(task_id, status="completed", result_json=json.dumps(result, default=str))
+        history.update(
+            task_id, status="completed", result_json=json.dumps(result, default=str)
+        )
 
     return fake_run
 
@@ -266,9 +304,9 @@ def _seed_learn_task(store, history, input_path):
         config=None,
         task_type=pipeline_tasks.LEARN_TASK_TYPE,
         scenario="existing-subtitle",
-        config_hash=_learn_dedupe_hash(_base_config_hash(),
-                                       _reference_hash(),
-                                       "existing-subtitle"),
+        config_hash=_learn_dedupe_hash(
+            _base_config_hash(), _reference_hash(), "existing-subtitle"
+        ),
     )
     return task_id
 
@@ -276,6 +314,7 @@ def _seed_learn_task(store, history, input_path):
 # ---------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
@@ -335,7 +374,9 @@ def captured_samples(monkeypatch):
             ingested.append(kwargs)
             return SimpleNamespace(sample_id="sample-1")
 
-    monkeypatch.setattr(sample_manager_module, "FeedbackSampleManager", FakeSampleManager)
+    monkeypatch.setattr(
+        sample_manager_module, "FeedbackSampleManager", FakeSampleManager
+    )
     return ingested
 
 
@@ -359,9 +400,14 @@ def _stub_pipeline_class(monkeypatch):
 # 任务创建
 # ---------------------------------------------------------------------------
 
+
 class TestLearnTaskCreation:
     def test_cold_rerun_creates_internal_learn_task(
-        self, client, store, history, recorder,
+        self,
+        client,
+        store,
+        history,
+        recorder,
     ):
         resp = _post_learn(client, "existing-subtitle")
         assert resp.status_code == 200
@@ -385,7 +431,9 @@ class TestLearnTaskCreation:
         assert len(recorder.calls) == 1
 
     def test_learn_task_visible_in_task_list_and_detail(
-        self, client, recorder,
+        self,
+        client,
+        recorder,
     ):
         task_id = _post_learn(client, "from-scratch-timing").json()["task_id"]
 
@@ -408,7 +456,12 @@ class TestLearnTaskCreation:
         assert item["scenario"] == "from-scratch-timing"
 
     def test_inline_review_without_task_id_stays_sync(
-        self, client, monkeypatch, captured_samples, stub_semantic_scorer, recorder,
+        self,
+        client,
+        monkeypatch,
+        captured_samples,
+        stub_semantic_scorer,
+        recorder,
     ):
         """V1 场景（非冷重跑）不带 task_id 时保持旧客户端同步重跑行为"""
         _stub_pipeline_class(monkeypatch)
@@ -422,12 +475,21 @@ class TestLearnTaskCreation:
         assert len(api._task_store) == 0
 
     def test_dry_run_preview_stays_sync(
-        self, client, monkeypatch, captured_samples, stub_semantic_scorer, recorder,
+        self,
+        client,
+        monkeypatch,
+        captured_samples,
+        stub_semantic_scorer,
+        recorder,
     ):
         """dry_run 预览语义不变：即使 V3/V4 场景也不转异步任务"""
         _stub_pipeline_class(monkeypatch)
         files = {
-            "reference": ("ref.srt", REFERENCE_SRT.encode("utf-8"), "application/octet-stream"),
+            "reference": (
+                "ref.srt",
+                REFERENCE_SRT.encode("utf-8"),
+                "application/octet-stream",
+            ),
             "audio": ("a.wav", AUDIO_BYTES, "audio/wav"),
         }
         resp = client.post(
@@ -444,7 +506,9 @@ class TestLearnTaskCreation:
 
 
 def _post_learn(client, scenario, *, with_audio=True, reference=REFERENCE_SRT):
-    files = {"reference": ("ref.srt", reference.encode("utf-8"), "application/octet-stream")}
+    files = {
+        "reference": ("ref.srt", reference.encode("utf-8"), "application/octet-stream")
+    }
     if with_audio:
         files["audio"] = ("a.wav", AUDIO_BYTES, "audio/wav")
     return client.post("/api/feedback/learn", data={"scenario": scenario}, files=files)
@@ -454,17 +518,28 @@ def _post_learn(client, scenario, *, with_audio=True, reference=REFERENCE_SRT):
 # 完成回调：对齐 → diff → 入库 → 报告挂任务详情
 # ---------------------------------------------------------------------------
 
+
 class TestLearnTaskCompletion:
     @pytest.fixture
-    def completed(self, monkeypatch, tmp_path, store, history, ws_spy,
-                  captured_samples, stub_semantic_scorer, guard_param_learner):
+    def completed(
+        self,
+        monkeypatch,
+        tmp_path,
+        store,
+        history,
+        ws_spy,
+        captured_samples,
+        stub_semantic_scorer,
+        guard_param_learner,
+    ):
         input_path = _session_dir(tmp_path) / "input.wav"
         task_id = _seed_learn_task(store, history, input_path)
         reference_path = input_path.parent / "learn_reference_dummy.srt"
         reference_path.write_text(REFERENCE_SRT, encoding="utf-8")
         captured = {}
         monkeypatch.setattr(
-            pipeline_tasks, "run_pipeline_in_thread",
+            pipeline_tasks,
+            "run_pipeline_in_thread",
             _make_fake_pipeline_run(store, history, captured),
         )
         run_learn_task_in_thread(
@@ -494,7 +569,9 @@ class TestLearnTaskCompletion:
         assert history.get(task_id)["status"] == "completed"
 
     def test_d2_sample_ingested_with_scenario_and_stats(
-        self, completed, captured_samples,
+        self,
+        completed,
+        captured_samples,
     ):
         assert len(captured_samples) == 1
         meta = captured_samples[0]
@@ -525,22 +602,32 @@ class TestLearnTaskCompletion:
 # 失败分支
 # ---------------------------------------------------------------------------
 
+
 class TestLearnTaskFailure:
     def test_pipeline_failure_is_visible_and_skips_learn(
-        self, monkeypatch, tmp_path, store, history, ws_spy, captured_samples,
+        self,
+        monkeypatch,
+        tmp_path,
+        store,
+        history,
+        ws_spy,
+        captured_samples,
     ):
         input_path = _session_dir(tmp_path) / "input.wav"
         task_id = _seed_learn_task(store, history, input_path)
         captured = {}
         monkeypatch.setattr(
-            pipeline_tasks, "run_pipeline_in_thread",
+            pipeline_tasks,
+            "run_pipeline_in_thread",
             _make_fake_pipeline_run(store, history, captured, fail=True),
         )
         run_learn_task_in_thread(
-            task_id, input_path,
+            task_id,
+            input_path,
             input_path.parent / "learn_reference_dummy.srt",
             input_path.parent / "output.srt",
-            "default", "existing-subtitle",
+            "default",
+            "existing-subtitle",
             session_dir=input_path.parent,
         )
         # 任务状态与错误可见
@@ -554,8 +641,14 @@ class TestLearnTaskFailure:
         assert not any(m.get("type") == "learn_complete" for m in ws_spy.messages)
 
     def test_learn_phase_failure_marks_task_failed(
-        self, monkeypatch, tmp_path, store, history, ws_spy,
-        captured_samples, stub_semantic_scorer,
+        self,
+        monkeypatch,
+        tmp_path,
+        store,
+        history,
+        ws_spy,
+        captured_samples,
+        stub_semantic_scorer,
     ):
         input_path = _session_dir(tmp_path) / "input.wav"
         task_id = _seed_learn_task(store, history, input_path)
@@ -563,13 +656,17 @@ class TestLearnTaskFailure:
         broken_reference.write_text("", encoding="utf-8")  # 解析不到字幕事件
         captured = {}
         monkeypatch.setattr(
-            pipeline_tasks, "run_pipeline_in_thread",
+            pipeline_tasks,
+            "run_pipeline_in_thread",
             _make_fake_pipeline_run(store, history, captured),
         )
         run_learn_task_in_thread(
-            task_id, input_path, broken_reference,
+            task_id,
+            input_path,
+            broken_reference,
             input_path.parent / "output.srt",
-            "default", "existing-subtitle",
+            "default",
+            "existing-subtitle",
             session_dir=input_path.parent,
         )
         assert store[task_id]["status"] == "failed"
@@ -587,9 +684,13 @@ class TestLearnTaskFailure:
 # 幂等 / 去重
 # ---------------------------------------------------------------------------
 
+
 class TestLearnTaskIdempotency:
     def test_duplicate_inflight_submission_returns_same_task(
-        self, client, history, recorder,
+        self,
+        client,
+        history,
+        recorder,
     ):
         first = _post_learn(client, "existing-subtitle").json()
         second = _post_learn(client, "existing-subtitle").json()
@@ -601,7 +702,9 @@ class TestLearnTaskIdempotency:
         assert len(recorder.calls) == 1
         assert len(history.records) == 1
 
-    def test_completed_task_dedupe_returns_original(self, client, store, history, recorder):
+    def test_completed_task_dedupe_returns_original(
+        self, client, store, history, recorder
+    ):
         first = _post_learn(client, "existing-subtitle").json()
         recorder.event.wait(timeout=5)
         # 模拟任务已完成
@@ -638,24 +741,36 @@ class TestLearnTaskIdempotency:
 # 全管线缓存命中：不进队列，同步秒级应答
 # ---------------------------------------------------------------------------
 
+
 class TestPipelineCacheHit:
     def test_cache_hit_answers_synchronously(
-        self, client, tmp_path, store, history, recorder,
-        captured_samples, stub_semantic_scorer, guard_param_learner,
+        self,
+        client,
+        tmp_path,
+        store,
+        history,
+        recorder,
+        captured_samples,
+        stub_semantic_scorer,
+        guard_param_learner,
     ):
         session = _session_dir(tmp_path)
-        _seed_completed_task(history, "task-orig", {
-            "task_id": "task-orig",
-            "run_id": "run-orig",
-            "status": "completed",
-            "input_path": str(session / "input.wav"),
-            "events": [
-                _serialized_event(1, 1.0, 3.0, "第一句"),
-                _serialized_event(2, 4.0, 6.0, "第二句"),
-            ],
-            "stats": dict(TASK_STATS),
-            "artifacts": {"input": str(session / "input.wav")},
-        })
+        _seed_completed_task(
+            history,
+            "task-orig",
+            {
+                "task_id": "task-orig",
+                "run_id": "run-orig",
+                "status": "completed",
+                "input_path": str(session / "input.wav"),
+                "events": [
+                    _serialized_event(1, 1.0, 3.0, "第一句"),
+                    _serialized_event(2, 4.0, 6.0, "第二句"),
+                ],
+                "stats": dict(TASK_STATS),
+                "artifacts": {"input": str(session / "input.wav")},
+            },
+        )
 
         resp = _post_learn(client, "existing-subtitle")
         assert resp.status_code == 200
@@ -671,15 +786,24 @@ class TestPipelineCacheHit:
         assert captured_samples[0]["audio_duration"] == 12.0
 
     def test_cache_hit_with_cleaned_session_falls_back_to_task(
-        self, client, tmp_path, store, history, recorder,
+        self,
+        client,
+        tmp_path,
+        store,
+        history,
+        recorder,
     ):
-        _seed_completed_task(history, "task-orig", {
-            "task_id": "task-orig",
-            "status": "completed",
-            "input_path": str(tmp_path / "cleaned-away" / "input.wav"),  # 已清理
-            "events": [_serialized_event(1, 1.0, 3.0, "第一句")],
-            "stats": dict(TASK_STATS),
-        })
+        _seed_completed_task(
+            history,
+            "task-orig",
+            {
+                "task_id": "task-orig",
+                "status": "completed",
+                "input_path": str(tmp_path / "cleaned-away" / "input.wav"),  # 已清理
+                "events": [_serialized_event(1, 1.0, 3.0, "第一句")],
+                "stats": dict(TASK_STATS),
+            },
+        )
 
         resp = _post_learn(client, "existing-subtitle")
         assert resp.status_code == 200
@@ -696,6 +820,7 @@ class TestPipelineCacheHit:
 # 任务历史：task_type/scenario 列迁移与幂等键查询（真实 SQLite）
 # ---------------------------------------------------------------------------
 
+
 class TestTaskHistoryLearnColumns:
     def test_create_with_learn_marker_and_find_by_type(self, tmp_path):
         from vocal_subtitle.utils.task_history import TaskHistoryManager
@@ -703,8 +828,15 @@ class TestTaskHistoryLearnColumns:
         mgr = TaskHistoryManager(db_path=tmp_path / "history.db")
         config = _build_run_config(ConfigLoader(), "default", {})
         mgr.create(
-            "t1", "a.wav", "h" * 64, 10, "default", config,
-            task_type="learn", scenario="existing-subtitle", config_hash="c1",
+            "t1",
+            "a.wav",
+            "h" * 64,
+            10,
+            "default",
+            config,
+            task_type="learn",
+            scenario="existing-subtitle",
+            config_hash="c1",
         )
         record = mgr.get("t1")
         assert record["task_type"] == "learn"

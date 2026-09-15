@@ -6,7 +6,6 @@ the actual tests live under ``tests/test_feedback/`` by responsibility.
 
 import sys
 
-
 # The normal repository collection already discovers ``feedback_suite``.  Only
 # expose the classes here when the historical file path is explicitly passed,
 # so the compatibility entry point does not run every test twice.

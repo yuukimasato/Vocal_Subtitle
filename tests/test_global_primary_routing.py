@@ -16,10 +16,10 @@ from vocal_subtitle.application.global_primary import (
 )
 from vocal_subtitle.config import PipelineConfig
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
-from vocal_subtitle.pipeline import Pipeline
-from vocal_subtitle.pipeline_context import NoiseProfile, PipelineContext
 from vocal_subtitle.physical.ir import GlobalWord
 from vocal_subtitle.physical.timeline import PhysicalTimeline
+from vocal_subtitle.pipeline import Pipeline
+from vocal_subtitle.pipeline_context import NoiseProfile, PipelineContext
 from vocal_subtitle.utils.audio_utils import AudioUtils
 
 
@@ -102,8 +102,9 @@ def _prepare_run(monkeypatch, tmp_path, routing):
     pipeline._finalize_events = lambda events, stats, duration: events
     pipeline._get_subtitle_builder = lambda: object()
     pipeline._export_subtitles_multi_format = (
-        lambda builder, events, output_path, output_format, session_dir, label:
-        {output_format: str(output_path)}
+        lambda builder, events, output_path, output_format, session_dir, label: {
+            output_format: str(output_path)
+        }
     )
     return pipeline, input_path
 
@@ -287,7 +288,6 @@ def test_global_primary_insufficient_coverage_records_fallback_reason(
     assert calls["segmented"] == 1
     diagnostics = result["stats"].global_diagnostics
     assert (
-        diagnostics["global_primary_fallback_reason"]
-        == "insufficient_speech_coverage"
+        diagnostics["global_primary_fallback_reason"] == "insufficient_speech_coverage"
     )
     assert [event.text for event in result["events"]] == ["segmented"]

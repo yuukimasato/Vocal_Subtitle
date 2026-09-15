@@ -35,9 +35,7 @@ def test_explicit_shadow_remains_a_valid_rollback_configuration(tmp_path):
 def test_legacy_config_without_review_mode_uses_safe_shadow_defaults(tmp_path):
     config_path = tmp_path / "legacy.yaml"
     config_path.write_text(
-        "pipeline:\n"
-        "  evidence_review:\n"
-        "    enabled: true\n",
+        "pipeline:\n  evidence_review:\n    enabled: true\n",
         encoding="utf-8",
     )
 

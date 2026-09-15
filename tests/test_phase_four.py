@@ -37,9 +37,7 @@ def _event(
         speaker_id=speaker_id,
         physical_start=0.0,
         physical_end=3.0,
-        physical_spans=[
-            {"physical_clip_id": clip, "start": start, "end": end}
-        ],
+        physical_spans=[{"physical_clip_id": clip, "start": start, "end": end}],
         source_word_ids=[f"w{index}-{offset}" for offset, _ in enumerate(words)],
         alignment_warning=warning,
     )
@@ -240,9 +238,7 @@ def test_two_character_unknown_phrase_is_not_repaired_by_default():
 
 
 def test_contiguous_unknown_run_inherits_same_neighbor_speaker_without_merging():
-    previous = _event(
-        1, "前", 0.0, 0.8, [WordTimestamp("前", 0.0, 0.8)], speaker_id=0
-    )
+    previous = _event(1, "前", 0.0, 0.8, [WordTimestamp("前", 0.0, 0.8)], speaker_id=0)
     unknown_one = _event(
         2, "中", 0.82, 0.94, [WordTimestamp("中", 0.0, 0.12)], speaker_id=None
     )
@@ -267,16 +263,24 @@ def test_contiguous_unknown_run_inherits_same_neighbor_speaker_without_merging()
 
 
 def test_unknown_run_is_not_repaired_across_physical_clip_boundary():
-    previous = _event(
-        1, "前", 0.0, 0.8, [WordTimestamp("前", 0.0, 0.8)], speaker_id=0
-    )
+    previous = _event(1, "前", 0.0, 0.8, [WordTimestamp("前", 0.0, 0.8)], speaker_id=0)
     unknown = _event(
-        2, "中", 0.82, 0.94, [WordTimestamp("中", 0.0, 0.12)],
-        clip="clip-b", speaker_id=None,
+        2,
+        "中",
+        0.82,
+        0.94,
+        [WordTimestamp("中", 0.0, 0.12)],
+        clip="clip-b",
+        speaker_id=None,
     )
     following = _event(
-        3, "后", 0.96, 1.7, [WordTimestamp("后", 0.0, 0.7)],
-        clip="clip-a", speaker_id=0,
+        3,
+        "后",
+        0.96,
+        1.7,
+        [WordTimestamp("后", 0.0, 0.7)],
+        clip="clip-a",
+        speaker_id=0,
     )
 
     result, diagnostics = repair_unknown_runs([previous, unknown, following])

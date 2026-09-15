@@ -1,8 +1,9 @@
 """WhisperX adapter regression tests."""
 
-import numpy as np
 import sys
 from types import SimpleNamespace
+
+import numpy as np
 
 from vocal_subtitle.asr.whisperx_engine import WhisperXEngine
 
@@ -14,7 +15,9 @@ def test_load_model_configures_word_timestamps_at_model_level(monkeypatch):
         calls.update(kwargs)
         return object()
 
-    monkeypatch.setitem(sys.modules, "whisperx", SimpleNamespace(load_model=fake_load_model))
+    monkeypatch.setitem(
+        sys.modules, "whisperx", SimpleNamespace(load_model=fake_load_model)
+    )
 
     WhisperXEngine(word_timestamps=True).load_model()
 
@@ -34,9 +37,7 @@ def test_transcribe_does_not_pass_unsupported_word_timestamp_argument():
                         "start": 0.0,
                         "end": 1.0,
                         "text": "hello",
-                        "words": [
-                            {"word": "hello", "start": 0.1, "end": 0.9}
-                        ],
+                        "words": [{"word": "hello", "start": 0.1, "end": 0.9}],
                     }
                 ],
             }

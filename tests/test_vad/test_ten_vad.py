@@ -1,7 +1,6 @@
 """测试 TEN VAD 引擎"""
 
 import numpy as np
-import pytest
 
 from vocal_subtitle.vad.base import SpeechSegment
 from vocal_subtitle.vad.ten_vad import TENVAD
@@ -37,7 +36,7 @@ class TestTENVAD:
             assert seg.start < seg.end
 
     def test_detect_on_array_silence(self, sample_audio_silence):
-        """静音不应检测到语音"""""
+        """静音不应检测到语音""" ""
         engine = TENVAD()
         engine._is_loaded = True
 

@@ -6,12 +6,12 @@
 - TestPipelineArchitecture: 后处理顺序、骨架复用、EndTimePostValidator
 """
 
-import numpy as np
-import pytest
 from pathlib import Path
 
-from vocal_subtitle.mapping.time_mapper import SubtitleEvent
+import numpy as np
+import pytest
 
+from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 
 # ===================================================================
 # TestEndTimePrecision — 验证结束时间精度相关修复
@@ -27,11 +27,11 @@ class TestEndTimePrecision:
 
     def test_boundary_refiner_trailing_silence_below_100ms_not_shrunk(self):
         """trailing_silence ≤ 100ms 不收缩（保护语尾渐弱）"""
+        from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
         from vocal_subtitle.asr.boundary_refiner import (
             BoundaryRefinementConfig,
             BoundaryRefiner,
         )
-        from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
         from vocal_subtitle.vad.base import SpeechSegment
 
         cfg = BoundaryRefinementConfig(
@@ -46,10 +46,15 @@ class TestEndTimePrecision:
         # last_word ends at 1.92, so trailing_silence = 0.08 (80ms)
         seg = SpeechSegment(start=0.0, end=2.0, confidence=0.9)
         word = WordTimestamp(
-            word="test", start=1.0, end=1.92, confidence=0.9,
+            word="test",
+            start=1.0,
+            end=1.92,
+            confidence=0.9,
         )
         asr_seg = TranscriptionSegment(
-            start=0.0, end=2.0, text="test",
+            start=0.0,
+            end=2.0,
+            text="test",
             words=[word],
         )
         asr_results = [[asr_seg]]
@@ -57,7 +62,7 @@ class TestEndTimePrecision:
         audio = np.zeros(int(2.0 * 16000), dtype=np.float32)
         # 语音段填充正弦波（确保能量检测不干扰）
         t = np.linspace(0, 1.92, int(1.92 * 16000), endpoint=False)
-        audio[:len(t)] = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.5
+        audio[: len(t)] = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.5
 
         refined_segs, _ = refiner.refine_all([seg], asr_results, audio, 16000)
         # trailing_silence = 2.0 - 1.92 = 0.08s < 0.10s → 不收缩
@@ -65,11 +70,11 @@ class TestEndTimePrecision:
 
     def test_boundary_refiner_trailing_silence_above_100ms_shrunk(self):
         """trailing_silence > 100ms 收缩但保留 50ms"""
+        from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
         from vocal_subtitle.asr.boundary_refiner import (
             BoundaryRefinementConfig,
             BoundaryRefiner,
         )
-        from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
         from vocal_subtitle.vad.base import SpeechSegment
 
         cfg = BoundaryRefinementConfig(
@@ -83,17 +88,22 @@ class TestEndTimePrecision:
         # trailing_silence = 2.0 - 1.70 = 0.30s (300ms) > 100ms → 应收缩
         seg = SpeechSegment(start=0.0, end=2.0, confidence=0.9)
         word = WordTimestamp(
-            start=1.0, end=1.70, word="test", confidence=0.9,
+            start=1.0,
+            end=1.70,
+            word="test",
+            confidence=0.9,
         )
         asr_seg = TranscriptionSegment(
-            start=0.0, end=2.0, text="test",
+            start=0.0,
+            end=2.0,
+            text="test",
             words=[word],
         )
         asr_results = [[asr_seg]]
 
         audio = np.zeros(int(2.0 * 16000), dtype=np.float32)
         t = np.linspace(0, 1.70, int(1.70 * 16000), endpoint=False)
-        audio[:len(t)] = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.5
+        audio[: len(t)] = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.5
 
         refined_segs, _ = refiner.refine_all([seg], asr_results, audio, 16000)
         # trailing=300ms, shrink=max(0, min(300-50, 80)) = 80ms
@@ -104,11 +114,11 @@ class TestEndTimePrecision:
 
     def test_boundary_refiner_low_confidence_no_shrink(self):
         """低置信度词不触发收缩"""
+        from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
         from vocal_subtitle.asr.boundary_refiner import (
             BoundaryRefinementConfig,
             BoundaryRefiner,
         )
-        from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
         from vocal_subtitle.vad.base import SpeechSegment
 
         cfg = BoundaryRefinementConfig(
@@ -121,10 +131,15 @@ class TestEndTimePrecision:
         # 低置信度词 (0.3 < 0.5)
         seg = SpeechSegment(start=0.0, end=2.0, confidence=0.9)
         word = WordTimestamp(
-            start=1.0, end=1.50, word="test", confidence=0.3,
+            start=1.0,
+            end=1.50,
+            word="test",
+            confidence=0.3,
         )
         asr_seg = TranscriptionSegment(
-            start=0.0, end=2.0, text="test",
+            start=0.0,
+            end=2.0,
+            text="test",
             words=[word],
         )
         asr_results = [[asr_seg]]
@@ -144,8 +159,8 @@ class TestEndTimePrecision:
 
     def test_time_mapper_clamp_uses_max_not_min_alone(self):
         """末尾段 end 锚定到声学边界（speech_seg.end），不被 ASR 时间戳拖偏"""
-        from vocal_subtitle.mapping.time_mapper import TimeMapper
         from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
+        from vocal_subtitle.mapping.time_mapper import TimeMapper
         from vocal_subtitle.vad.base import SpeechSegment
 
         mapper = TimeMapper(seamless_threshold=0.2)
@@ -156,13 +171,18 @@ class TestEndTimePrecision:
         speech_seg = SpeechSegment(start=0.0, end=2.8, confidence=0.9)
         word = WordTimestamp(start=0.5, end=3.0, word="hello", confidence=0.9)
         asr_seg = TranscriptionSegment(
-            start=0.5, end=3.0, text="hello",
+            start=0.5,
+            end=3.0,
+            text="hello",
             words=[word],
         )
 
         events = mapper.map(
-            [[asr_seg]], [speech_seg],
-            speaker_ids=None, audio=None, sample_rate=16000,
+            [[asr_seg]],
+            [speech_seg],
+            speaker_ids=None,
+            audio=None,
+            sample_rate=16000,
         )
 
         # 末尾段 end 锚定到 speech_seg.end = 2.8（声学边界）
@@ -171,8 +191,8 @@ class TestEndTimePrecision:
 
     def test_time_mapper_clamp_when_asr_before_speech_end(self):
         """ASR end 在 speech_seg.end 之前时正常限制"""
-        from vocal_subtitle.mapping.time_mapper import TimeMapper
         from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
+        from vocal_subtitle.mapping.time_mapper import TimeMapper
         from vocal_subtitle.vad.base import SpeechSegment
 
         mapper = TimeMapper(seamless_threshold=0.2)
@@ -180,13 +200,18 @@ class TestEndTimePrecision:
         speech_seg = SpeechSegment(start=0.0, end=5.0, confidence=0.9)
         word = WordTimestamp(start=1.0, end=6.0, word="hello", confidence=0.9)
         asr_seg = TranscriptionSegment(
-            start=1.0, end=6.0, text="hello",
+            start=1.0,
+            end=6.0,
+            text="hello",
             words=[word],
         )
 
         events = mapper.map(
-            [[asr_seg]], [speech_seg],
-            speaker_ids=None, audio=None, sample_rate=16000,
+            [[asr_seg]],
+            [speech_seg],
+            speaker_ids=None,
+            audio=None,
+            sample_rate=16000,
         )
 
         # 末尾段 end 锚定到 speech_seg.end = 5.0（声学边界），不被 ASR 拖偏
@@ -217,7 +242,10 @@ class TestEndTimePrecision:
             SubtitleEvent(index=1, start=0.5, end=1.5, text="Inside speech"),
         ]
         result, report = validator._physical_snap_validation(
-            events, skeleton, audio=None, sample_rate=16000,
+            events,
+            skeleton,
+            audio=None,
+            sample_rate=16000,
         )
         # end 延长到语音终点 - margin（不走 snapped_ends 回缩计数）
         assert report["snapped_ends"] == 0
@@ -246,7 +274,10 @@ class TestEndTimePrecision:
             SubtitleEvent(index=1, start=0.5, end=1.2, text="Across gap"),
         ]
         result, report = validator._physical_snap_validation(
-            events, skeleton, audio=None, sample_rate=16000,
+            events,
+            skeleton,
+            audio=None,
+            sample_rate=16000,
         )
         # end=1.2 落在语音段 (1.05, 2.0) 内 → is_end_in_speech=True → 不触发吸附
         assert report["snapped_ends"] == 0
@@ -274,7 +305,10 @@ class TestEndTimePrecision:
             SubtitleEvent(index=1, start=0.5, end=1.15, text="Truncated end"),
         ]
         result, report = validator._physical_snap_validation(
-            events, skeleton, audio=None, sample_rate=16000,
+            events,
+            skeleton,
+            audio=None,
+            sample_rate=16000,
         )
         assert report["snapped_ends"] == 0
         assert result[0].end == pytest.approx(1.15)
@@ -296,11 +330,12 @@ class TestEndTimePrecision:
         # 语音 0.0–1.0s，静音 1.0–2.0s
         audio = np.zeros(int(sr * 2.0), dtype=np.float32)
         t = np.linspace(0, 1.0, int(sr * 1.0), endpoint=False)
-        audio[:len(t)] = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.5
+        audio[: len(t)] = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.5
 
         silence_rms = AudioUtils.estimate_silence_rms(audio, sr)
         result = TimeMapper._find_speech_end_backward(
-            audio, sr,
+            audio,
+            sr,
             search_start=0.8,
             search_end=2.0,
             silence_rms=silence_rms,
@@ -317,7 +352,8 @@ class TestEndTimePrecision:
         audio = np.zeros(int(sr * 2.0), dtype=np.float32)
 
         result = TimeMapper._find_speech_end_backward(
-            audio, sr,
+            audio,
+            sr,
             search_start=0.0,
             search_end=2.0,
             silence_rms=0.001,
@@ -332,11 +368,11 @@ class TestEndTimePrecision:
         # 语音 0.0–1.5s，静音 1.5–2.0s
         audio = np.zeros(int(sr * 2.0), dtype=np.float32)
         t = np.linspace(0, 1.5, int(sr * 1.5), endpoint=False)
-        audio[:len(t)] = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.5
+        audio[: len(t)] = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.5
 
         mapper = TimeMapper(seamless_threshold=0.3, natural_pause_max=1.0)
         events = [
-            SubtitleEvent(index=1, start=0.5, end=1.0, text="First"),   # end 提前
+            SubtitleEvent(index=1, start=0.5, end=1.0, text="First"),  # end 提前
             SubtitleEvent(index=2, start=1.5, end=2.0, text="Second"),  # start 精确
         ]
         result = mapper._merge_gaps(events, audio, sr)
@@ -351,7 +387,9 @@ class TestEndTimePrecision:
         mapper = TimeMapper(seamless_threshold=0.6, natural_pause_max=1.0)
         events = [
             SubtitleEvent(index=1, start=0.5, end=1.0, text="First"),
-            SubtitleEvent(index=2, start=1.3, end=2.0, text="Second"),  # gap=0.3s ≤ 0.6s
+            SubtitleEvent(
+                index=2, start=1.3, end=2.0, text="Second"
+            ),  # gap=0.3s ≤ 0.6s
         ]
         result = mapper._merge_gaps(events, audio=None, sample_rate=16000)
         # 无音频 → 回退：gap ≤ 0.6s 直接衔接
@@ -359,11 +397,11 @@ class TestEndTimePrecision:
 
     def test_boundary_refiner_shrink_end_disabled(self):
         """新默认值：shrink_end_enabled=False 保持段尾不收缩"""
+        from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
         from vocal_subtitle.asr.boundary_refiner import (
             BoundaryRefinementConfig,
             BoundaryRefiner,
         )
-        from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
         from vocal_subtitle.vad.base import SpeechSegment
 
         cfg = BoundaryRefinementConfig(
@@ -377,24 +415,36 @@ class TestEndTimePrecision:
         # trailing_silence = 2.0 - 1.70 = 0.30s → 旧行为会收缩，新行为不收缩
         seg = SpeechSegment(start=0.0, end=2.0, confidence=0.9)
         word = WordTimestamp(
-            start=1.0, end=1.70, word="test", confidence=0.9,
+            start=1.0,
+            end=1.70,
+            word="test",
+            confidence=0.9,
         )
         asr_seg = TranscriptionSegment(
-            start=0.0, end=2.0, text="test", words=[word],
+            start=0.0,
+            end=2.0,
+            text="test",
+            words=[word],
         )
         audio = np.zeros(int(2.0 * 16000), dtype=np.float32)
         t = np.linspace(0, 1.70, int(1.70 * 16000), endpoint=False)
-        audio[:len(t)] = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.5
+        audio[: len(t)] = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.5
 
         refined_segs, _ = refiner.refine_all(
-            [seg], [[asr_seg]], audio, 16000,
+            [seg],
+            [[asr_seg]],
+            audio,
+            16000,
         )
         # shrink_end_enabled=False → 段尾不收缩（保留在三帧斜率精修范围内）
         assert refined_segs[0].end >= 1.98  # 未收缩
 
     def test_subtitle_builder_uses_round_not_int(self):
         """验证时间戳使用 round() 而非 int() 做毫秒转换"""
-        from vocal_subtitle.mapping.subtitle_builder import SubtitleBuilder, SubtitleRule
+        from vocal_subtitle.mapping.subtitle_builder import (
+            SubtitleBuilder,
+            SubtitleRule,
+        )
 
         builder = SubtitleBuilder(rule=SubtitleRule())
         # 通过 _to_ssa 间接验证 round 行为
@@ -402,13 +452,12 @@ class TestEndTimePrecision:
         event = SubtitleEvent(
             index=1,
             start=1.2345,  # *1000 = 1234.5 → round=1235, int=1234
-            end=3.6789,    # *1000 = 3678.9 → round=3679, int=3678
+            end=3.6789,  # *1000 = 3678.9 → round=3679, int=3678
             text="Test rounding",
         )
 
         subs = builder._to_ssa([event], fmt="srt")
         assert len(subs) == 1
-        ssa_event = subs[0]
         # round(1234.5) = 1234 (banker's rounding!) or 1235?
         # Actually: round(1234.5) = 1234 in Python (banker's rounding to even)
         # But for 1234.6 → round=1235, int=1234
@@ -417,14 +466,17 @@ class TestEndTimePrecision:
 
     def test_subtitle_builder_round_vs_int(self):
         """round() 四舍五入比 int() 截断更精确"""
-        from vocal_subtitle.mapping.subtitle_builder import SubtitleBuilder, SubtitleRule
+        from vocal_subtitle.mapping.subtitle_builder import (
+            SubtitleBuilder,
+            SubtitleRule,
+        )
 
         builder = SubtitleBuilder(rule=SubtitleRule())
         # 使用明确应该向上舍入的值
         event = SubtitleEvent(
             index=1,
             start=1.2346,  # *1000 = 1234.6 → round=1235, int=1234
-            end=3.6785,    # *1000 = 3678.5 → round=3678 (banker's), int=3678
+            end=3.6785,  # *1000 = 3678.5 → round=3678 (banker's), int=3678
             text="Test rounding precision",
         )
 
@@ -449,6 +501,7 @@ class TestTextQuality:
     @pytest.fixture
     def normalizer(self):
         from vocal_subtitle.asr.text_normalizer import TextNormalizer
+
         return TextNormalizer()
 
     # ------------------------------------------------------------------
@@ -456,13 +509,13 @@ class TestTextQuality:
     # ------------------------------------------------------------------
 
     def test_number_word_to_digit_label(self, normalizer):
-        """"One answer" → "1. Answer" """
+        """ "One answer" → "1. Answer" """
         result = normalizer.normalize("One answer within three rings")
         assert result.startswith("1.")
         assert "answer" in result
 
     def test_numbered_list_two(self, normalizer):
-        """"Two options" → "2. options" """
+        """ "Two options" → "2. options" """
         result = normalizer.normalize("Two options are available")
         assert result.startswith("2.")
 
@@ -483,13 +536,13 @@ class TestTextQuality:
     # ------------------------------------------------------------------
 
     def test_proper_noun_mahood(self, normalizer):
-        """"mahood" → "Mehood" """
+        """ "mahood" → "Mehood" """
         result = normalizer.normalize("Welcome to mahood hotel")
         assert "Mehood" in result
         assert "mahood" not in result.lower()
 
     def test_proper_noun_lusty(self, normalizer):
-        """"lusty" → "Lestie" """
+        """ "lusty" → "Lestie" """
         result = normalizer.normalize("Hello lusty how are you")
         assert "Lestie" in result
         assert "lusty" not in result
@@ -553,19 +606,20 @@ class TestTextQuality:
     # ------------------------------------------------------------------
 
     def test_proper_noun_case_insensitive_match(self, normalizer):
-        """"Shao Shi" → "Xiao Xi"（大小写不敏感 + 多词短语）"""
+        """ "Shao Shi" → "Xiao Xi"（大小写不敏感 + 多词短语）"""
         result = normalizer.normalize("Hello Shao Shi welcome")
         assert "Xiao Xi" in result
         assert "Shao Shi" not in result
 
     def test_proper_noun_mixed_case(self, normalizer):
-        """"SHaO sHi" → "Xiao Xi"（混合大小写）"""
+        """ "SHaO sHi" → "Xiao Xi"（混合大小写）"""
         result = normalizer.normalize("Hello SHaO sHi welcome")
         assert "Xiao Xi" in result
 
     def test_proper_noun_all_caps(self, normalizer):
-        """"MAHOOD" → "MEHOOD"（全大写保留）"""
+        """ "MAHOOD" → "MEHOOD"（全大写保留）"""
         from vocal_subtitle.asr.text_normalizer import TextNormalizer
+
         custom = TextNormalizer(custom_corrections={"mahood": "Mehood"})
         result = custom.normalize("Welcome to MAHOOD hotel")
         assert "MEHOOD" in result
@@ -602,6 +656,7 @@ class TestPipelineArchitecture:
         """验证 _post_process_events 的正确顺序：
         帧级衔接 → LLM 合并 → 声学校验（B1 修复）"""
         import inspect
+
         from vocal_subtitle.pipeline import Pipeline
 
         source = inspect.getsource(Pipeline._post_process_events)
@@ -622,11 +677,11 @@ class TestPipelineArchitecture:
     def test_post_process_events_shared_by_all_paths(self):
         """验证 _post_process_events 被三个路径共用（B4 修复）"""
         import inspect
-        from vocal_subtitle.pipeline import Pipeline
 
         # 2026-09-15 重构 Task 3:_post_process_events 调用随 ASR 分支
         # 迁入 _run_asr_stage;改为检查整个生命周期模块源码,≥3 的断言不变。
         import vocal_subtitle.application.run_lifecycle as run_lifecycle_module
+
         run_source = inspect.getsource(run_lifecycle_module)
         # 检查 _post_process_events 被调用次数
         call_count = run_source.count("self._post_process_events(")
@@ -638,6 +693,7 @@ class TestPipelineArchitecture:
     def test_post_process_events_accepts_ffmpeg_result(self):
         """验证 _post_process_events 接受 ffmpeg_unified_result 参数"""
         import inspect
+
         from vocal_subtitle.pipeline import Pipeline
 
         sig = inspect.signature(Pipeline._post_process_events)
@@ -655,6 +711,7 @@ class TestPipelineArchitecture:
     def test_acoustic_validation_after_llm_merge_in_post_process(self):
         """声学校验在 LLM 合并之后执行（B1 架构 Bug 已修复）"""
         import inspect
+
         from vocal_subtitle.pipeline import Pipeline
 
         source = inspect.getsource(Pipeline._post_process_events)
@@ -712,6 +769,7 @@ class TestEndTimePostValidator:
     @pytest.fixture
     def validator(self):
         from vocal_subtitle.mapping.end_time_validator import EndTimePostValidator
+
         return EndTimePostValidator()
 
     def test_end_before_start_fixed(self, validator):
@@ -747,17 +805,24 @@ class TestEndTimePostValidator:
     def test_large_same_speaker_gap_warns(self, caplog, validator):
         """同说话人大间隙产生告警"""
         import logging
+
         caplog.set_level(logging.WARNING)
 
         evt1 = SubtitleEvent(
-            index=1, start=0.0, end=1.0, text="First",
+            index=1,
+            start=0.0,
+            end=1.0,
+            text="First",
             speaker_id=0,
         )
         evt2 = SubtitleEvent(
-            index=2, start=3.0, end=4.0, text="Second",
+            index=2,
+            start=3.0,
+            end=4.0,
+            text="Second",
             speaker_id=0,
         )
-        result = validator.validate([evt1, evt2])
+        validator.validate([evt1, evt2])
         # gap = 2.0s > 1.5s → 告警
         assert len(caplog.records) >= 1
         assert any("large gap" in r.message.lower() for r in caplog.records)

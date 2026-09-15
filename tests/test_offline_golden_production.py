@@ -1,9 +1,9 @@
 import json
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
-from scripts.run_offline_golden_production import _categories, _config, _parse_reference
 from scripts.run_golden_quality_gate import main as run_quality_gate
+from scripts.run_offline_golden_production import _categories, _config, _parse_reference
 
 
 def test_golden_runner_reads_json_reference_and_preserves_event_kind():
@@ -35,7 +35,6 @@ def test_golden_runner_adds_long_audio_and_repeated_phrase_categories():
 
 
 def test_golden_runner_marks_manual_subtitles_as_advisory_by_default():
-    args = SimpleNamespace(output=Path("/tmp/golden-input.json"))
     item = {
         "ground_truth": "test/reference.ass",
         "category": "single_speaker",
@@ -44,13 +43,17 @@ def test_golden_runner_marks_manual_subtitles_as_advisory_by_default():
 
     # The runner's default is observable without loading an ASR model through
     # the same manifest convention used by run_scene.
-    reference_role = str(item.get("reference_role", "advisory" if item["ground_truth"] else "none"))
+    reference_role = str(
+        item.get("reference_role", "advisory" if item["ground_truth"] else "none")
+    )
     assert reference_role == "advisory"
 
 
 def test_golden_runner_defaults_no_reference_without_ground_truth():
     item = {"ground_truth": None}
-    reference_role = str(item.get("reference_role", "advisory" if item.get("ground_truth") else "none"))
+    reference_role = str(
+        item.get("reference_role", "advisory" if item.get("ground_truth") else "none")
+    )
     assert reference_role == "none"
 
 
@@ -110,18 +113,26 @@ def test_golden_runner_selects_comparable_production_modes():
 def test_quality_gate_cli_carries_input_production_metadata(tmp_path):
     input_path = tmp_path / "input.json"
     output_path = tmp_path / "report.json"
-    input_path.write_text(json.dumps({
-        "schema_version": "golden-quality-input-v2",
-        "generated_from": "test/quality_manifest.yaml",
-        "metadata": {
-            "primary_engine": "faster-whisper",
-            "secondary_engine": "qwen",
-            "review_policy": "risk_only",
-        },
-        "cases": [],
-    }), encoding="utf-8")
+    input_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "golden-quality-input-v2",
+                "generated_from": "test/quality_manifest.yaml",
+                "metadata": {
+                    "primary_engine": "faster-whisper",
+                    "secondary_engine": "qwen",
+                    "review_policy": "risk_only",
+                },
+                "cases": [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    assert run_quality_gate(["--input", str(input_path), "--output", str(output_path)]) == 0
+    assert (
+        run_quality_gate(["--input", str(input_path), "--output", str(output_path)])
+        == 0
+    )
     report = json.loads(output_path.read_text(encoding="utf-8"))
 
     assert report["metadata"]["input_schema_version"] == "golden-quality-input-v2"
@@ -131,20 +142,30 @@ def test_quality_gate_cli_carries_input_production_metadata(tmp_path):
 
 def test_quality_gate_cli_strict_reference_is_opt_in(tmp_path):
     input_path = tmp_path / "input.json"
-    input_path.write_text(json.dumps({
-        "schema_version": "golden-quality-input-v3",
-        "cases": [{
-            "reference_role": "advisory",
-            "reference_status": "manual_reference",
-            "expected_events": [{"start": 0.0, "end": 1.0, "text": "参考"}],
-            "predicted_events": [],
-            "diagnostics": {
-                "physical_violation_count": 0,
-                "cross_silence_count": 0,
-                "raw_event_bypass_count": 0,
-            },
-        }],
-    }), encoding="utf-8")
+    input_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "golden-quality-input-v3",
+                "cases": [
+                    {
+                        "reference_role": "advisory",
+                        "reference_status": "manual_reference",
+                        "expected_events": [{"start": 0.0, "end": 1.0, "text": "参考"}],
+                        "predicted_events": [],
+                        "diagnostics": {
+                            "physical_violation_count": 0,
+                            "cross_silence_count": 0,
+                            "raw_event_bypass_count": 0,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     assert run_quality_gate(["--input", str(input_path), "--ci"]) == 0
-    assert run_quality_gate(["--input", str(input_path), "--ci", "--strict-reference"]) == 3
+    assert (
+        run_quality_gate(["--input", str(input_path), "--ci", "--strict-reference"])
+        == 3
+    )

@@ -1,7 +1,8 @@
 """Physical-evidence quality checks for ASR subtitle candidates."""
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,9 @@ def _intersection_duration(
     start: float,
     end: float,
 ) -> float:
-    return sum(max(0.0, min(end, right) - max(start, left)) for left, right in intervals)
+    return sum(
+        max(0.0, min(end, right) - max(start, left)) for left, right in intervals
+    )
 
 
 def evaluate_asr_quality(
@@ -61,8 +64,14 @@ def evaluate_asr_quality(
     invalid = 0
     for event in candidates:
         text = str(getattr(event, "text", "") or "").strip()
-        start = float(getattr(event, "physical_start", None) or getattr(event, "start", None) or 0.0)
-        end = float(getattr(event, "physical_end", None) or getattr(event, "end", None) or 0.0)
+        start = float(
+            getattr(event, "physical_start", None)
+            or getattr(event, "start", None)
+            or 0.0
+        )
+        end = float(
+            getattr(event, "physical_end", None) or getattr(event, "end", None) or 0.0
+        )
         if not text or end <= start or end < 0 or start > float(audio_duration):
             invalid += 1
             continue
@@ -82,10 +91,12 @@ def evaluate_asr_quality(
 
     overlap_duration = 0.0
     for index, (start, end, _) in enumerate(valid):
-        for other_start, other_end, _ in valid[index + 1:]:
+        for other_start, other_end, _ in valid[index + 1 :]:
             overlap_duration += max(0.0, min(end, other_end) - max(start, other_start))
     total_event_duration = sum(end - start for start, end, _ in valid)
-    overlap_ratio = overlap_duration / total_event_duration if total_event_duration else 0.0
+    overlap_ratio = (
+        overlap_duration / total_event_duration if total_event_duration else 0.0
+    )
 
     metrics = {
         "coverage_ratio": round(coverage, 6),
@@ -112,9 +123,8 @@ def evaluate_asr_quality(
         reasons.append("excessive_overlap")
     if long_events and float(audio_duration) >= float(long_audio_seconds):
         reasons.append("abnormally_long_events")
-    if (
-        float(audio_duration) >= float(long_audio_seconds)
-        and text_chars < int(long_audio_min_text_chars)
+    if float(audio_duration) >= float(long_audio_seconds) and text_chars < int(
+        long_audio_min_text_chars
     ):
         reasons.append("long_audio_low_text_amount")
 

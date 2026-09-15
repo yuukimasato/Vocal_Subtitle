@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
-from typing import Iterable, List, Optional, Sequence, Tuple
 
 from .base import AtomicSpeechSpan, SpeakerTurn
 
@@ -17,11 +17,11 @@ logger = logging.getLogger(__name__)
 
 def normalize_turns(
     turns: Iterable[SpeakerTurn],
-    duration: Optional[float] = None,
+    duration: float | None = None,
     min_duration: float = 0.0,
-) -> List[SpeakerTurn]:
+) -> list[SpeakerTurn]:
     """清理全局 turns，保持 speaker id，只裁剪时间范围。"""
-    result: List[SpeakerTurn] = []
+    result: list[SpeakerTurn] = []
     limit = max(0.0, duration) if duration is not None else None
     for turn in turns:
         start = max(0.0, float(turn.start))
@@ -46,8 +46,8 @@ def normalize_turns(
 def shift_turns(
     turns: Sequence[SpeakerTurn],
     offset: float,
-    duration: Optional[float] = None,
-) -> List[SpeakerTurn]:
+    duration: float | None = None,
+) -> list[SpeakerTurn]:
     """将全局 turns 投影到以 ``offset`` 为起点的局部音频。"""
     shifted = [
         replace(turn, start=turn.start - offset, end=turn.end - offset)
@@ -76,9 +76,9 @@ def reconcile_regions(
     physical_source: str = "fused_vad",
     speaker_source: str = "diarization",
     boundary_collar_ms: float = 80.0,
-    duration: Optional[float] = None,
+    duration: float | None = None,
     keep_unknown: bool = True,
-) -> List[AtomicSpeechSpan]:
+) -> list[AtomicSpeechSpan]:
     """将物理语音区间与 speaker turns 求交集。
 
     ``regions`` 只需要提供 ``start`` 和 ``end`` 属性，也可传入
@@ -86,7 +86,7 @@ def reconcile_regions(
     """
     collar = max(0.0, float(boundary_collar_ms)) / 1000.0
     normalized = normalize_turns(turns, duration=duration)
-    output: List[AtomicSpeechSpan] = []
+    output: list[AtomicSpeechSpan] = []
 
     for region in regions:
         if isinstance(region, (tuple, list)):
@@ -101,8 +101,7 @@ def reconcile_regions(
             continue
 
         overlaps = [
-            turn for turn in normalized
-            if turn.end > start and turn.start < end
+            turn for turn in normalized if turn.end > start and turn.start < end
         ]
         if not overlaps:
             if keep_unknown:
@@ -122,10 +121,16 @@ def reconcile_regions(
             span_start = max(start, turn.start)
             span_end = min(end, turn.end)
             span_start = _snap_to_physical_boundary(
-                span_start, start, end, collar,
+                span_start,
+                start,
+                end,
+                collar,
             )
             span_end = _snap_to_physical_boundary(
-                span_end, start, end, collar,
+                span_end,
+                start,
+                end,
+                collar,
             )
             span_start = max(start, min(span_start, end))
             span_end = max(start, min(span_end, end))
@@ -172,14 +177,14 @@ def merge_same_speaker_spans(
     spans: Sequence[AtomicSpeechSpan],
     *,
     max_gap: float = 0.12,
-) -> List[AtomicSpeechSpan]:
+) -> list[AtomicSpeechSpan]:
     """只合并相邻且 speaker id 相同的 span。
 
     ``None`` 和不同 speaker 永远不会合并。该函数不通过 gap 推断身份。
     """
     if not spans:
         return []
-    result: List[AtomicSpeechSpan] = []
+    result: list[AtomicSpeechSpan] = []
     for span in sorted(spans, key=lambda item: (item.start, item.end)):
         if span.end <= span.start:
             continue
@@ -206,11 +211,11 @@ def split_event_intervals(
     start: float,
     end: float,
     turns: Sequence[SpeakerTurn],
-) -> List[Tuple[float, float, Optional[int]]]:
+) -> list[tuple[float, float, int | None]]:
     """按全局 turns 拆分一个字幕事件，供无词级时间戳 fallback 使用。"""
     if end <= start:
         return []
-    pieces: List[Tuple[float, float, Optional[int]]] = []
+    pieces: list[tuple[float, float, int | None]] = []
     cursor = start
     for turn in normalize_turns(turns):
         if turn.end <= start or turn.start >= end:

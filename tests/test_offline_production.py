@@ -159,7 +159,10 @@ def test_coordinator_falls_back_to_segmented_events_with_diagnostics():
     assert result.diagnostics["production_path"] == "segmented_fallback"
     assert result.diagnostics["status"] == "degraded"
     assert result.diagnostics["review_status"] == "failed"
-    assert result.diagnostics["physical_projection"]["mode"] == "segmented_fallback_projected"
+    assert (
+        result.diagnostics["physical_projection"]["mode"]
+        == "segmented_fallback_projected"
+    )
     assert result.diagnostics["physical_projection"]["raw_event_bypass_count"] == 0
     assert result.diagnostics["decision_count"] == 1
 
@@ -264,8 +267,11 @@ def test_physical_projection_aggregates_multiple_decisions_into_one_bin_event():
     assert result.events[0].physical_bin_id == "subtitle-bin-000001"
     assert result.events[0].physical_start >= result.events[0].physical_bin_start
     assert result.events[0].physical_end <= result.events[0].physical_bin_end
-    assert {item["decision_id"] for item in result.events[0].revision_trace
-            if item["stage"] == "evidence_decision"} == {
+    assert {
+        item["decision_id"]
+        for item in result.events[0].revision_trace
+        if item["stage"] == "evidence_decision"
+    } == {
         "decision:000001",
         "decision:000002",
     }

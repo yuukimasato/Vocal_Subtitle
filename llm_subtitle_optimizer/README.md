@@ -36,8 +36,8 @@ from llm_subtitle_optimizer import SubtitleOptimizer
 
 # 创建优化器（默认使用 deepseek-chat）
 optimizer = SubtitleOptimizer(
-    thread_num=4,           # 并发线程数
-    batch_num=10,           # 每批处理的字幕条数
+    thread_num=4,  # 并发线程数
+    batch_num=10,  # 每批处理的字幕条数
 )
 
 # 输入字幕字典 {index: text}

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from difflib import SequenceMatcher
-from typing import Iterable
 
 
 def validate_llm_text(

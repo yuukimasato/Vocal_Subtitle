@@ -11,8 +11,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 
 @dataclass
@@ -22,7 +23,7 @@ class OverlapExportConfig:
     max_tracks: int = 2
     speaker_prefix_format: str = "name_only"  # "name_only" | "colon" | "bracket"
     srt_max_lines: int = 2
-    ass_track_positions: Tuple[int, ...] = (2, 8)  # ASS {\an} 位置代码
+    ass_track_positions: tuple[int, ...] = (2, 8)  # ASS {\an} 位置代码
 
 
 @dataclass
@@ -31,10 +32,10 @@ class OverlapTrack:
 
     text: str
     speaker_id: int
-    speaker_label: Optional[str] = None
+    speaker_label: str | None = None
     start: float = 0.0
     end: float = 0.0
-    source_word_ids: List[str] = field(default_factory=list)
+    source_word_ids: list[str] = field(default_factory=list)
 
     def format_srt_line(self, prefix_format: str = "name_only") -> str:
         """格式化为 SRT 行。"""
@@ -53,28 +54,30 @@ class OverlapGroup:
     """一组真实重叠的 DisplayCue。"""
 
     group_id: str
-    tracks: List[OverlapTrack]
+    tracks: list[OverlapTrack]
     start: float = 0.0
     end: float = 0.0
     verified: bool = True
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def track_count(self) -> int:
         return len(self.tracks)
 
-    def srt_text(self, config: Optional[OverlapExportConfig] = None) -> str:
+    def srt_text(self, config: OverlapExportConfig | None = None) -> str:
         """生成 SRT 双行文本。
 
         两行格式，每行带 speaker prefix，行间用 \\n 分隔。
         """
         cfg = config or OverlapExportConfig()
         lines = []
-        for i, track in enumerate(self.tracks[:cfg.srt_max_lines]):
+        for i, track in enumerate(self.tracks[: cfg.srt_max_lines]):
             lines.append(track.format_srt_line(cfg.speaker_prefix_format))
         return "\n".join(lines)
 
-    def ass_events(self, config: Optional[OverlapExportConfig] = None) -> List[Dict[str, Any]]:
+    def ass_events(
+        self, config: OverlapExportConfig | None = None
+    ) -> list[dict[str, Any]]:
         """生成 ASS 展示事件。
 
         每个 speaker 轨道生成一个 ASS 事件，使用不同的 \\an 位置代码。
@@ -83,19 +86,21 @@ class OverlapGroup:
         events = []
         for i, track in enumerate(self.tracks):
             position = cfg.ass_track_positions[min(i, len(cfg.ass_track_positions) - 1)]
-            events.append({
-                "start": track.start,
-                "end": track.end,
-                "text": track.text,
-                "speaker_id": track.speaker_id,
-                "speaker_label": track.speaker_label,
-                "an_position": position,
-                "overlap_group_id": self.group_id,
-                "track_index": i,
-            })
+            events.append(
+                {
+                    "start": track.start,
+                    "end": track.end,
+                    "text": track.text,
+                    "speaker_id": track.speaker_id,
+                    "speaker_label": track.speaker_label,
+                    "an_position": position,
+                    "overlap_group_id": self.group_id,
+                    "track_index": i,
+                }
+            )
         return events
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "group_id": self.group_id,
             "tracks": [
@@ -119,9 +124,9 @@ class OverlapGroup:
 def group_overlapping_events(
     events: Sequence[Any],
     *,
-    config: Optional[OverlapExportConfig] = None,
+    config: OverlapExportConfig | None = None,
     max_gap: float = 0.05,
-) -> List[OverlapGroup]:
+) -> list[OverlapGroup]:
     """将带 genuine_overlap 标记的事件分组为 OverlapGroup。
 
     Args:
@@ -136,7 +141,8 @@ def group_overlapping_events(
 
     # 筛选真正重叠的事件
     overlap_events = [
-        e for e in events
+        e
+        for e in events
         if getattr(e, "genuine_overlap", False)
         and getattr(e, "overlap_group_id", None) is not None
     ]
@@ -145,34 +151,40 @@ def group_overlapping_events(
         return []
 
     # 按 overlap_group_id 分组
-    groups_by_id: Dict[str, List[Any]] = {}
+    groups_by_id: dict[str, list[Any]] = {}
     for event in overlap_events:
         gid = str(getattr(event, "overlap_group_id", ""))
         groups_by_id.setdefault(gid, []).append(event)
 
-    result: List[OverlapGroup] = []
+    result: list[OverlapGroup] = []
     for gid, members in sorted(groups_by_id.items()):
         # 排序
         members.sort(key=lambda e: (getattr(e, "start", 0), getattr(e, "end", 0)))
 
         # 按 speaker 区分轨道
-        tracks: List[OverlapTrack] = []
+        tracks: list[OverlapTrack] = []
         speakers_seen: set = set()
-        for member in members[:cfg.max_tracks]:
+        for member in members[: cfg.max_tracks]:
             sid = getattr(member, "speaker_id", -1)
             # 去重同 speaker
             if sid in speakers_seen:
                 continue
             speakers_seen.add(sid)
 
-            tracks.append(OverlapTrack(
-                text=str(getattr(member, "text", "")),
-                speaker_id=sid if sid is not None else -1,
-                speaker_label=getattr(member, "speaker_label", None),
-                start=float(getattr(member, "physical_start", getattr(member, "start", 0))),
-                end=float(getattr(member, "physical_end", getattr(member, "end", 0))),
-                source_word_ids=list(getattr(member, "source_word_ids", []) or []),
-            ))
+            tracks.append(
+                OverlapTrack(
+                    text=str(getattr(member, "text", "")),
+                    speaker_id=sid if sid is not None else -1,
+                    speaker_label=getattr(member, "speaker_label", None),
+                    start=float(
+                        getattr(member, "physical_start", getattr(member, "start", 0))
+                    ),
+                    end=float(
+                        getattr(member, "physical_end", getattr(member, "end", 0))
+                    ),
+                    source_word_ids=list(getattr(member, "source_word_ids", []) or []),
+                )
+            )
 
         if not tracks:
             continue
@@ -183,20 +195,22 @@ def group_overlapping_events(
             getattr(m, "speaker_source", "") not in ("llm_guess", "unknown")
             for m in members
         )
-        warnings: List[str] = []
+        warnings: list[str] = []
         if len(members) > cfg.max_tracks:
             warnings.append(f"truncated_{len(members) - cfg.max_tracks}_tracks")
         if not verified:
             warnings.append("unverified_speaker_attribution")
 
-        result.append(OverlapGroup(
-            group_id=gid,
-            tracks=tracks,
-            start=group_start,
-            end=group_end,
-            verified=verified,
-            warnings=warnings,
-        ))
+        result.append(
+            OverlapGroup(
+                group_id=gid,
+                tracks=tracks,
+                start=group_start,
+                end=group_end,
+                verified=verified,
+                warnings=warnings,
+            )
+        )
 
     # 按时间排序
     result.sort(key=lambda g: (g.start, g.end, g.group_id))
@@ -206,8 +220,8 @@ def group_overlapping_events(
 def render_overlap_srt(
     groups: Sequence[OverlapGroup],
     *,
-    config: Optional[OverlapExportConfig] = None,
-    audio_duration: Optional[float] = None,
+    config: OverlapExportConfig | None = None,
+    audio_duration: float | None = None,
 ) -> str:
     """将重叠组渲染为 SRT 文本。
 
@@ -224,7 +238,7 @@ def render_overlap_srt(
         millis = int(round((total_seconds % 1) * 1000))
         return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
 
-    lines: List[str] = []
+    lines: list[str] = []
     for index, group in enumerate(groups, start=1):
         start_str = _format_ms(group.start)
         end_str = _format_ms(group.end)

@@ -8,7 +8,8 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -25,9 +26,9 @@ class WebSocketManager:
     """
 
     def __init__(self) -> None:
-        self._connections: Dict[str, List[WebSocket]] = defaultdict(list)
-        self._task_states: Dict[str, Dict[str, Any]] = {}
-        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._connections: dict[str, list[WebSocket]] = defaultdict(list)
+        self._task_states: dict[str, dict[str, Any]] = {}
+        self._main_loop: asyncio.AbstractEventLoop | None = None
 
     def set_main_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """设置主事件循环（FastAPI/uvicorn 的 loop）。
@@ -50,8 +51,11 @@ class WebSocketManager:
         # 捕获主事件循环（FastAPI 的 running loop），用于跨线程广播
         if self._main_loop is None:
             self._main_loop = asyncio.get_running_loop()
-        logger.info("WebSocket connected for task: %s (total: %d)",
-                     task_id, len(self._connections[task_id]))
+        logger.info(
+            "WebSocket connected for task: %s (total: %d)",
+            task_id,
+            len(self._connections[task_id]),
+        )
 
     def disconnect(self, websocket: WebSocket, task_id: str) -> None:
         """移除 WebSocket 连接"""
@@ -66,9 +70,9 @@ class WebSocketManager:
         # be mistaken for a server-side pipeline failure.
         logger.debug("WebSocket disconnected for task: %s", task_id)
 
-    async def broadcast(self, task_id: str, message: Dict[str, Any]) -> None:
+    async def broadcast(self, task_id: str, message: dict[str, Any]) -> None:
         """向所有监听该任务的 WebSocket 广播消息"""
-        dead: List[WebSocket] = []
+        dead: list[WebSocket] = []
         for ws in self._connections.get(task_id, []):
             try:
                 await ws.send_json(message)
@@ -93,35 +97,31 @@ class WebSocketManager:
         # 必须使用 FastAPI 主事件循环，而非后台线程的 loop
         loop = self._get_main_loop()
 
-        def callback(event: Dict[str, Any]) -> None:
+        def callback(event: dict[str, Any]) -> None:
             """同步回调 — 从后台线程调用"""
             try:
-                asyncio.run_coroutine_threadsafe(
-                    self.broadcast(task_id, event), loop
-                )
+                asyncio.run_coroutine_threadsafe(self.broadcast(task_id, event), loop)
             except Exception as e:
                 logger.error("Failed to broadcast progress: %s", e)
 
         return callback
 
-    def store_task_result(self, task_id: str, result: Dict[str, Any]) -> None:
+    def store_task_result(self, task_id: str, result: dict[str, Any]) -> None:
         """存储任务结果"""
         self._task_states[task_id] = result
 
-    def get_task_result(self, task_id: str) -> Dict[str, Any]:
+    def get_task_result(self, task_id: str) -> dict[str, Any]:
         """获取任务结果"""
         return self._task_states.get(task_id, {})
 
-    def broadcast_from_thread(self, task_id: str, message: Dict[str, Any]) -> None:
+    def broadcast_from_thread(self, task_id: str, message: dict[str, Any]) -> None:
         """从任意线程向主事件循环发送广播（fire-and-forget）
 
         用于后台线程向 WebSocket 客户端推送消息。
         不等待广播完成，异常由 broadcast() 内部静默处理。
         """
         loop = self._get_main_loop()
-        asyncio.run_coroutine_threadsafe(
-            self.broadcast(task_id, message), loop
-        )
+        asyncio.run_coroutine_threadsafe(self.broadcast(task_id, message), loop)
 
 
 # 全局单例

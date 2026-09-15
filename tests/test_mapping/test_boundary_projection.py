@@ -3,18 +3,18 @@
 import pytest
 
 from vocal_subtitle.mapping.boundary_projection import (
+    _MAX_TRANSITIONS,
     BoundaryCandidate,
     ProjectedBoundary,
     ProjectionResult,
     ProjectionState,
+    log_transition,
     project_boundaries,
     project_with_repair,
-    log_transition,
-    _MAX_TRANSITIONS,
 )
 
-
 # ── BoundaryCandidate ────────────────────────────────────────────────
+
 
 def test_candidate_rejects_negative_time():
     with pytest.raises(ValueError, match="non-negative"):
@@ -27,15 +27,22 @@ def test_candidate_rejects_bad_direction():
 
 
 def test_candidate_clamps_confidence():
-    c = BoundaryCandidate(candidate_id="c1", time=1.0, direction="start", confidence=1.5)
+    c = BoundaryCandidate(
+        candidate_id="c1", time=1.0, direction="start", confidence=1.5
+    )
     assert c.confidence == 1.0
 
 
 def test_candidate_to_dict():
-    c = BoundaryCandidate(candidate_id="c99", time=2.5, direction="end",
-                          confidence=0.85, source="arbiter",
-                          evidence_ids=("ev1", "ev2"),
-                          metadata={"score": 3.5})
+    c = BoundaryCandidate(
+        candidate_id="c99",
+        time=2.5,
+        direction="end",
+        confidence=0.85,
+        source="arbiter",
+        evidence_ids=("ev1", "ev2"),
+        metadata={"score": 3.5},
+    )
     d = c.to_dict()
     assert d["candidate_id"] == "c99"
     assert d["time"] == 2.5
@@ -45,6 +52,7 @@ def test_candidate_to_dict():
 
 
 # ── log_transition ───────────────────────────────────────────────────
+
 
 def test_log_transition_valid():
     log = []
@@ -67,6 +75,7 @@ def test_log_transition_from_none():
 
 
 # ── project_boundaries ───────────────────────────────────────────────
+
 
 def test_simple_accepted_projection():
     groups = [
@@ -151,7 +160,9 @@ def test_duration_limit_enforced():
         BoundaryCandidate("e1", 9.5, "end", confidence=0.9),
     ]
 
-    results = project_boundaries(groups, start_candidates, end_candidates, max_duration=5.0)
+    results = project_boundaries(
+        groups, start_candidates, end_candidates, max_duration=5.0
+    )
 
     assert not results[0].is_accepted
 
@@ -159,10 +170,20 @@ def test_duration_limit_enforced():
 def test_merge_with_compatible_neighbor():
     """When no admissible candidate, try to merge with neighbor."""
     groups = [
-        {"physical_start": 1.0, "physical_end": 2.0, "text": "first",
-         "speaker_id": 1, "physical_region_id": "r1"},
-        {"physical_start": 2.1, "physical_end": 3.5, "text": "second",
-         "speaker_id": 1, "physical_region_id": "r1"},
+        {
+            "physical_start": 1.0,
+            "physical_end": 2.0,
+            "text": "first",
+            "speaker_id": 1,
+            "physical_region_id": "r1",
+        },
+        {
+            "physical_start": 2.1,
+            "physical_end": 3.5,
+            "text": "second",
+            "speaker_id": 1,
+            "physical_region_id": "r1",
+        },
     ]
     # No candidates matching group 0
     start_candidates = [
@@ -173,15 +194,26 @@ def test_merge_with_compatible_neighbor():
 
     # First group has no end candidate — should merge with compatible neighbor
     # Not FALLBACK because neighbor is compatible
-    assert results[0].projected_end.state in (ProjectionState.MERGED, ProjectionState.FALLBACK)
+    assert results[0].projected_end.state in (
+        ProjectionState.MERGED,
+        ProjectionState.FALLBACK,
+    )
 
 
 def test_no_merge_across_speakers():
     groups = [
-        {"physical_start": 1.0, "physical_end": 2.0, "text": "speaker A",
-         "speaker_id": 1},
-        {"physical_start": 2.1, "physical_end": 3.5, "text": "speaker B",
-         "speaker_id": 2},  # different speaker
+        {
+            "physical_start": 1.0,
+            "physical_end": 2.0,
+            "text": "speaker A",
+            "speaker_id": 1,
+        },
+        {
+            "physical_start": 2.1,
+            "physical_end": 3.5,
+            "text": "speaker B",
+            "speaker_id": 2,
+        },  # different speaker
     ]
 
     results = project_boundaries(groups, [], [])
@@ -192,23 +224,38 @@ def test_no_merge_across_speakers():
 
 # ── project_with_repair ──────────────────────────────────────────────
 
+
 def test_repair_fn_called_once():
     repair_log = []
 
     def mock_repair(**kwargs):
         repair_log.append(kwargs)
         return {
-            "start": ProjectedBoundary(1.0, "repair-start", 0.5, ProjectionState.ONE_REPAIR),
-            "end": ProjectedBoundary(3.0, "repair-end", 0.5, ProjectionState.ONE_REPAIR),
+            "start": ProjectedBoundary(
+                1.0, "repair-start", 0.5, ProjectionState.ONE_REPAIR
+            ),
+            "end": ProjectedBoundary(
+                3.0, "repair-end", 0.5, ProjectionState.ONE_REPAIR
+            ),
         }
 
     # One group has a compatible neighbor (same speaker, same region) —
     # with no admissible end candidate, the projection enters MERGED state.
     groups = [
-        {"physical_start": 1.0, "physical_end": 2.0, "text": "first",
-         "speaker_id": 1, "physical_region_id": "r1"},
-        {"physical_start": 2.1, "physical_end": 3.0, "text": "second",
-         "speaker_id": 1, "physical_region_id": "r1"},
+        {
+            "physical_start": 1.0,
+            "physical_end": 2.0,
+            "text": "first",
+            "speaker_id": 1,
+            "physical_region_id": "r1",
+        },
+        {
+            "physical_start": 2.1,
+            "physical_end": 3.0,
+            "text": "second",
+            "speaker_id": 1,
+            "physical_region_id": "r1",
+        },
     ]
 
     # Provide a valid start but no valid end for group 0
@@ -218,7 +265,10 @@ def test_repair_fn_called_once():
     end_candidates = []  # no end candidates → triggers MERGED path
 
     results = project_with_repair(
-        groups, start_candidates, end_candidates, repair_fn=mock_repair,
+        groups,
+        start_candidates,
+        end_candidates,
+        repair_fn=mock_repair,
     )
 
     # Repair function should have been called for at least one group
@@ -246,7 +296,10 @@ def test_repair_not_called_when_already_accepted():
     ]
 
     results = project_with_repair(
-        groups, start_candidates, end_candidates, repair_fn=mock_repair,
+        groups,
+        start_candidates,
+        end_candidates,
+        repair_fn=mock_repair,
     )
 
     assert results[0].is_accepted
@@ -280,10 +333,19 @@ def test_transition_count_capped():
 
 def test_merge_blocked_by_hard_split():
     groups = [
-        {"physical_start": 1.0, "physical_end": 2.0, "text": "first",
-         "speaker_id": 1, "hard_split_after": True},
-        {"physical_start": 2.1, "physical_end": 3.5, "text": "second",
-         "speaker_id": 1},  # same speaker but hard split
+        {
+            "physical_start": 1.0,
+            "physical_end": 2.0,
+            "text": "first",
+            "speaker_id": 1,
+            "hard_split_after": True,
+        },
+        {
+            "physical_start": 2.1,
+            "physical_end": 3.5,
+            "text": "second",
+            "speaker_id": 1,
+        },  # same speaker but hard split
     ]
 
     results = project_boundaries(groups, [], [])

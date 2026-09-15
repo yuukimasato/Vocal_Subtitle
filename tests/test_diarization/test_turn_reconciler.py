@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from vocal_subtitle.diarization.base import SpeakerTurn
 from vocal_subtitle.diarization.turn_reconciler import (
     merge_same_speaker_spans,
-    reconcile_regions,
     normalize_turns,
+    reconcile_regions,
     shift_turns,
     split_event_intervals,
 )
@@ -45,7 +45,9 @@ def test_global_identity_is_stable_for_complex_alternation():
         SpeakerTurn(6.0, 7.0, 1),
     ]
     spans = reconcile_regions(
-        [Region(0.0, 7.0)], turns, boundary_collar_ms=0,
+        [Region(0.0, 7.0)],
+        turns,
+        boundary_collar_ms=0,
     )
 
     assert [s.speaker_id for s in spans] == [0, 1, 0, 0, 1, 2, 1]
@@ -54,11 +56,13 @@ def test_global_identity_is_stable_for_complex_alternation():
 def test_gap_does_not_create_or_change_identity():
     spans = [
         *reconcile_regions(
-            [Region(0.0, 1.0)], [SpeakerTurn(0.0, 1.0, 0)],
+            [Region(0.0, 1.0)],
+            [SpeakerTurn(0.0, 1.0, 0)],
             boundary_collar_ms=0,
         ),
         *reconcile_regions(
-            [Region(3.0, 4.0)], [SpeakerTurn(3.0, 4.0, 0)],
+            [Region(3.0, 4.0)],
+            [SpeakerTurn(3.0, 4.0, 0)],
             boundary_collar_ms=0,
         ),
     ]
@@ -71,11 +75,13 @@ def test_gap_does_not_create_or_change_identity():
 def test_different_speakers_never_merge_even_without_gap():
     spans = [
         *reconcile_regions(
-            [Region(0.0, 1.0)], [SpeakerTurn(0.0, 1.0, 0)],
+            [Region(0.0, 1.0)],
+            [SpeakerTurn(0.0, 1.0, 0)],
             boundary_collar_ms=0,
         ),
         *reconcile_regions(
-            [Region(1.0, 2.0)], [SpeakerTurn(1.0, 2.0, 1)],
+            [Region(1.0, 2.0)],
+            [SpeakerTurn(1.0, 2.0, 1)],
             boundary_collar_ms=0,
         ),
     ]
@@ -99,7 +105,9 @@ def test_uncovered_physical_audio_is_explicitly_unknown():
 
 def test_shift_turns_uses_local_chunk_coordinates():
     shifted = shift_turns(
-        [SpeakerTurn(10.0, 11.0, 2)], offset=10.0, duration=2.0,
+        [SpeakerTurn(10.0, 11.0, 2)],
+        offset=10.0,
+        duration=2.0,
     )
     assert [(turn.start, turn.end, turn.speaker_id) for turn in shifted] == [
         (0.0, 1.0, 2),

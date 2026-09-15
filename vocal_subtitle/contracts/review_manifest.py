@@ -16,7 +16,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def manifest_filename(subtitle_path: str | Path) -> str:
     return f"{path.stem}.manifest.json"
 
 
-def subtitle_sha256(path: str | Path) -> Optional[str]:
+def subtitle_sha256(path: str | Path) -> str | None:
     """字幕文件内容哈希（清单生成时计算；读取失败返回 None）"""
     try:
         return hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -44,14 +44,14 @@ def _event_field(event: Any, key: str, default: Any = None) -> Any:
     return getattr(event, key, default)
 
 
-def _words_of_event(event: Any) -> Optional[List[Dict[str, Any]]]:
+def _words_of_event(event: Any) -> list[dict[str, Any]] | None:
     """提取词级时间戳为 [{w, t0, t1}]，无词级数据返回 None。
 
     SubtitleEvent.words 相对 event.start；这里还原为绝对时间。
     """
     start = _event_field(event, "start")
     raw_words = _event_field(event, "words") or []
-    words: List[Dict[str, Any]] = []
+    words: list[dict[str, Any]] = []
     for word in raw_words:
         if isinstance(word, dict):
             w = word.get("word") or word.get("w")
@@ -65,7 +65,7 @@ def _words_of_event(event: Any) -> Optional[List[Dict[str, Any]]]:
             confidence = getattr(word, "confidence", None)
         if w is None or w_start is None or w_end is None:
             continue
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "w": w,
             "t0": round(float(start) + float(w_start), 3),
             "t1": round(float(start) + float(w_end), 3),
@@ -83,9 +83,9 @@ def _source_stage(event: Any) -> str:
     return "asr"
 
 
-def _cue_entry(event: Any) -> Dict[str, Any]:
+def _cue_entry(event: Any) -> dict[str, Any]:
     """单条 cue 的出处条目（index 与字幕事件序号一致，1 起）"""
-    cue: Dict[str, Any] = {
+    cue: dict[str, Any] = {
         "index": int(_event_field(event, "index", 0)),
         "source_stage": _source_stage(event),
     }
@@ -109,15 +109,15 @@ def build_review_manifest(
     task_id: str,
     run_id: str,
     subtitle_path: str | Path,
-    events: List[Any],
-    input_name: Optional[str] = None,
-    input_sha256: Optional[str] = None,
-    duration: Optional[float] = None,
-    profile: Optional[str] = None,
-    engines: Optional[Dict[str, str]] = None,
+    events: list[Any],
+    input_name: str | None = None,
+    input_sha256: str | None = None,
+    duration: float | None = None,
+    profile: str | None = None,
+    engines: dict[str, str] | None = None,
     stage: str = "final",
-    created_at: Optional[str] = None,
-) -> Dict[str, Any]:
+    created_at: str | None = None,
+) -> dict[str, Any]:
     """从任务结果构建 review-manifest-v1 清单字典。
 
     Args:
@@ -134,7 +134,7 @@ def build_review_manifest(
         created_at: ISO 时间戳（缺省取当前 UTC 时间）
     """
     subtitle_path = Path(subtitle_path)
-    manifest: Dict[str, Any] = {
+    manifest: dict[str, Any] = {
         "schema": REVIEW_MANIFEST_SCHEMA,
         "run_id": run_id,
         "task_id": task_id,
@@ -161,7 +161,9 @@ def build_review_manifest(
     return manifest
 
 
-def write_review_manifest(subtitle_path: str | Path, manifest: Dict[str, Any]) -> Optional[Path]:
+def write_review_manifest(
+    subtitle_path: str | Path, manifest: dict[str, Any]
+) -> Path | None:
     """把清单写到字幕产物同目录（<字幕同名>.manifest.json）。
 
     Returns:

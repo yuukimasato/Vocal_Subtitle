@@ -11,8 +11,9 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 from .display_timeline import DisplayCue, DisplayTimelineConfig, map_to_display_timeline
 from .time_mapper import SubtitleEvent
@@ -37,11 +38,11 @@ class FinalizeConfig:
 class FinalizeResult:
     """最终化结果 — 单一出口。"""
 
-    events: List[SubtitleEvent]
-    display_cues: List[DisplayCue]
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    events: list[SubtitleEvent]
+    display_cues: list[DisplayCue]
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "events": [
                 {
@@ -69,8 +70,8 @@ class FinalizeResult:
 def finalize_subtitle_events(
     events: Sequence[SubtitleEvent],
     *,
-    config: Optional[FinalizeConfig] = None,
-    audio_duration: Optional[float] = None,
+    config: FinalizeConfig | None = None,
+    audio_duration: float | None = None,
 ) -> FinalizeResult:
     """唯一字幕事件最终化入口。
 
@@ -86,7 +87,7 @@ def finalize_subtitle_events(
         FinalizeResult 包含事件和显示 cue。
     """
     cfg = config or FinalizeConfig()
-    diagnostics: Dict[str, Any] = {
+    diagnostics: dict[str, Any] = {
         "input_event_count": len(events),
         "output_event_count": 0,
         "step": [],
@@ -103,6 +104,7 @@ def finalize_subtitle_events(
     # the deterministic boundary stage; the builder below remains the final
     # fallback for events without usable word timings.
     from .strict_segmenter import StrictSegmentationConfig, segment_events
+
     strict_result = segment_events(
         valid_events,
         config=StrictSegmentationConfig(
@@ -144,9 +146,7 @@ def finalize_subtitle_events(
     )
     before_merge = len(valid_events)
     valid_events = builder._merge_short_events(valid_events)
-    diagnostics["merge_short_event_count"] = max(
-        0, before_merge - len(valid_events)
-    )
+    diagnostics["merge_short_event_count"] = max(0, before_merge - len(valid_events))
     diagnostics["step"].append("merge_short_events")
 
     # Split logical cues before display mapping so the preview, API payload,
@@ -194,7 +194,8 @@ def finalize_subtitle_events(
         if isinstance(trace, dict)
         and (
             trace.get("op") in {"merge", "split"}
-            or trace.get("stage") in {"acoustic_micro_gap_merge", "boundary_arbitration"}
+            or trace.get("stage")
+            in {"acoustic_micro_gap_merge", "boundary_arbitration"}
         )
     ]
     diagnostics["boundary_trace"] = boundary_trace
@@ -211,10 +212,10 @@ def finalize_subtitle_events(
 
 def _validate_input_events(
     events: Sequence[SubtitleEvent],
-    diagnostics: Dict[str, Any],
-) -> List[SubtitleEvent]:
+    diagnostics: dict[str, Any],
+) -> list[SubtitleEvent]:
     """验证并过滤输入事件。"""
-    valid: List[SubtitleEvent] = []
+    valid: list[SubtitleEvent] = []
     skipped = 0
 
     for event in events:
@@ -233,7 +234,7 @@ def _validate_input_events(
 
 def _events_to_semantic_groups(
     events: Sequence[SubtitleEvent],
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """将 SubtitleEvent 列表转为语义组字典列表。"""
     groups = []
     for i, event in enumerate(events, start=1):
@@ -244,30 +245,32 @@ def _events_to_semantic_groups(
         if physical_end is None or physical_end <= 0:
             physical_end = event.end
 
-        groups.append({
-            "index": i,
-            "text": event.text,
-            "start": event.start,
-            "end": event.end,
-            "physical_start": physical_start,
-            "physical_end": physical_end,
-            "speaker_id": getattr(event, "speaker_id", None),
-            "speaker_label": getattr(event, "speaker_label", None),
-            "source_word_ids": list(getattr(event, "source_word_ids", []) or []),
-            "physical_spans": list(getattr(event, "physical_spans", []) or []),
-            "timing_degraded": bool(getattr(event, "alignment_warning", None)),
-            "overlap_group_id": getattr(event, "overlap_group_id", None),
-            "hard_split_before": bool(getattr(event, "hard_split_before", False)),
-            "hard_split_after": False,
-            "trace_context": dict(getattr(event, "trace_context", {}) or {}),
-        })
+        groups.append(
+            {
+                "index": i,
+                "text": event.text,
+                "start": event.start,
+                "end": event.end,
+                "physical_start": physical_start,
+                "physical_end": physical_end,
+                "speaker_id": getattr(event, "speaker_id", None),
+                "speaker_label": getattr(event, "speaker_label", None),
+                "source_word_ids": list(getattr(event, "source_word_ids", []) or []),
+                "physical_spans": list(getattr(event, "physical_spans", []) or []),
+                "timing_degraded": bool(getattr(event, "alignment_warning", None)),
+                "overlap_group_id": getattr(event, "overlap_group_id", None),
+                "hard_split_before": bool(getattr(event, "hard_split_before", False)),
+                "hard_split_after": False,
+                "trace_context": dict(getattr(event, "trace_context", {}) or {}),
+            }
+        )
     return groups
 
 
 def _run_final_validation(
     events: Sequence[SubtitleEvent],
-    audio_duration: Optional[float],
-) -> tuple[List[SubtitleEvent], Dict[str, Any]]:
+    audio_duration: float | None,
+) -> tuple[list[SubtitleEvent], dict[str, Any]]:
     """运行最终校验，返回通过校验的事件和诊断信息。"""
     from .final_validator import validate_events
 

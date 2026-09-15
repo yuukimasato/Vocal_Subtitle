@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from .evidence import CandidateEvidence, DecisionEvidenceBundle, EvidenceWord
 from .review_engines import ForcedAlignerPort, SEDPort, SemanticReviewPort
@@ -37,11 +38,11 @@ class SecondaryEvidenceCollector:
         sample_rate: int,
         windows: Sequence[ReviewWindow],
         candidates: Iterable[CandidateEvidence],
-        language: Optional[str],
+        language: str | None,
         config: Any,
-        forced_aligner: Optional[ForcedAlignerPort] = None,
-        sed: Optional[SEDPort] = None,
-        semantic_review: Optional[SemanticReviewPort] = None,
+        forced_aligner: ForcedAlignerPort | None = None,
+        sed: SEDPort | None = None,
+        semantic_review: SemanticReviewPort | None = None,
     ) -> dict[str, Any]:
         candidate_list = list(candidates)
         by_id = {item.id: item for item in candidate_list}
@@ -71,26 +72,29 @@ class SecondaryEvidenceCollector:
             ),
         }
         result["bundles"] = [
-            item.to_dict()
-            for item in secondary_evidence_to_bundles(result, windows)
+            item.to_dict() for item in secondary_evidence_to_bundles(result, windows)
         ]
         return result
 
     @staticmethod
-    def _availability(engine: Any) -> Optional[dict[str, Any]]:
+    def _availability(engine: Any) -> dict[str, Any] | None:
         if engine is None or not hasattr(engine, "availability"):
             return None
         try:
             return dict(engine.availability())
         except Exception as exc:
-            return {"status": "unavailable", "reason": "availability_check_failed", "error": str(exc)}
+            return {
+                "status": "unavailable",
+                "reason": "availability_check_failed",
+                "error": str(exc),
+            }
 
     def _stage_status(
         self,
         *,
         enabled: bool,
         engine: Any,
-        availability: Optional[dict[str, Any]] = None,
+        availability: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not enabled:
             return {"status": "disabled", "reason": "feature_disabled", "windows": []}
@@ -112,9 +116,9 @@ class SecondaryEvidenceCollector:
         sample_rate: int,
         windows: Sequence[ReviewWindow],
         by_id: dict[str, CandidateEvidence],
-        language: Optional[str],
+        language: str | None,
         enabled: bool,
-        engine: Optional[ForcedAlignerPort],
+        engine: ForcedAlignerPort | None,
     ) -> dict[str, Any]:
         result = self._stage_status(
             enabled=enabled,
@@ -145,21 +149,29 @@ class SecondaryEvidenceCollector:
                         language=language,
                     )
                     words = [_json_value(word) for word in (raw or ())]
-                    item.update({
-                        "status": "ok",
-                        "word_count": len(words),
-                        "words": words,
-                        "wall_time_seconds": elapsed,
-                        "resources": resources,
-                    })
+                    item.update(
+                        {
+                            "status": "ok",
+                            "word_count": len(words),
+                            "words": words,
+                            "wall_time_seconds": elapsed,
+                            "resources": resources,
+                        }
+                    )
                 except Exception as exc:
-                    item.update({
-                        "status": "failed",
-                        "error": str(exc),
-                        "resources": resource_snapshot(),
-                    })
+                    item.update(
+                        {
+                            "status": "failed",
+                            "error": str(exc),
+                            "resources": resource_snapshot(),
+                        }
+                    )
                 result["windows"].append(item)
-        result["status"] = "degraded" if any(item["status"] == "failed" for item in result["windows"]) else "ok"
+        result["status"] = (
+            "degraded"
+            if any(item["status"] == "failed" for item in result["windows"])
+            else "ok"
+        )
         result["window_count"] = len(result["windows"])
         return result
 
@@ -169,9 +181,9 @@ class SecondaryEvidenceCollector:
         audio: Any,
         sample_rate: int,
         windows: Sequence[ReviewWindow],
-        language: Optional[str],
+        language: str | None,
         enabled: bool,
-        engine: Optional[SEDPort],
+        engine: SEDPort | None,
     ) -> dict[str, Any]:
         del language
         result = self._stage_status(
@@ -192,20 +204,28 @@ class SecondaryEvidenceCollector:
                     sample_rate,
                     window,
                 )
-                item.update({
-                    "status": "ok",
-                    "evidence": _json_value(raw),
-                    "wall_time_seconds": elapsed,
-                    "resources": resources,
-                })
+                item.update(
+                    {
+                        "status": "ok",
+                        "evidence": _json_value(raw),
+                        "wall_time_seconds": elapsed,
+                        "resources": resources,
+                    }
+                )
             except Exception as exc:
-                item.update({
-                    "status": "failed",
-                    "error": str(exc),
-                    "resources": resource_snapshot(),
-                })
+                item.update(
+                    {
+                        "status": "failed",
+                        "error": str(exc),
+                        "resources": resource_snapshot(),
+                    }
+                )
             result["windows"].append(item)
-        result["status"] = "degraded" if any(item["status"] == "failed" for item in result["windows"]) else "ok"
+        result["status"] = (
+            "degraded"
+            if any(item["status"] == "failed" for item in result["windows"])
+            else "ok"
+        )
         result["window_count"] = len(result["windows"])
         return result
 
@@ -215,7 +235,7 @@ class SecondaryEvidenceCollector:
         windows: Sequence[ReviewWindow],
         by_id: dict[str, CandidateEvidence],
         enabled: bool,
-        engine: Optional[SemanticReviewPort],
+        engine: SemanticReviewPort | None,
     ) -> dict[str, Any]:
         result = self._stage_status(
             enabled=enabled,
@@ -232,27 +252,39 @@ class SecondaryEvidenceCollector:
                 candidate = by_id.get(candidate_id)
                 if candidate is None:
                     continue
-                item = {"window_id": window.id, "candidate_id": candidate.id, "text": candidate.text}
+                item = {
+                    "window_id": window.id,
+                    "candidate_id": candidate.id,
+                    "text": candidate.text,
+                }
                 try:
                     raw, elapsed, resources = timed_call(
                         engine.review,
                         candidate.text,
                         context,
                     )
-                    item.update({
-                        "status": "ok",
-                        "evidence": _json_value(raw),
-                        "wall_time_seconds": elapsed,
-                        "resources": resources,
-                    })
+                    item.update(
+                        {
+                            "status": "ok",
+                            "evidence": _json_value(raw),
+                            "wall_time_seconds": elapsed,
+                            "resources": resources,
+                        }
+                    )
                 except Exception as exc:
-                    item.update({
-                        "status": "failed",
-                        "error": str(exc),
-                        "resources": resource_snapshot(),
-                    })
+                    item.update(
+                        {
+                            "status": "failed",
+                            "error": str(exc),
+                            "resources": resource_snapshot(),
+                        }
+                    )
                 result["windows"].append(item)
-        result["status"] = "degraded" if any(item["status"] == "failed" for item in result["windows"]) else "ok"
+        result["status"] = (
+            "degraded"
+            if any(item["status"] == "failed" for item in result["windows"])
+            else "ok"
+        )
         result["window_count"] = len(result["windows"])
         return result
 
@@ -270,7 +302,8 @@ def secondary_evidence_to_bundles(
         for item in payload.get(source, {}).get("windows", ()):
             window_id = item.get("window_id")
             candidate_ids = tuple(
-                item.get("candidate_id") and (item["candidate_id"],)
+                item.get("candidate_id")
+                and (item["candidate_id"],)
                 or candidate_ids_by_window.get(window_id, ())
             )
             evidence = item.get("evidence")
@@ -279,18 +312,22 @@ def secondary_evidence_to_bundles(
                     "words": item.get("words", ()),
                     "word_count": item.get("word_count", 0),
                 }
-            bundles.append(DecisionEvidenceBundle(
-                source=source,
-                status=str(item.get("status", "unknown")),
-                candidate_ids=candidate_ids,
-                window_id=window_id,
-                evidence=evidence if isinstance(evidence, dict) else {"value": evidence},
-                diagnostics={
-                    key: item[key]
-                    for key in ("error", "wall_time_seconds", "resources")
-                    if key in item
-                },
-            ))
+            bundles.append(
+                DecisionEvidenceBundle(
+                    source=source,
+                    status=str(item.get("status", "unknown")),
+                    candidate_ids=candidate_ids,
+                    window_id=window_id,
+                    evidence=evidence
+                    if isinstance(evidence, dict)
+                    else {"value": evidence},
+                    diagnostics={
+                        key: item[key]
+                        for key in ("error", "wall_time_seconds", "resources")
+                        if key in item
+                    },
+                )
+            )
     return bundles
 
 

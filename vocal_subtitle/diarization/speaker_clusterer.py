@@ -13,7 +13,6 @@
 """
 
 import logging
-from typing import List
 
 import numpy as np
 
@@ -82,10 +81,10 @@ class SpeakerDiarizer(DiarizationEngine):
 
     def diarize(
         self,
-        segments: List,
+        segments: list,
         audio: np.ndarray,
         sample_rate: int,
-    ) -> List[int]:
+    ) -> list[int]:
         """为每个语音片段分配 speaker_id
 
         Args:
@@ -133,7 +132,9 @@ class SpeakerDiarizer(DiarizationEngine):
         #      (单簇的轮廓系数被定义为 1.0，不触发条件 1)
         needs_retry = (
             silhouette < 0
-            or (silhouette < 0.20 and n_speakers > 3 and n_speakers > len(segments) // 3)
+            or (
+                silhouette < 0.20 and n_speakers > 3 and n_speakers > len(segments) // 3
+            )
             or (n_speakers == 1 and len(segments) >= 5)
         )
 
@@ -141,12 +142,13 @@ class SpeakerDiarizer(DiarizationEngine):
             logger.warning(
                 "Diarization quality is insufficient (silhouette=%.3f, %d speakers). "
                 "Attempting multi-threshold retry before falling back.",
-                silhouette, n_speakers,
+                silhouette,
+                n_speakers,
             )
             # 尝试不同距离阈值。
             # 低阈值 (0.15-0.45) → 拆分集群获得更多说话人
             # 高阈值 (0.55+)   → 合并集群减少说话人
-            is_single_cluster = (n_speakers == 1)
+            is_single_cluster = n_speakers == 1
             if is_single_cluster:
                 # 单簇情况：重点尝试低阈值以拆分出多个说话人
                 retry_thresholds = [0.15, 0.20, 0.25, 0.30, 0.40]
@@ -165,13 +167,19 @@ class SpeakerDiarizer(DiarizationEngine):
                     alt_n = len(set(alt_labels))
                     logger.debug(
                         "Retry threshold=%.2f → silhouette=%.3f, %d speakers",
-                        thresh, alt_score, alt_n,
+                        thresh,
+                        alt_score,
+                        alt_n,
                     )
                     # 选择策略：
                     # - 单簇初始时：优先找 2-3 说话人且 sil > 0.1 的结果
                     # - 多簇初始时：优先找 2-3 说话人且 sil 高于当前的结果
                     if is_single_cluster:
-                        if 2 <= alt_n <= 3 and alt_score > 0.1 and alt_score > best_score:
+                        if (
+                            2 <= alt_n <= 3
+                            and alt_score > 0.1
+                            and alt_score > best_score
+                        ):
                             best_score = alt_score
                             best_labels = alt_labels
                             best_n_speakers = alt_n
@@ -189,9 +197,7 @@ class SpeakerDiarizer(DiarizationEngine):
 
             # 质量门控：仅当重试结果足够好时才采用
             quality_ok = (
-                best_labels is not None
-                and best_score > 0.15
-                and best_n_speakers <= 3
+                best_labels is not None and best_score > 0.15 and best_n_speakers <= 3
             )
             # 单簇初始时降低门槛：sil > 0.05 且 2-3 说话人即可
             if is_single_cluster and not quality_ok:
@@ -205,7 +211,10 @@ class SpeakerDiarizer(DiarizationEngine):
                 logger.info(
                     "Multi-threshold retry succeeded: silhouette=%.3f (was %.3f), "
                     "%d speakers (was %d)",
-                    best_score, silhouette, best_n_speakers, n_speakers,
+                    best_score,
+                    silhouette,
+                    best_n_speakers,
+                    n_speakers,
                 )
                 speaker_ids = best_labels
                 silhouette = best_score
@@ -215,14 +224,17 @@ class SpeakerDiarizer(DiarizationEngine):
                     "(best silhouette=%.3f, %d speakers). "
                     "Falling back to single speaker; "
                     "text-based diarization can re-label after ASR.",
-                    best_score, best_n_speakers,
+                    best_score,
+                    best_n_speakers,
                 )
                 speaker_ids = [0] * len(segments)
                 self._acoustic_failed = True
 
         logger.info(
             "Diarization complete: %d segments → %d speakers (silhouette=%.3f)",
-            len(segments), len(set(speaker_ids)), silhouette,
+            len(segments),
+            len(set(speaker_ids)),
+            silhouette,
         )
 
         return speaker_ids
@@ -232,9 +244,7 @@ class SpeakerDiarizer(DiarizationEngine):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_segment_audio(
-        seg, audio: np.ndarray, sample_rate: int
-    ) -> np.ndarray:
+    def _extract_segment_audio(seg, audio: np.ndarray, sample_rate: int) -> np.ndarray:
         """从完整音频中提取片段"""
         start_sample = max(0, int(seg.start * sample_rate))
         end_sample = min(len(audio), int(seg.end * sample_rate))
@@ -242,7 +252,7 @@ class SpeakerDiarizer(DiarizationEngine):
             return np.zeros(int(0.25 * sample_rate), dtype=np.float32)
         return audio[start_sample:end_sample].astype(np.float32)
 
-    def _cluster(self, feature_matrix: np.ndarray) -> List[int]:
+    def _cluster(self, feature_matrix: np.ndarray) -> list[int]:
         """对特征矩阵进行凝聚聚类"""
         try:
             from sklearn.cluster import AgglomerativeClustering
@@ -258,17 +268,17 @@ class SpeakerDiarizer(DiarizationEngine):
 
         # 标准化
         scaler = StandardScaler()
-        X = scaler.fit_transform(feature_matrix)
+        X = scaler.fit_transform(feature_matrix)  # noqa: N806 (sklearn/librosa 惯例命名)
 
         # PCA 降维
         if self.use_pca and X.shape[1] > 3 and n_segments >= 3:
-            n_components = min(n_segments - 1, X.shape[1])
             pca = PCA(n_components=self.pca_variance)
             try:
-                X = pca.fit_transform(X)
+                X = pca.fit_transform(X)  # noqa: N806 (sklearn/librosa 惯例命名)
                 logger.debug(
                     "PCA: %d → %d components (%.1f%% variance retained)",
-                    feature_matrix.shape[1], X.shape[1],
+                    feature_matrix.shape[1],
+                    X.shape[1],
                     self.pca_variance * 100,
                 )
             except Exception as e:
@@ -304,7 +314,7 @@ class SpeakerDiarizer(DiarizationEngine):
         self,
         labels: np.ndarray,
         n_segments: int,
-        X: np.ndarray,
+        X: np.ndarray,  # noqa: N803 (sklearn/librosa 惯例命名)
         min_spk: int,
         max_spk: int,
     ) -> np.ndarray:
@@ -315,21 +325,28 @@ class SpeakerDiarizer(DiarizationEngine):
             # 合并最近的簇
             logger.debug(
                 "Merging clusters: %d → %d (max_speakers=%d)",
-                n_clusters, max_spk, max_spk,
+                n_clusters,
+                max_spk,
+                max_spk,
             )
             labels = self._merge_clusters(labels, X, max_spk)
         elif n_clusters < min_spk and n_segments >= min_spk:
             # 拆分最大的簇
             logger.debug(
                 "Splitting clusters: %d → %d (min_speakers=%d)",
-                n_clusters, min_spk, min_spk,
+                n_clusters,
+                min_spk,
+                min_spk,
             )
             labels = self._split_clusters(labels, X, min_spk)
 
         return labels
 
     def _merge_clusters(
-        self, labels: np.ndarray, X: np.ndarray, target: int
+        self,
+        labels: np.ndarray,
+        X: np.ndarray,  # noqa: N803 (sklearn 惯例命名)
+        target: int,  # noqa: N803 (sklearn 惯例命名)
     ) -> np.ndarray:
         """合并最近的簇直到达到目标数"""
         try:
@@ -339,9 +356,7 @@ class SpeakerDiarizer(DiarizationEngine):
 
         # 计算簇中心
         unique_labels = sorted(set(labels))
-        centroids = np.array([
-            X[labels == lbl].mean(axis=0) for lbl in unique_labels
-        ])
+        centroids = np.array([X[labels == lbl].mean(axis=0) for lbl in unique_labels])
 
         # 对簇中心再次聚类
         if len(centroids) > target:
@@ -361,7 +376,10 @@ class SpeakerDiarizer(DiarizationEngine):
         return labels
 
     def _split_clusters(
-        self, labels: np.ndarray, X: np.ndarray, target: int
+        self,
+        labels: np.ndarray,
+        X: np.ndarray,  # noqa: N803 (sklearn 惯例命名)
+        target: int,  # noqa: N803 (sklearn 惯例命名)
     ) -> np.ndarray:
         """拆分最大的簇直到达到目标数"""
         try:
@@ -387,7 +405,7 @@ class SpeakerDiarizer(DiarizationEngine):
 
             # 在簇内再次聚类
             mask = new_labels == lbl
-            sub_X = X[mask]
+            sub_X = X[mask]  # noqa: N806 (sklearn/librosa 惯例命名)
             sub_n = min(2, size - 1)
             sub = AgglomerativeClustering(
                 n_clusters=sub_n,
@@ -397,9 +415,7 @@ class SpeakerDiarizer(DiarizationEngine):
             sub_labels = sub.fit_predict(sub_X)
 
             # 重新分配标签
-            new_labels[mask] = np.where(
-                sub_labels == 0, lbl, next_label
-            )
+            new_labels[mask] = np.where(sub_labels == 0, lbl, next_label)
             next_label += 1
             n_current += 1
 
@@ -407,9 +423,9 @@ class SpeakerDiarizer(DiarizationEngine):
 
     @staticmethod
     def diarize_from_text(
-        texts: List[str],
-        gap_seconds: List[float],
-    ) -> List[int]:
+        texts: list[str],
+        gap_seconds: list[float],
+    ) -> list[int]:
         """文本模式降级方案：用 ASR 文本推断说话人轮换。
 
         当声学特征聚类失败（silhouette < 0）时，分析 ASR 转录文本
@@ -441,25 +457,25 @@ class SpeakerDiarizer(DiarizationEngine):
 
         # 模式定义
         question_pattern = re.compile(
-            r'\?|吗[？?]|呢[？?]|吧[？?]|'
-            r'[Hh]ow may|[Ww]hat |[Cc]an I|[Ww]hy |[Ww]hen |[Ww]here |'
-            r'[Ii]s that|[Aa]re you|[Ww]ould you|[Cc]ould you|[Dd]o you|'
-            r'怎么|为什么|如何|哪里|哪个|什么|谁|哪[一位]|何时|'
-            r'请问|请教|怎么看|觉得|认为|能不能|可不可以|是否|'
-            r'有没有|是不是|对吧|对吗|是吧|是吗|可以吗|行吗|好吗',
+            r"\?|吗[？?]|呢[？?]|吧[？?]|"
+            r"[Hh]ow may|[Ww]hat |[Cc]an I|[Ww]hy |[Ww]hen |[Ww]here |"
+            r"[Ii]s that|[Aa]re you|[Ww]ould you|[Cc]ould you|[Dd]o you|"
+            r"怎么|为什么|如何|哪里|哪个|什么|谁|哪[一位]|何时|"
+            r"请问|请教|怎么看|觉得|认为|能不能|可不可以|是否|"
+            r"有没有|是不是|对吧|对吗|是吧|是吗|可以吗|行吗|好吗",
         )
         short_response_pattern = re.compile(
-            r'^(Yeah|Yes|OK|Okay|Got it|Right|Sure|Alright|I see|'
-            r'好的|好[的了]|嗯[嗯哼]|对|是的|没错|知道了|明白|My pleasure|'
-            r'See you|Thank you)',
+            r"^(Yeah|Yes|OK|Okay|Got it|Right|Sure|Alright|I see|"
+            r"好的|好[的了]|嗯[嗯哼]|对|是的|没错|知道了|明白|My pleasure|"
+            r"See you|Thank you)",
         )
         address_pattern = re.compile(
-            r'\b(Mr\.|Ms\.|Mrs\.|Miss|Dr\.)\s+\w+'
-            r'|'
-            r'(教授|老师|先生|女士|总[监经]|博士|医生|律师|'
-            r'主播|嘉宾|导演|演员|记者|解说|主持)'
+            r"\b(Mr\.|Ms\.|Mrs\.|Miss|Dr\.)\s+\w+"
+            r"|"
+            r"(教授|老师|先生|女士|总[监经]|博士|医生|律师|"
+            r"主播|嘉宾|导演|演员|记者|解说|主持)"
         )
-        sentence_end = {'.', '!', '?', '。', '！', '？'}
+        sentence_end = {".", "!", "?", "。", "！", "？"}
 
         # 辅助：分配一个新的 speaker ID
         def _alloc_spk() -> int:
@@ -549,14 +565,12 @@ class SpeakerDiarizer(DiarizationEngine):
             # 先检查全局是否有句子结束标点（ASR 可能不输出标点）：
             has_any_sentence_end = any(
                 t.rstrip() and t.rstrip()[-1] in sentence_end
-                for t in texts if t.strip()
+                for t in texts
+                if t.strip()
             )
 
             # 计算间隙中位数，用于自适应阈值
-            clean_gaps = [
-                g for g in gap_seconds
-                if g is not None and 0 < g < 10
-            ]
+            clean_gaps = [g for g in gap_seconds if g is not None and 0 < g < 10]
             if clean_gaps:
                 gap_median = sorted(clean_gaps)[len(clean_gaps) // 2]
             else:
@@ -578,10 +592,7 @@ class SpeakerDiarizer(DiarizationEngine):
                     # 无标点时使用纯间隙判断（自适应阈值）
                     should_switch = (
                         gap >= 0.25 and text and text[-1] in sentence_end
-                    ) or (
-                        not has_any_sentence_end
-                        and gap >= switch_threshold
-                    )
+                    ) or (not has_any_sentence_end and gap >= switch_threshold)
                     if should_switch:
                         current_speaker = alt_counter
                         alt_counter = (alt_counter + 1) % max(2, 3)  # 轮换 2-3 个说话人
@@ -593,12 +604,13 @@ class SpeakerDiarizer(DiarizationEngine):
 
         logger.info(
             "Text-based diarization: %d segments → %d speakers",
-            n, len(set(speaker_ids)),
+            n,
+            len(set(speaker_ids)),
         )
         return speaker_ids
 
     def _evaluate_clustering(
-        self, feature_matrix: np.ndarray, labels: List[int]
+        self, feature_matrix: np.ndarray, labels: list[int]
     ) -> float:
         """计算聚类轮廓系数"""
         n_unique = len(set(labels))
@@ -632,7 +644,8 @@ class SpeakerDiarizer(DiarizationEngine):
             else:
                 logger.warning(
                     "Cluster quality: LOW (silhouette=%.3f) — "
-                    "speaker separation may be unreliable", score
+                    "speaker separation may be unreliable",
+                    score,
                 )
 
             self.last_silhouette_ = score

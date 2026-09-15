@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -31,30 +31,30 @@ class RunContext:
     """One offline pipeline run's explicit state container."""
 
     input_path: Path
-    output_path: Optional[Path] = None
+    output_path: Path | None = None
     output_format: str = "srt"
     skip_separation: bool = False
-    task_id: Optional[str] = None
-    session_dir: Optional[Path] = None
-    feedback_reference: Optional[Path] = None
-    overrides: Dict[str, Any] = field(default_factory=dict)
+    task_id: str | None = None
+    session_dir: Path | None = None
+    feedback_reference: Path | None = None
+    overrides: dict[str, Any] = field(default_factory=dict)
 
     # 中间产物(按阶段填充;缺失即 None/空)。
-    audio: Optional[np.ndarray] = None
+    audio: np.ndarray | None = None
     sample_rate: int = 16000
-    vocals_path: Optional[Path] = None
-    duration_seconds: Optional[float] = None
-    events: List[Any] = field(default_factory=list)
-    stats: Optional[PipelineStats] = None
+    vocals_path: Path | None = None
+    duration_seconds: float | None = None
+    events: list[Any] = field(default_factory=list)
+    stats: PipelineStats | None = None
 
     # 协作取消与诊断。
-    cancellation_token: Optional[CancellationToken] = None
-    diagnostics: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    cancellation_token: CancellationToken | None = None
+    diagnostics: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     # 阶段间暂存(跨阶段局部状态的显式载体,Task 3)。
-    state: Dict[str, Any] = field(default_factory=dict)
+    state: dict[str, Any] = field(default_factory=dict)
     schema_version: str = SCHEMA_VERSION
 
-    def add_diagnostic(self, stage: str, payload: Dict[str, Any]) -> None:
+    def add_diagnostic(self, stage: str, payload: dict[str, Any]) -> None:
         """记录一条阶段诊断(按阶段分组合并,保持插入顺序)。"""
         if not stage:
             raise ValueError("diagnostic stage must be a non-empty string")

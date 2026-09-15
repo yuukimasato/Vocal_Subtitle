@@ -26,7 +26,6 @@ from vocal_subtitle.webui.feedback_services import (
     TaskBaselineError,
 )
 
-
 REFERENCE_SRT = (
     "1\n00:00:01,000 --> 00:00:03,000\n第一句\n\n"
     "2\n00:00:04,000 --> 00:00:06,000\n第二句\n"
@@ -70,8 +69,11 @@ def _task_payload(session_dir):
 
 
 def _history_record(payload):
-    return {"id": "task-1", "status": "completed",
-            "result_json": json.dumps(payload, default=str)}
+    return {
+        "id": "task-1",
+        "status": "completed",
+        "result_json": json.dumps(payload, default=str),
+    }
 
 
 class FakeTaskHistory:
@@ -123,7 +125,9 @@ def captured_samples(monkeypatch):
             ingested.append(kwargs)
             return SimpleNamespace(sample_id="sample-1")
 
-    monkeypatch.setattr(sample_manager_module, "FeedbackSampleManager", FakeSampleManager)
+    monkeypatch.setattr(
+        sample_manager_module, "FeedbackSampleManager", FakeSampleManager
+    )
     return ingested
 
 
@@ -153,23 +157,36 @@ def pipeline_calls(monkeypatch):
 # API 层：task_id 分支与错误分支
 # ---------------------------------------------------------------------------
 
+
 def _post_learn(client, data=None, with_reference=True):
     files = {}
     if with_reference:
-        files["reference"] = ("ref.srt", REFERENCE_SRT.encode("utf-8"), "application/octet-stream")
+        files["reference"] = (
+            "ref.srt",
+            REFERENCE_SRT.encode("utf-8"),
+            "application/octet-stream",
+        )
     return client.post("/api/feedback/learn", data=data or {}, files=files)
 
 
 class TestLearnApiTaskIdBranch:
     def test_task_id_reuses_history_baseline_without_rerun(
-        self, client, monkeypatch, session_dir, pipeline_calls,
-        captured_samples, stub_semantic_scorer,
+        self,
+        client,
+        monkeypatch,
+        session_dir,
+        pipeline_calls,
+        captured_samples,
+        stub_semantic_scorer,
     ):
         monkeypatch.setattr(
-            api, "_task_history",
+            api,
+            "_task_history",
             FakeTaskHistory({"task-1": _history_record(_task_payload(session_dir))}),
         )
-        resp = _post_learn(client, data={"task_id": "task-1", "scenario": "inline-review"})
+        resp = _post_learn(
+            client, data={"task_id": "task-1", "scenario": "inline-review"}
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
@@ -185,11 +202,17 @@ class TestLearnApiTaskIdBranch:
         assert meta["scene"] == "inline-review"
 
     def test_task_id_wins_over_uploaded_audio(
-        self, client, monkeypatch, session_dir, pipeline_calls, captured_samples,
+        self,
+        client,
+        monkeypatch,
+        session_dir,
+        pipeline_calls,
+        captured_samples,
         stub_semantic_scorer,
     ):
         monkeypatch.setattr(
-            api, "_task_history",
+            api,
+            "_task_history",
             FakeTaskHistory({"task-1": _history_record(_task_payload(session_dir))}),
         )
         resp = client.post(
@@ -197,7 +220,11 @@ class TestLearnApiTaskIdBranch:
             data={"task_id": "task-1"},
             files={
                 "audio": ("a.wav", b"fake audio", "audio/wav"),
-                "reference": ("ref.srt", REFERENCE_SRT.encode("utf-8"), "application/octet-stream"),
+                "reference": (
+                    "ref.srt",
+                    REFERENCE_SRT.encode("utf-8"),
+                    "application/octet-stream",
+                ),
             },
         )
         assert resp.status_code == 200
@@ -218,11 +245,14 @@ class TestLearnApiErrors:
         assert resp.status_code == 404
         assert "音频" in resp.json()["detail"]
 
-    def test_cleaned_session_returns_410_with_audio_hint(self, client, monkeypatch, tmp_path):
+    def test_cleaned_session_returns_410_with_audio_hint(
+        self, client, monkeypatch, tmp_path
+    ):
         payload = _task_payload(None)
         payload["input_path"] = str(tmp_path / "cleaned-away" / "input.wav")
         monkeypatch.setattr(
-            api, "_task_history",
+            api,
+            "_task_history",
             FakeTaskHistory({"task-1": _history_record(payload)}),
         )
         resp = _post_learn(client, data={"task_id": "task-1"})
@@ -232,7 +262,8 @@ class TestLearnApiErrors:
 
     def test_invalid_scenario_returns_400(self, client, monkeypatch, session_dir):
         monkeypatch.setattr(
-            api, "_task_history",
+            api,
+            "_task_history",
             FakeTaskHistory({"task-1": _history_record(_task_payload(session_dir))}),
         )
         resp = _post_learn(client, data={"task_id": "task-1", "scenario": "bogus"})
@@ -242,7 +273,11 @@ class TestLearnApiErrors:
 
 class TestLearnApiLegacyPath:
     def test_audio_only_legacy_path_still_reruns(
-        self, client, monkeypatch, captured_samples, stub_semantic_scorer,
+        self,
+        client,
+        monkeypatch,
+        captured_samples,
+        stub_semantic_scorer,
     ):
         """旧客户端兼容：不带 task_id、只传音频 → 照常走管线重跑"""
         from vocal_subtitle.webui import feedback_services
@@ -267,7 +302,11 @@ class TestLearnApiLegacyPath:
             data={},
             files={
                 "audio": ("a.wav", b"fake audio", "audio/wav"),
-                "reference": ("ref.srt", REFERENCE_SRT.encode("utf-8"), "application/octet-stream"),
+                "reference": (
+                    "ref.srt",
+                    REFERENCE_SRT.encode("utf-8"),
+                    "application/octet-stream",
+                ),
             },
         )
         assert resp.status_code == 200
@@ -283,10 +322,13 @@ class TestLearnApiLegacyPath:
 # 服务层：基线解析/复用与元数据补全
 # ---------------------------------------------------------------------------
 
+
 class TestResolveTaskBaseline:
     def test_parses_history_events_and_stats(self, session_dir):
         service = FeedbackLearningService(
-            task_history=FakeTaskHistory({"task-1": _history_record(_task_payload(session_dir))})
+            task_history=FakeTaskHistory(
+                {"task-1": _history_record(_task_payload(session_dir))}
+            )
         )
         baseline = service.resolve_task_baseline("task-1")
         assert [e.text for e in baseline.events] == ["第一句", "第二句"]
@@ -304,7 +346,11 @@ class TestResolveTaskBaseline:
     def test_empty_events_raise_410(self, tmp_path):
         session_dir = tmp_path / "sess"
         session_dir.mkdir()
-        payload = {"events": [], "stats": {}, "input_path": str(session_dir / "input.wav")}
+        payload = {
+            "events": [],
+            "stats": {},
+            "input_path": str(session_dir / "input.wav"),
+        }
         service = FeedbackLearningService(
             task_history=FakeTaskHistory({"task-1": _history_record(payload)})
         )
@@ -368,22 +414,37 @@ class TestServiceLearnMetadata:
         monkeypatch.setattr(fbs, "FewShotBuilder", _NoFewShot)
 
     def test_learn_with_task_id_reuses_baseline_and_fills_metadata(
-        self, session_dir, pipeline_calls, captured_samples, stub_semantic_scorer,
-        no_param_writes, tmp_path,
+        self,
+        session_dir,
+        pipeline_calls,
+        captured_samples,
+        stub_semantic_scorer,
+        no_param_writes,
+        tmp_path,
     ):
         ref = tmp_path / "ref.srt"
         ref.write_text(REFERENCE_SRT, encoding="utf-8")
         service = FeedbackLearningService(
-            task_history=FakeTaskHistory({"task-1": _history_record(_task_payload(session_dir))})
+            task_history=FakeTaskHistory(
+                {"task-1": _history_record(_task_payload(session_dir))}
+            )
         )
         # 预览不产生入库副作用（定案 §5 遗留观察的复核结论）
         response = service.learn(
-            None, ref, task_id="task-1", scenario="external-correction", dry_run=True,
+            None,
+            ref,
+            task_id="task-1",
+            scenario="external-correction",
+            dry_run=True,
         )
         assert response["status"] == "ok"
         assert captured_samples == []
         response = service.learn(
-            None, ref, task_id="task-1", scenario="external-correction", dry_run=False,
+            None,
+            ref,
+            task_id="task-1",
+            scenario="external-correction",
+            dry_run=False,
         )
         assert response["status"] == "ok"
         assert response["baseline_source"] == "task_history"
@@ -396,24 +457,39 @@ class TestServiceLearnMetadata:
         assert meta["scene"] == "external-correction"
 
     def test_speaker_count_falls_back_to_canonical(
-        self, session_dir, captured_samples, stub_semantic_scorer, no_param_writes, tmp_path,
+        self,
+        session_dir,
+        captured_samples,
+        stub_semantic_scorer,
+        no_param_writes,
+        tmp_path,
     ):
         payload = _task_payload(session_dir)
-        payload["stats"] = {"detected_language": "en", "canonical_speaker_count": 3,
-                            "duration_seconds": 30.0}
+        payload["stats"] = {
+            "detected_language": "en",
+            "canonical_speaker_count": 3,
+            "duration_seconds": 30.0,
+        }
         ref = tmp_path / "ref.srt"
         ref.write_text(REFERENCE_SRT, encoding="utf-8")
         service = FeedbackLearningService(
             task_history=FakeTaskHistory({"task-1": _history_record(payload)})
         )
-        service.learn(None, ref, task_id="task-1", scenario="existing-subtitle", dry_run=False)
+        service.learn(
+            None, ref, task_id="task-1", scenario="existing-subtitle", dry_run=False
+        )
         meta = captured_samples[0]
         assert meta["language"] == "en"
         assert meta["speaker_count"] == 3
         assert meta["audio_duration"] == 30.0
 
     def test_rerun_path_metadata_from_pipeline_stats(
-        self, monkeypatch, captured_samples, stub_semantic_scorer, no_param_writes, tmp_path,
+        self,
+        monkeypatch,
+        captured_samples,
+        stub_semantic_scorer,
+        no_param_writes,
+        tmp_path,
     ):
         from vocal_subtitle.webui import feedback_services
 
@@ -444,6 +520,7 @@ class TestServiceLearnMetadata:
 # ingest 层：journal header 可选 scenario 与统计分层
 # ---------------------------------------------------------------------------
 
+
 def _journal_event(session_id="s-1", seq=0, command="updateCueTimes"):
     return {
         "schema": "edit-journal-v1",
@@ -462,7 +539,9 @@ def _write_journal(path, header_extra, seqs, session_id="s-1"):
     header = {"schema": "edit-journal-v1", "type": "header", "session_id": session_id}
     header.update(header_extra)
     lines = [json.dumps(header)]
-    lines += [json.dumps(_journal_event(session_id=session_id, seq=seq)) for seq in seqs]
+    lines += [
+        json.dumps(_journal_event(session_id=session_id, seq=seq)) for seq in seqs
+    ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -483,11 +562,16 @@ class TestJournalScenarioLayering:
     def test_statistics_layered_by_scenario(self, tmp_path):
         """带场景的日志按场景分层；无 scenario 的旧日志照常计入总体"""
         modern = _write_journal(
-            tmp_path / "modern.journal.jsonl", {"scenario": "inline-review"}, [0, 1],
+            tmp_path / "modern.journal.jsonl",
+            {"scenario": "inline-review"},
+            [0, 1],
             session_id="s-modern",
         )
         legacy = _write_journal(
-            tmp_path / "legacy.journal.jsonl", {}, [0], session_id="s-legacy",
+            tmp_path / "legacy.journal.jsonl",
+            {},
+            [0],
+            session_id="s-legacy",
         )
         files = load_journal_files([modern, legacy])
         stats = journal_statistics(files)
@@ -503,11 +587,15 @@ class TestJournalScenarioLayering:
 
     def test_statistics_covers_multiple_scenarios(self, tmp_path):
         first = _write_journal(
-            tmp_path / "a.journal.jsonl", {"scenario": "inline-review"}, [0],
+            tmp_path / "a.journal.jsonl",
+            {"scenario": "inline-review"},
+            [0],
             session_id="s-a",
         )
         second = _write_journal(
-            tmp_path / "b.journal.jsonl", {"scenario": "from-scratch-timing"}, [0, 5],
+            tmp_path / "b.journal.jsonl",
+            {"scenario": "from-scratch-timing"},
+            [0, 5],
             session_id="s-b",
         )
         files = load_journal_files([first, second])

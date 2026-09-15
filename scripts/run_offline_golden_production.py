@@ -25,12 +25,13 @@ from vocal_subtitle.pipeline import Pipeline
 from vocal_subtitle.quality.golden_gate import (
     LEGACY_MATCH_POLICY_VERSION,
     STRICT_MATCH_POLICY_VERSION,
-    classify_expected_match,
 )
 from vocal_subtitle.quality.provenance import attribute_case_misses, attribution_counts
 
 
-def _parse_reference(path: Path | None, reference_format: str | None) -> list[dict[str, Any]]:
+def _parse_reference(
+    path: Path | None, reference_format: str | None
+) -> list[dict[str, Any]]:
     if path is None:
         return []
     if reference_format == "normalized_json" or path.suffix.lower() == ".json":
@@ -116,13 +117,15 @@ def _span_payloads(spans: Any) -> list[dict[str, Any]]:
             continue
         if not all(hasattr(item, name) for name in ("start", "end")):
             continue
-        payloads.append({
-            "id": getattr(item, "id", None),
-            "start": float(item.start),
-            "end": float(item.end),
-            "source": getattr(item, "source", None),
-            "physical_clip_id": getattr(item, "physical_clip_id", None),
-        })
+        payloads.append(
+            {
+                "id": getattr(item, "id", None),
+                "start": float(item.start),
+                "end": float(item.end),
+                "source": getattr(item, "source", None),
+                "physical_clip_id": getattr(item, "physical_clip_id", None),
+            }
+        )
     return payloads
 
 
@@ -151,7 +154,9 @@ def _diagnostics(stats: Any) -> dict[str, Any]:
         "duration_seconds": stats.duration_seconds,
         "elapsed_seconds": stats.total_time,
         "selected_engine": stats.selected_engine,
-        "primary_engine": pair.get("primary") or route.get("selected_engine") or stats.selected_engine,
+        "primary_engine": pair.get("primary")
+        or route.get("selected_engine")
+        or stats.selected_engine,
         "primary_model": route.get("selected_model"),
         "secondary_engine": pair.get("secondary"),
         "review_policy": pair.get("policy") or review.get("review_policy"),
@@ -171,7 +176,9 @@ def _diagnostics(stats: Any) -> dict[str, Any]:
         "skeleton_priority": bool(
             (getattr(stats, "diagnostic_report", None) or {}).get("skeleton_priority")
         ),
-        "skeleton_start_delta_ms": (getattr(stats, "diagnostic_report", None) or {}).get(
+        "skeleton_start_delta_ms": (
+            getattr(stats, "diagnostic_report", None) or {}
+        ).get(
             "skeleton_start_delta_ms",
         ),
         "skeleton_end_delta_ms": (getattr(stats, "diagnostic_report", None) or {}).get(
@@ -180,10 +187,14 @@ def _diagnostics(stats: Any) -> dict[str, Any]:
         "skeleton_coverage_rate": (getattr(stats, "diagnostic_report", None) or {}).get(
             "skeleton_coverage_rate",
         ),
-        "cross_skeleton_merge_count": (getattr(stats, "diagnostic_report", None) or {}).get(
+        "cross_skeleton_merge_count": (
+            getattr(stats, "diagnostic_report", None) or {}
+        ).get(
             "cross_skeleton_merge_count",
         ),
-        "micro_pause_split_count": (getattr(stats, "diagnostic_report", None) or {}).get(
+        "micro_pause_split_count": (
+            getattr(stats, "diagnostic_report", None) or {}
+        ).get(
             "micro_pause_split_count",
         ),
         "event_count": stats.subtitle_count,
@@ -211,12 +222,15 @@ def _engine_status(diagnostics: dict[str, Any]) -> dict[str, dict[str, Any]]:
         model_path: str | None = None,
     ) -> None:
         window_items = windows or []
-        failed = sum(1 for item in window_items if item.get("status") not in {"ok", "cache_hit"})
+        failed = sum(
+            1 for item in window_items if item.get("status") not in {"ok", "cache_hit"}
+        )
         result[name] = {
             "lifecycle": lifecycle,
             "enabled": enabled,
             "selected": selected,
-            "available": status not in {"disabled", "unavailable", "model_missing", "port_missing"},
+            "available": status
+            not in {"disabled", "unavailable", "model_missing", "port_missing"},
             "status": status,
             "model_path": model_path,
             "windows_processed": len(window_items),
@@ -230,7 +244,10 @@ def _engine_status(diagnostics: dict[str, Any]) -> dict[str, dict[str, Any]]:
             lifecycle="primary",
             selected=True,
             enabled=True,
-            status="completed" if diagnostics.get("production_path") not in {"segmented_fallback", "failed"} else "execution_failed",
+            status="completed"
+            if diagnostics.get("production_path")
+            not in {"segmented_fallback", "failed"}
+            else "execution_failed",
             reason=diagnostics.get("fallback_reason"),
         )
 
@@ -265,13 +282,18 @@ def _engine_status(diagnostics: dict[str, Any]) -> dict[str, dict[str, Any]]:
         "context_reasr",
         lifecycle="review",
         selected=bool(context_windows),
-        enabled=bool(context_windows) or review.get("status") not in {"disabled", "skipped"},
+        enabled=bool(context_windows)
+        or review.get("status") not in {"disabled", "skipped"},
         status=(
-            "completed" if review.get("status") in {"ok", "completed"} else
-            "execution_failed" if review.get("status") in {"failed", "degraded"} else
-            "port_missing" if review.get("reason") == "context_reasr_port_missing" else
-            "residual_risk_gate" if review.get("reason") == "no_review_windows" else
-            str(review.get("status", "unavailable"))
+            "completed"
+            if review.get("status") in {"ok", "completed"}
+            else "execution_failed"
+            if review.get("status") in {"failed", "degraded"}
+            else "port_missing"
+            if review.get("reason") == "context_reasr_port_missing"
+            else "residual_risk_gate"
+            if review.get("reason") == "no_review_windows"
+            else str(review.get("status", "unavailable"))
         ),
         reason=review.get("reason"),
         windows=context_windows,
@@ -292,19 +314,21 @@ def _miss_attribution(
             continue
         candidate_ids = list(decision.get("candidate_ids", ()) or ())
         for candidate_id in candidate_ids:
-            candidate_trace.append({
-                "id": candidate_id,
-                "start": decision.get("start"),
-                "end": decision.get("end"),
-                "text": decision.get("final_text", ""),
-                "trace_context": {
-                    "candidate_id": candidate_id,
-                    "decision_id": decision.get("decision_id"),
-                    "physical_span_ids": (
-                        decision.get("trace_context", {}) or {}
-                    ).get("physical_span_ids", []),
-                },
-            })
+            candidate_trace.append(
+                {
+                    "id": candidate_id,
+                    "start": decision.get("start"),
+                    "end": decision.get("end"),
+                    "text": decision.get("final_text", ""),
+                    "trace_context": {
+                        "candidate_id": candidate_id,
+                        "decision_id": decision.get("decision_id"),
+                        "physical_span_ids": (
+                            decision.get("trace_context", {}) or {}
+                        ).get("physical_span_ids", []),
+                    },
+                }
+            )
     return attribute_case_misses(
         expected,
         predicted,
@@ -323,16 +347,18 @@ def _candidate_trace(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         for candidate_id in decision.get("candidate_ids", ()) or ():
             trace_context = decision.get("trace_context") or {}
-            result.append({
-                "id": candidate_id,
-                "source": trace_context.get("source_id", "unknown"),
-                "start": decision.get("start"),
-                "end": decision.get("end"),
-                "text": decision.get("final_text", ""),
-                "decision_id": decision.get("decision_id"),
-                "candidate_role": decision.get("candidate_role", "primary"),
-                "trace_context": trace_context,
-            })
+            result.append(
+                {
+                    "id": candidate_id,
+                    "source": trace_context.get("source_id", "unknown"),
+                    "start": decision.get("start"),
+                    "end": decision.get("end"),
+                    "text": decision.get("final_text", ""),
+                    "decision_id": decision.get("decision_id"),
+                    "candidate_role": decision.get("candidate_role", "primary"),
+                    "trace_context": trace_context,
+                }
+            )
     return result
 
 
@@ -373,7 +399,9 @@ def run_scene(scene: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]
     output = subtitle_root / f"{scene['name']}.ass"
     output.parent.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
-    result = Pipeline(_config(args, language=str(scene.get("language", "")).casefold())).run(
+    result = Pipeline(
+        _config(args, language=str(scene.get("language", "")).casefold())
+    ).run(
         audio,
         output,
         output_format="ass",
@@ -416,11 +444,14 @@ def run_scene(scene: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]
         "review_policy": args.review_policy,
         "production_mode": getattr(args, "production_mode", "authoritative"),
         "audio": str(audio.relative_to(REPO_ROOT)),
-        "ground_truth": str(ground_truth.relative_to(REPO_ROOT)) if ground_truth else None,
+        "ground_truth": str(ground_truth.relative_to(REPO_ROOT))
+        if ground_truth
+        else None,
         "reference_role": reference_role,
         "gate_profile": gate_profile,
         "reference_status": (
-            "manual_reference" if ground_truth and reference_role != "none"
+            "manual_reference"
+            if ground_truth and reference_role != "none"
             else "no_manual_reference"
         ),
         "categories": _categories(scene, stats.duration_seconds),
@@ -443,7 +474,9 @@ def run_scene(scene: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=Path("test/quality_manifest.yaml"))
+    parser.add_argument(
+        "--manifest", type=Path, default=Path("test/quality_manifest.yaml")
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile", default="default")
     parser.add_argument(
@@ -505,7 +538,9 @@ def main(argv: list[str] | None = None) -> int:
         default=str(REPO_ROOT / "cache/whisper_cpp/models/ggml-tiny.bin"),
     )
     args = parser.parse_args(argv)
-    args.manifest = args.manifest if args.manifest.is_absolute() else REPO_ROOT / args.manifest
+    args.manifest = (
+        args.manifest if args.manifest.is_absolute() else REPO_ROOT / args.manifest
+    )
     args.output = args.output if args.output.is_absolute() else REPO_ROOT / args.output
     payload = yaml.safe_load(args.manifest.read_text(encoding="utf-8")) or {}
     scenes = payload.get("scenes", [])
@@ -520,72 +555,92 @@ def main(argv: list[str] | None = None) -> int:
         for scene in scenes:
             item = run_scene(scene, args)
             cases.append(item)
-            print(json.dumps({
-                "id": item["id"],
-                "engine": item["engine"],
-                "model": item["model"],
-                "production_mode": item["production_mode"],
-                "reference_status": item["reference_status"],
-                "production_path": item["diagnostics"]["production_path"],
-                "review_status": item["diagnostics"]["review_status"],
-                "decision_count": item["diagnostics"]["decision_count"],
-                "elapsed_seconds": item["diagnostics"]["elapsed_seconds"],
-            }, ensure_ascii=False), flush=True)
+            print(
+                json.dumps(
+                    {
+                        "id": item["id"],
+                        "engine": item["engine"],
+                        "model": item["model"],
+                        "production_mode": item["production_mode"],
+                        "reference_status": item["reference_status"],
+                        "production_path": item["diagnostics"]["production_path"],
+                        "review_status": item["diagnostics"]["review_status"],
+                        "decision_count": item["diagnostics"]["decision_count"],
+                        "elapsed_seconds": item["diagnostics"]["elapsed_seconds"],
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     manifest_bytes = args.manifest.read_bytes()
     reference_case_count = sum(
-        1 for case in cases
+        1
+        for case in cases
         if str(case.get("reference_role", "")).casefold() not in {"none", "safety_only"}
         and case.get("reference_status") != "no_manual_reference"
     )
     expected_speech_count = sum(
-        1 for case in cases
+        1
+        for case in cases
         if str(case.get("reference_role", "")).casefold() not in {"none", "safety_only"}
         and case.get("reference_status") != "no_manual_reference"
         for event in case.get("expected_events", ())
-        if str(event.get("kind", "speech")).casefold() not in {"non_speech", "non-speech", "noise", "hallucination"}
+        if str(event.get("kind", "speech")).casefold()
+        not in {"non_speech", "non-speech", "noise", "hallucination"}
     )
     expected_non_speech_count = sum(
-        1 for case in cases
+        1
+        for case in cases
         for event in case.get("expected_events", ())
-        if str(event.get("kind", "speech")).casefold() in {"non_speech", "non-speech", "noise", "hallucination"}
+        if str(event.get("kind", "speech")).casefold()
+        in {"non_speech", "non-speech", "noise", "hallucination"}
     )
-    args.output.write_text(json.dumps({
-        "schema_version": "golden-quality-input-v3",
-        "generated_from": str(args.manifest.relative_to(REPO_ROOT)),
-        "metadata": {
-            "primary_engine": args.engine,
-            "profile": args.profile,
-            "primary_model": args.model if not args.model_matrix else None,
-            "models": list(models),
-            "secondary_engine": args.secondary_engine,
-            "review_policy": args.review_policy,
-            "production_mode": args.production_mode,
-            "engine_pair_enabled": not args.disable_engine_pair,
-            "context_reasr_enabled": not args.disable_context_reasr,
-            "qwen_model_path": args.qwen_model_path,
-            "whisper_cpp_model_path": args.whisper_cpp_model_path,
-            "route_version": "asr-route-v1",
-            "pair_route_version": "asr-pair-v1",
-            "manifest_path": str(args.manifest.relative_to(REPO_ROOT)),
-            "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-            "manifest_version": payload.get("schema_version", "quality-manifest-v1"),
-            "manifest_case_count": len(scenes),
-            "case_ids": [str(scene.get("name", "")) for scene in scenes],
-            "reference_case_count": reference_case_count,
-            "expected_speech_count": expected_speech_count,
-            "expected_non_speech_count": expected_non_speech_count,
-            "reference_role_rule": "advisory|strict|none",
-            "legacy_match_policy": LEGACY_MATCH_POLICY_VERSION,
-            "strict_match_policy": STRICT_MATCH_POLICY_VERSION,
-            "strict_min_overlap_seconds": 0.01,
-            "strict_min_overlap_ratio": 0.0,
-        },
-        "engine": args.engine,
-        "model": args.model if not args.model_matrix else None,
-        "models": list(models),
-        "cases": cases,
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    args.output.write_text(
+        json.dumps(
+            {
+                "schema_version": "golden-quality-input-v3",
+                "generated_from": str(args.manifest.relative_to(REPO_ROOT)),
+                "metadata": {
+                    "primary_engine": args.engine,
+                    "profile": args.profile,
+                    "primary_model": args.model if not args.model_matrix else None,
+                    "models": list(models),
+                    "secondary_engine": args.secondary_engine,
+                    "review_policy": args.review_policy,
+                    "production_mode": args.production_mode,
+                    "engine_pair_enabled": not args.disable_engine_pair,
+                    "context_reasr_enabled": not args.disable_context_reasr,
+                    "qwen_model_path": args.qwen_model_path,
+                    "whisper_cpp_model_path": args.whisper_cpp_model_path,
+                    "route_version": "asr-route-v1",
+                    "pair_route_version": "asr-pair-v1",
+                    "manifest_path": str(args.manifest.relative_to(REPO_ROOT)),
+                    "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+                    "manifest_version": payload.get(
+                        "schema_version", "quality-manifest-v1"
+                    ),
+                    "manifest_case_count": len(scenes),
+                    "case_ids": [str(scene.get("name", "")) for scene in scenes],
+                    "reference_case_count": reference_case_count,
+                    "expected_speech_count": expected_speech_count,
+                    "expected_non_speech_count": expected_non_speech_count,
+                    "reference_role_rule": "advisory|strict|none",
+                    "legacy_match_policy": LEGACY_MATCH_POLICY_VERSION,
+                    "strict_match_policy": STRICT_MATCH_POLICY_VERSION,
+                    "strict_min_overlap_seconds": 0.01,
+                    "strict_min_overlap_ratio": 0.0,
+                },
+                "engine": args.engine,
+                "model": args.model if not args.model_matrix else None,
+                "models": list(models),
+                "cases": cases,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     return 0
 
 

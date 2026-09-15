@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
-from .engine import EngineAvailability, EngineIdentity, EngineRequest, EngineResult, PrepareResult
+from .engine import (
+    EngineAvailability,
+    EngineIdentity,
+    EngineRequest,
+    EngineResult,
+    PrepareResult,
+)
 from .report import RunReport
 from .run import RunRequest, RunResult
 from .task import TaskRequest, TaskSnapshot, TaskState
@@ -13,7 +20,7 @@ from .task import TaskRequest, TaskSnapshot, TaskState
 
 @runtime_checkable
 class TaskPort(Protocol):
-    def get(self, task_id: str) -> Optional[TaskSnapshot]: ...
+    def get(self, task_id: str) -> TaskSnapshot | None: ...
 
     def create(
         self,
@@ -40,7 +47,7 @@ class PipelineRunPort(Protocol):
 
 @runtime_checkable
 class EngineRegistryPort(Protocol):
-    def get(self, engine: str) -> Optional[EngineAvailability]: ...
+    def get(self, engine: str) -> EngineAvailability | None: ...
 
     def list_all(self) -> Iterable[EngineAvailability]: ...
 
@@ -60,7 +67,9 @@ class EnginePort(Protocol):
 
 @runtime_checkable
 class ReportPort(Protocol):
-    def build(self, result: RunResult, *, config_snapshot: Optional[Mapping[str, Any]] = None) -> RunReport: ...
+    def build(
+        self, result: RunResult, *, config_snapshot: Mapping[str, Any] | None = None
+    ) -> RunReport: ...
 
     def persist(self, report: RunReport, *, config: Any = None) -> Path: ...
 
@@ -71,7 +80,7 @@ class ArtifactPort(Protocol):
 
     def exists(self, name: str) -> bool: ...
 
-    def get(self, name: str) -> Optional[Path]: ...
+    def get(self, name: str) -> Path | None: ...
 
 
 @runtime_checkable

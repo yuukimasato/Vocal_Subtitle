@@ -11,7 +11,6 @@ TEN VAD 来自 TEN Framework，是一个高性能轻量级 VAD 引擎。
 
 import logging
 from pathlib import Path
-from typing import List
 
 import numpy as np
 
@@ -72,7 +71,7 @@ class TENVAD(VADEngine):
         threshold: float = 0.5,
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 400,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """检测语音区间"""
         from ..utils.audio_utils import AudioUtils
 
@@ -88,7 +87,7 @@ class TENVAD(VADEngine):
         threshold: float = 0.5,
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 400,
-    ) -> List[SpeechSegment]:
+    ) -> list[SpeechSegment]:
         """在 numpy 数组上检测语音区间
 
         当前实现使用基于能量的简单帧级检测作为降级方案。

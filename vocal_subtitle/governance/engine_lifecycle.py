@@ -13,9 +13,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +34,14 @@ class EngineLifecycle(str, Enum):
 
 # 允许的状态转换
 ALLOWED_LIFECYCLE_TRANSITIONS: dict[EngineLifecycle, frozenset[EngineLifecycle]] = {
-    EngineLifecycle.UNAVAILABLE:   frozenset({EngineLifecycle.MODEL_MISSING}),
+    EngineLifecycle.UNAVAILABLE: frozenset({EngineLifecycle.MODEL_MISSING}),
     EngineLifecycle.MODEL_MISSING: frozenset({EngineLifecycle.READY_SHADOW}),
-    EngineLifecycle.READY_SHADOW:  frozenset({EngineLifecycle.READY_REVIEW, EngineLifecycle.MODEL_MISSING}),
-    EngineLifecycle.READY_REVIEW:  frozenset({EngineLifecycle.READY_DEFAULT, EngineLifecycle.READY_SHADOW}),
+    EngineLifecycle.READY_SHADOW: frozenset(
+        {EngineLifecycle.READY_REVIEW, EngineLifecycle.MODEL_MISSING}
+    ),
+    EngineLifecycle.READY_REVIEW: frozenset(
+        {EngineLifecycle.READY_DEFAULT, EngineLifecycle.READY_SHADOW}
+    ),
     EngineLifecycle.READY_DEFAULT: frozenset({EngineLifecycle.READY_SHADOW}),
 }
 
@@ -46,6 +49,7 @@ ALLOWED_LIFECYCLE_TRANSITIONS: dict[EngineLifecycle, frozenset[EngineLifecycle]]
 @dataclass
 class EngineStatus:
     """引擎状态记录"""
+
     engine: str
     model: str = ""
     status: EngineLifecycle = EngineLifecycle.UNAVAILABLE
@@ -53,8 +57,8 @@ class EngineStatus:
     model_path: str = ""
     model_hash: str = ""
     resource_requirement: str = ""  # 如 "GPU ~4GB"
-    language_support: str = ""       # 如 "zh, en"
-    degradation_strategy: str = ""   # 降级策略描述
+    language_support: str = ""  # 如 "zh, en"
+    degradation_strategy: str = ""  # 降级策略描述
     last_checked: str = ""
     last_transition: str = ""
 
@@ -91,68 +95,153 @@ class EngineRegistry:
         """
         defaults = [
             # 人声分离
-            EngineStatus("uvr", "bs_roformer", EngineLifecycle.READY_DEFAULT,
-                         resource_requirement="CPU/GPU, ~1GB RAM", language_support="通用",
-                         degradation_strategy="降级到 Open-Unmix"),
-            EngineStatus("spleeter", "2stems", EngineLifecycle.UNAVAILABLE,
-                         resource_requirement="TensorFlow, ~2GB RAM", language_support="通用",
-                         degradation_strategy="N/A"),
-            EngineStatus("open-unmix", "umxhq", EngineLifecycle.READY_SHADOW,
-                         resource_requirement="PyTorch, ~1GB RAM", language_support="通用",
-                         degradation_strategy="N/A"),
+            EngineStatus(
+                "uvr",
+                "bs_roformer",
+                EngineLifecycle.READY_DEFAULT,
+                resource_requirement="CPU/GPU, ~1GB RAM",
+                language_support="通用",
+                degradation_strategy="降级到 Open-Unmix",
+            ),
+            EngineStatus(
+                "spleeter",
+                "2stems",
+                EngineLifecycle.UNAVAILABLE,
+                resource_requirement="TensorFlow, ~2GB RAM",
+                language_support="通用",
+                degradation_strategy="N/A",
+            ),
+            EngineStatus(
+                "open-unmix",
+                "umxhq",
+                EngineLifecycle.READY_SHADOW,
+                resource_requirement="PyTorch, ~1GB RAM",
+                language_support="通用",
+                degradation_strategy="N/A",
+            ),
             # VAD
-            EngineStatus("silero", "silero_vad", EngineLifecycle.READY_DEFAULT,
-                         resource_requirement="CPU, 极低", language_support="通用",
-                         degradation_strategy="降级到 WebRTC VAD"),
-            EngineStatus("webrtc", "", EngineLifecycle.READY_SHADOW,
-                         resource_requirement="CPU, 极低", language_support="通用",
-                         degradation_strategy="降级到 TEN VAD"),
+            EngineStatus(
+                "silero",
+                "silero_vad",
+                EngineLifecycle.READY_DEFAULT,
+                resource_requirement="CPU, 极低",
+                language_support="通用",
+                degradation_strategy="降级到 WebRTC VAD",
+            ),
+            EngineStatus(
+                "webrtc",
+                "",
+                EngineLifecycle.READY_SHADOW,
+                resource_requirement="CPU, 极低",
+                language_support="通用",
+                degradation_strategy="降级到 TEN VAD",
+            ),
             # ASR
-            EngineStatus("faster-whisper", "large-v3", EngineLifecycle.READY_DEFAULT,
-                         resource_requirement="GPU 推荐, CPU 可用", language_support="多语言 (99+)",
-                         degradation_strategy="降级到 tiny 模型"),
-            EngineStatus("funasr", "paraformer-zh", EngineLifecycle.READY_SHADOW,
-                         resource_requirement="GPU 推荐, ~2GB", language_support="中文优化",
-                         degradation_strategy="降级到 faster-whisper"),
-            EngineStatus("qwen-asr", "Qwen3-ASR-1.7B", EngineLifecycle.READY_SHADOW,
-                         resource_requirement="GPU 推荐, ~4GB", language_support="多语言",
-                         degradation_strategy="降级到 faster-whisper"),
-            EngineStatus("whisper.cpp", "ggml-medium", EngineLifecycle.READY_SHADOW,
-                         resource_requirement="CPU, 低内存", language_support="多语言",
-                         degradation_strategy="降级到 tiny 模型"),
+            EngineStatus(
+                "faster-whisper",
+                "large-v3",
+                EngineLifecycle.READY_DEFAULT,
+                resource_requirement="GPU 推荐, CPU 可用",
+                language_support="多语言 (99+)",
+                degradation_strategy="降级到 tiny 模型",
+            ),
+            EngineStatus(
+                "funasr",
+                "paraformer-zh",
+                EngineLifecycle.READY_SHADOW,
+                resource_requirement="GPU 推荐, ~2GB",
+                language_support="中文优化",
+                degradation_strategy="降级到 faster-whisper",
+            ),
+            EngineStatus(
+                "qwen-asr",
+                "Qwen3-ASR-1.7B",
+                EngineLifecycle.READY_SHADOW,
+                resource_requirement="GPU 推荐, ~4GB",
+                language_support="多语言",
+                degradation_strategy="降级到 faster-whisper",
+            ),
+            EngineStatus(
+                "whisper.cpp",
+                "ggml-medium",
+                EngineLifecycle.READY_SHADOW,
+                resource_requirement="CPU, 低内存",
+                language_support="多语言",
+                degradation_strategy="降级到 tiny 模型",
+            ),
             # 复核引擎
-            EngineStatus("global-asr-evidence", "large-v3", EngineLifecycle.READY_DEFAULT,
-                         resource_requirement="同 ASR", language_support="多语言",
-                         degradation_strategy="shadow 模式"),
-            EngineStatus("context-reasr", "large-v3", EngineLifecycle.UNAVAILABLE,
-                         resource_requirement="同 ASR", language_support="多语言",
-                         degradation_strategy="实验阶段"),
-            EngineStatus("qwen-review", "Qwen3-ASR-1.7B", EngineLifecycle.MODEL_MISSING,
-                         resource_requirement="GPU ~4GB", language_support="zh, en",
-                         degradation_strategy="回退到分段结果"),
-            EngineStatus("forced-aligner", "Qwen3-ForcedAligner-0.6B", EngineLifecycle.MODEL_MISSING,
-                         resource_requirement="GPU ~2GB", language_support="zh, en",
-                         degradation_strategy="使用 ASR 原生时间戳"),
-            EngineStatus("sed", "MIT/ast-finetuned-audioset", EngineLifecycle.MODEL_MISSING,
-                         resource_requirement="GPU ~1GB", language_support="通用",
-                         degradation_strategy="不使用音频分类"),
-            EngineStatus("semantic-review", "", EngineLifecycle.UNAVAILABLE,
-                         resource_requirement="CPU", language_support="通用",
-                         degradation_strategy="实验阶段"),
+            EngineStatus(
+                "global-asr-evidence",
+                "large-v3",
+                EngineLifecycle.READY_DEFAULT,
+                resource_requirement="同 ASR",
+                language_support="多语言",
+                degradation_strategy="shadow 模式",
+            ),
+            EngineStatus(
+                "context-reasr",
+                "large-v3",
+                EngineLifecycle.UNAVAILABLE,
+                resource_requirement="同 ASR",
+                language_support="多语言",
+                degradation_strategy="实验阶段",
+            ),
+            EngineStatus(
+                "qwen-review",
+                "Qwen3-ASR-1.7B",
+                EngineLifecycle.MODEL_MISSING,
+                resource_requirement="GPU ~4GB",
+                language_support="zh, en",
+                degradation_strategy="回退到分段结果",
+            ),
+            EngineStatus(
+                "forced-aligner",
+                "Qwen3-ForcedAligner-0.6B",
+                EngineLifecycle.MODEL_MISSING,
+                resource_requirement="GPU ~2GB",
+                language_support="zh, en",
+                degradation_strategy="使用 ASR 原生时间戳",
+            ),
+            EngineStatus(
+                "sed",
+                "MIT/ast-finetuned-audioset",
+                EngineLifecycle.MODEL_MISSING,
+                resource_requirement="GPU ~1GB",
+                language_support="通用",
+                degradation_strategy="不使用音频分类",
+            ),
+            EngineStatus(
+                "semantic-review",
+                "",
+                EngineLifecycle.UNAVAILABLE,
+                resource_requirement="CPU",
+                language_support="通用",
+                degradation_strategy="实验阶段",
+            ),
             # 说话人分离
-            EngineStatus("speechbrain-ecapa", "speechbrain/ecapa", EngineLifecycle.READY_DEFAULT,
-                         resource_requirement="CPU, ~500MB", language_support="通用",
-                         degradation_strategy="降级到纯文本聚类"),
-            EngineStatus("pyannote", "speaker-diarization-3.1", EngineLifecycle.READY_SHADOW,
-                         resource_requirement="GPU 推荐, ~2GB", language_support="通用",
-                         degradation_strategy="保留 agglomerative 结果"),
+            EngineStatus(
+                "speechbrain-ecapa",
+                "speechbrain/ecapa",
+                EngineLifecycle.READY_DEFAULT,
+                resource_requirement="CPU, ~500MB",
+                language_support="通用",
+                degradation_strategy="降级到纯文本聚类",
+            ),
+            EngineStatus(
+                "pyannote",
+                "speaker-diarization-3.1",
+                EngineLifecycle.READY_SHADOW,
+                resource_requirement="GPU 推荐, ~2GB",
+                language_support="通用",
+                degradation_strategy="保留 agglomerative 结果",
+            ),
         ]
         for entry in defaults:
             self._engines[entry.engine] = entry
 
     # ---- 查询 ----
 
-    def get(self, engine: str) -> Optional[EngineStatus]:
+    def get(self, engine: str) -> EngineStatus | None:
         return self._engines.get(engine)
 
     def list_all(self) -> list[EngineStatus]:
@@ -167,8 +256,14 @@ class EngineRegistry:
             "separation": {"uvr", "spleeter", "open-unmix"},
             "vad": {"silero", "webrtc"},
             "asr": {"faster-whisper", "funasr", "qwen-asr", "whisper.cpp"},
-            "review": {"global-asr-evidence", "context-reasr", "qwen-review",
-                       "forced-aligner", "sed", "semantic-review"},
+            "review": {
+                "global-asr-evidence",
+                "context-reasr",
+                "qwen-review",
+                "forced-aligner",
+                "sed",
+                "semantic-review",
+            },
             "diarization": {"speechbrain-ecapa", "pyannote"},
         }
         keys = category_map.get(category, set())
@@ -184,7 +279,7 @@ class LifecycleManager:
     确保转换符合 ENGINE_LIFECYCLE.md §1 定义的路径。
     """
 
-    def __init__(self, registry: Optional[EngineRegistry] = None):
+    def __init__(self, registry: EngineRegistry | None = None):
         self.registry = registry or EngineRegistry()
 
     def transition(
@@ -226,6 +321,7 @@ class LifecycleManager:
                 )
 
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc).isoformat()
         old_status = current.status
         current.status = target
@@ -234,7 +330,10 @@ class LifecycleManager:
 
         logger.info(
             "Engine %s: %s → %s (reason: %s)",
-            engine, old_status.value, target.value, reason or "N/A",
+            engine,
+            old_status.value,
+            target.value,
+            reason or "N/A",
         )
         return True
 
@@ -248,20 +347,29 @@ class LifecycleManager:
 
     def promote_to_review(self, engine: str) -> bool:
         """ready_shadow → ready_review"""
-        return self.transition(engine, EngineLifecycle.READY_REVIEW,
-                              reason="shadow validation passed")
+        return self.transition(
+            engine, EngineLifecycle.READY_REVIEW, reason="shadow validation passed"
+        )
 
     def promote_to_default(self, engine: str) -> bool:
         """ready_review → ready_default"""
-        return self.transition(engine, EngineLifecycle.READY_DEFAULT,
-                              reason="regression test + human check passed")
+        return self.transition(
+            engine,
+            EngineLifecycle.READY_DEFAULT,
+            reason="regression test + human check passed",
+        )
 
     def rollback_to_shadow(self, engine: str) -> bool:
         """ready_default → ready_shadow (回退)"""
-        return self.transition(engine, EngineLifecycle.READY_SHADOW,
-                              reason="regression detected", force=True)
+        return self.transition(
+            engine,
+            EngineLifecycle.READY_SHADOW,
+            reason="regression detected",
+            force=True,
+        )
 
     def mark_unavailable(self, engine: str, reason: str = "") -> bool:
         """任意状态 → unavailable（重置）"""
-        return self.transition(engine, EngineLifecycle.UNAVAILABLE,
-                              reason=reason, force=True)
+        return self.transition(
+            engine, EngineLifecycle.UNAVAILABLE, reason=reason, force=True
+        )

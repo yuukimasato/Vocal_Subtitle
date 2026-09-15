@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+from typing import Any
 
 
 def _number(value: Any, name: str) -> float:
@@ -16,7 +16,7 @@ def _number(value: Any, name: str) -> float:
     return result
 
 
-def _span(start: Any, end: Any, name: str) -> Tuple[float, float]:
+def _span(start: Any, end: Any, name: str) -> tuple[float, float]:
     first = _number(start, f"{name}_start")
     last = _number(end, f"{name}_end")
     if first < 0 or last <= first:
@@ -59,7 +59,7 @@ class CoordinateMapper:
     """Map one explicitly local window onto the absolute audio timeline."""
 
     origin_offset: float
-    duration: Optional[float]
+    duration: float | None
     source_id: str
 
     def __post_init__(self) -> None:
@@ -75,10 +75,12 @@ class CoordinateMapper:
             object.__setattr__(self, "duration", duration)
         object.__setattr__(self, "origin_offset", offset)
 
-    def to_global(self, local_start: Any, local_end: Any = None) -> Tuple[float, float]:
+    def to_global(self, local_start: Any, local_end: Any = None) -> tuple[float, float]:
         if isinstance(local_start, CoordinateRange):
             if local_end is not None and local_start is not local_end:
-                raise ValueError("coordinate range arguments must be one matching object")
+                raise ValueError(
+                    "coordinate range arguments must be one matching object"
+                )
             if local_start.coordinate_space != "local":
                 raise ValueError("to_global received an already global range")
             local_start, local_end = local_start.start, local_start.end
@@ -93,10 +95,14 @@ class CoordinateMapper:
             raise ValueError("global range exceeds duration")
         return global_start, global_end
 
-    def to_local(self, global_start: Any, global_end: Any = None) -> Tuple[float, float]:
+    def to_local(
+        self, global_start: Any, global_end: Any = None
+    ) -> tuple[float, float]:
         if isinstance(global_start, CoordinateRange):
             if global_end is not None and global_start is not global_end:
-                raise ValueError("coordinate range arguments must be one matching object")
+                raise ValueError(
+                    "coordinate range arguments must be one matching object"
+                )
             if global_start.coordinate_space != "global":
                 raise ValueError("to_local received an already local range")
             global_start, global_end = global_start.start, global_start.end
@@ -113,7 +119,7 @@ class CoordinateMapper:
             raise ValueError("global range is before mapper origin")
         return local_start, local_end
 
-    def clamp_global(self, start: Any, end: Any) -> Tuple[float, float]:
+    def clamp_global(self, start: Any, end: Any) -> tuple[float, float]:
         first = _number(start, "global_start")
         last = _number(end, "global_end")
         if last <= first:

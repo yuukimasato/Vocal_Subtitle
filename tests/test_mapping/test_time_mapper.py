@@ -19,12 +19,8 @@ class TestTimeMapper:
         mapper = TimeMapper()
         asr_results = [
             [
-                TranscriptionSegment(
-                    text="大家好", start=0.0, end=1.0
-                ),
-                TranscriptionSegment(
-                    text="欢迎收听", start=1.5, end=2.5
-                ),
+                TranscriptionSegment(text="大家好", start=0.0, end=1.0),
+                TranscriptionSegment(text="欢迎收听", start=1.5, end=2.5),
             ]
         ]
         speech_segments = [SpeechSegment(start=0.0, end=3.0)]
@@ -43,9 +39,7 @@ class TestTimeMapper:
     def test_map_with_offset(self):
         """带偏移的映射测试"""
         mapper = TimeMapper()
-        asr_results = [
-            [TranscriptionSegment(text="第二段", start=0.0, end=1.5)]
-        ]
+        asr_results = [[TranscriptionSegment(text="第二段", start=0.0, end=1.5)]]
         speech_segments = [SpeechSegment(start=10.0, end=12.0)]
 
         events = mapper.map(asr_results, speech_segments)
@@ -57,15 +51,19 @@ class TestTimeMapper:
 
     def test_map_with_offset_keeps_words_relative_to_event_start(self):
         mapper = TimeMapper()
-        asr_results = [[TranscriptionSegment(
-            text="第二段",
-            start=0.5,
-            end=1.5,
-            words=[
-                WordTimestamp("第", 0.5, 0.8),
-                WordTimestamp("二段", 0.9, 1.5),
-            ],
-        )]]
+        asr_results = [
+            [
+                TranscriptionSegment(
+                    text="第二段",
+                    start=0.5,
+                    end=1.5,
+                    words=[
+                        WordTimestamp("第", 0.5, 0.8),
+                        WordTimestamp("二段", 0.9, 1.5),
+                    ],
+                )
+            ]
+        ]
         speech_segments = [SpeechSegment(start=10.0, end=12.0)]
 
         events = mapper.map(asr_results, speech_segments)
@@ -121,11 +119,13 @@ class TestTimeMapper:
         assert (event.physical_start, event.physical_end) == (10.2, 10.8)
         assert (event.physical_bin_start, event.physical_bin_end) == (10.1, 10.9)
         assert event.physical_spans[0]["start"] == 10.2
-        assert event.time_offset_trace == [{
-            "stage": "time_offset",
-            "source": "test-window",
-            "offset": 10.0,
-        }]
+        assert event.time_offset_trace == [
+            {
+                "stage": "time_offset",
+                "source": "test-window",
+                "offset": 10.0,
+            }
+        ]
 
         with pytest.raises(ValueError, match="already has a time offset"):
             offset_subtitle_event(event, 1.0, source="second-window")
@@ -185,12 +185,14 @@ class TestTimeMapper:
 
     def test_map_single_segment_words_are_relative_to_event_start(self):
         events = TimeMapper.map_single_segment(
-            [TranscriptionSegment(
-                text="测试",
-                start=0.5,
-                end=2.0,
-                words=[WordTimestamp("测试", 0.5, 1.2)],
-            )],
+            [
+                TranscriptionSegment(
+                    text="测试",
+                    start=0.5,
+                    end=2.0,
+                    words=[WordTimestamp("测试", 0.5, 1.2)],
+                )
+            ],
             segment_offset=5.0,
         )
 
@@ -203,12 +205,11 @@ class TestTimeMapper:
 
         # 创建两个重叠且文本几乎相同的字幕事件
         events = [
-            SubtitleEvent(index=1, start=0.5, end=2.0,
-                          text="Got it. 1. Listen attentively."),
-            SubtitleEvent(index=2, start=1.0, end=2.0,
-                          text="1. Listen attentively."),
-            SubtitleEvent(index=3, start=3.0, end=4.0,
-                          text="Focus on the guest."),
+            SubtitleEvent(
+                index=1, start=0.5, end=2.0, text="Got it. 1. Listen attentively."
+            ),
+            SubtitleEvent(index=2, start=1.0, end=2.0, text="1. Listen attentively."),
+            SubtitleEvent(index=3, start=3.0, end=4.0, text="Focus on the guest."),
         ]
 
         result = mapper._deduplicate_overlapping(events)
@@ -219,19 +220,18 @@ class TestTimeMapper:
         texts = {e.text for e in result}
         assert "Focus on the guest." in texts
         # 覆盖更完整（更长文本 + 更大时间跨度）的事件应被保留
-        assert any("Got it" in t for t in texts) or any("Listen attentively" in t for t in texts)
+        assert any("Got it" in t for t in texts) or any(
+            "Listen attentively" in t for t in texts
+        )
 
     def test_deduplicate_non_overlapping_kept(self):
         """无重叠或文本不相似的事件全部保留"""
         mapper = TimeMapper()
 
         events = [
-            SubtitleEvent(index=1, start=0.0, end=1.0,
-                          text="Hello world."),
-            SubtitleEvent(index=2, start=1.5, end=2.5,
-                          text="How are you?"),
-            SubtitleEvent(index=3, start=3.0, end=4.0,
-                          text="I am fine."),
+            SubtitleEvent(index=1, start=0.0, end=1.0, text="Hello world."),
+            SubtitleEvent(index=2, start=1.5, end=2.5, text="How are you?"),
+            SubtitleEvent(index=3, start=3.0, end=4.0, text="I am fine."),
         ]
 
         result = mapper._deduplicate_overlapping(events)
@@ -242,10 +242,10 @@ class TestTimeMapper:
         mapper = TimeMapper()
 
         events = [
-            SubtitleEvent(index=1, start=0.0, end=2.0,
-                          text="Phone etiquette."),
-            SubtitleEvent(index=2, start=1.0, end=2.5,
-                          text="Rapid response"),  # 重叠但完全不相似
+            SubtitleEvent(index=1, start=0.0, end=2.0, text="Phone etiquette."),
+            SubtitleEvent(
+                index=2, start=1.0, end=2.5, text="Rapid response"
+            ),  # 重叠但完全不相似
         ]
 
         result = mapper._deduplicate_overlapping(events)

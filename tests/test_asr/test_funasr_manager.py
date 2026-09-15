@@ -43,9 +43,13 @@ def test_prepare_uses_local_cache_without_download(tmp_path, monkeypatch):
 
 def test_prepare_installs_missing_package_then_downloads_model(tmp_path, monkeypatch):
     package_states = iter((False, True))
-    monkeypatch.setattr(manager, "funasr_package_installed", lambda: next(package_states))
+    monkeypatch.setattr(
+        manager, "funasr_package_installed", lambda: next(package_states)
+    )
     installed = []
-    monkeypatch.setattr(manager, "_install_funasr_package", lambda: installed.append(True))
+    monkeypatch.setattr(
+        manager, "_install_funasr_package", lambda: installed.append(True)
+    )
     downloaded = tmp_path / "downloaded"
     downloaded.mkdir()
     (downloaded / "configuration.json").write_text("{}", encoding="utf-8")

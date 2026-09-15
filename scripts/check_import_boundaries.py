@@ -8,7 +8,6 @@ import ast
 import subprocess
 from pathlib import Path
 
-
 DOMAIN_PACKAGES = ("physical", "asr", "acoustic", "merging")
 FORBIDDEN_DOMAIN_IMPORTS = ("pipeline", "webui")
 
@@ -35,7 +34,9 @@ def module_name(path: Path, root: Path) -> str:
     return ".".join(parts)
 
 
-def resolve_import(node: ast.Import | ast.ImportFrom, current: str, root_name: str) -> set[str]:
+def resolve_import(
+    node: ast.Import | ast.ImportFrom, current: str, root_name: str
+) -> set[str]:
     if isinstance(node, ast.Import):
         return {alias.name for alias in node.names}
 
@@ -103,7 +104,7 @@ def find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
             if state.get(target, 0) == 0:
                 visit(target)
             elif state.get(target) == 1 and target in stack:
-                cycle = stack[stack.index(target):]
+                cycle = stack[stack.index(target) :]
                 rotations = [tuple(cycle[i:] + cycle[:i]) for i in range(len(cycle))]
                 cycles.add(min(rotations))
         stack.pop()
@@ -132,9 +133,7 @@ def main() -> int:
         for target in targets:
             target_parts = target.split(".")
             if len(target_parts) > 1 and target_parts[1] in FORBIDDEN_DOMAIN_IMPORTS:
-                violations.add(
-                    f"domain-boundary: {locations[module]} imports {target}"
-                )
+                violations.add(f"domain-boundary: {locations[module]} imports {target}")
 
     for cycle in find_cycles(graph):
         violations.add("import-cycle: " + " -> ".join(cycle))

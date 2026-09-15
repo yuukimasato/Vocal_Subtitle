@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from scripts.compare_timeline import (
-    TimelineEvent,
-    EventComparison,
     ComparisonReport,
+    EventComparison,
+    TimelineEvent,
     _ass_time_to_seconds,
     match_events,
     parse_ass,
@@ -16,18 +16,21 @@ from scripts.compare_timeline import (
     report_to_dict,
 )
 
-
 # ── _ass_time_to_seconds ─────────────────────────────────────────────
 
-@pytest.mark.parametrize("input_str,expected", [
-    ("0:00:01.50", 1.5),       # 2 decimal places (centiseconds)
-    ("0:00:01.500", 1.5),      # 3 decimal places (milliseconds)
-    ("1:00:00.00", 3600.0),    # 1 hour
-    ("0:01:00.50", 60.5),      # 1 min
-    ("0:01:30.00", 90.0),      # 1.5 min
-    ("0:00:00.001", 0.001),    # 1ms
-    ("0:00:00.1", 0.1),        # 1 decimal place
-])
+
+@pytest.mark.parametrize(
+    "input_str,expected",
+    [
+        ("0:00:01.50", 1.5),  # 2 decimal places (centiseconds)
+        ("0:00:01.500", 1.5),  # 3 decimal places (milliseconds)
+        ("1:00:00.00", 3600.0),  # 1 hour
+        ("0:01:00.50", 60.5),  # 1 min
+        ("0:01:30.00", 90.0),  # 1.5 min
+        ("0:00:00.001", 0.001),  # 1ms
+        ("0:00:00.1", 0.1),  # 1 decimal place
+    ],
+)
 def test_ass_time_parsing(input_str, expected):
     result = _ass_time_to_seconds(input_str)
     assert result is not None
@@ -46,6 +49,7 @@ def test_ass_time_no_fractional():
 
 # ── parse_ass ────────────────────────────────────────────────────────
 
+
 def test_parse_ass_simple():
     content = """[Script Info]
 Title: test
@@ -54,7 +58,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 0,0:00:01.00,0:00:02.50,Default,,0,0,0,,Hello world
 Dialogue: 0,0:00:03.00,0:00:05.00,Default,,0,0,0,,Second line
 """
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".ass", delete=False, encoding="utf-8-sig") as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".ass", delete=False, encoding="utf-8-sig"
+    ) as f:
         f.write(content)
         path = Path(f.name)
 
@@ -75,7 +81,9 @@ Title: test
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\an8}Hello world
 """
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".ass", delete=False, encoding="utf-8-sig") as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".ass", delete=False, encoding="utf-8-sig"
+    ) as f:
         f.write(content)
         path = Path(f.name)
 
@@ -88,6 +96,7 @@ Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\an8}Hello world
 
 # ── parse_srt ────────────────────────────────────────────────────────
 
+
 def test_parse_srt_basic():
     content = """1
 00:00:01,000 --> 00:00:02,500
@@ -97,7 +106,9 @@ Hello world
 00:00:03,000 --> 00:00:05,000
 Second line
 """
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".srt", delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".srt", delete=False, encoding="utf-8"
+    ) as f:
         f.write(content)
         path = Path(f.name)
 
@@ -111,6 +122,7 @@ Second line
 
 
 # ── match_events ─────────────────────────────────────────────────────
+
 
 def test_match_events_same_count():
     auto = [
@@ -165,15 +177,21 @@ def test_match_events_no_match_too_distant():
 
 # ── report_to_dict ───────────────────────────────────────────────────
 
+
 def test_report_to_dict():
     comparisons = [
         EventComparison(
             index=1,
-            auto_start=1.0, auto_end=2.0,
-            gt_start=1.1, gt_end=2.1,
-            auto_text="hello", gt_text="hello",
-            start_error_ms=100.0, end_error_ms=100.0,
-            start_error_abs_ms=100.0, end_error_abs_ms=100.0,
+            auto_start=1.0,
+            auto_end=2.0,
+            gt_start=1.1,
+            gt_end=2.1,
+            auto_text="hello",
+            gt_text="hello",
+            start_error_ms=100.0,
+            end_error_ms=100.0,
+            start_error_abs_ms=100.0,
+            end_error_abs_ms=100.0,
         ),
     ]
     report = ComparisonReport(

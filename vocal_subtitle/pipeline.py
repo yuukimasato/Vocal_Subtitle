@@ -11,50 +11,49 @@
     → (可选) LLM 优化
 """
 
-import json
 import logging
-import tempfile
-import time
-from collections import defaultdict
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-import numpy as np
-
-from .asr.base import ASREngine, ASRInvalidResultError, TranscriptionSegment
-from .application.pipeline_result import PipelineStats
-from .application.pipeline_services import PipelineServices
 from .application.asr_path import PipelineASRPathMixin
-from .application.physical_path import PipelinePhysicalPathMixin
-from .application.stage_runner import PipelineStageMixin
-from .application.pipeline_runner import PipelineRunMixin
-from .application.streaming_runner import PipelineStreamingMixin
-from .diarization.pipeline_stage import PipelineDiarizationMixin
-from .mapping.pipeline_stage import PipelineMappingMixin
 from .application.chunk_runner import PipelineChunkMixin
+from .application.physical_path import PipelinePhysicalPathMixin
+from .application.pipeline_result import PipelineStats  # noqa: F401 (re-export)
+from .application.pipeline_runner import PipelineRunMixin
+from .application.pipeline_services import PipelineServices
 from .application.postprocess_runner import PipelinePostprocessMixin
-from .feedback.pipeline_stage import PipelineFeedbackMixin
-from .asr.router import ASRRouteDecision, ASRRouter
+from .application.stage_runner import PipelineStageMixin
+from .application.streaming_runner import PipelineStreamingMixin
+from .asr.base import ASREngine
+from .asr.router import ASRRouteDecision
 from .config import PipelineConfig
+from .diarization.pipeline_stage import PipelineDiarizationMixin
+from .feedback.pipeline_stage import PipelineFeedbackMixin
+from .mapping.pipeline_stage import PipelineMappingMixin
 from .mapping.subtitle_builder import SubtitleBuilder, SubtitleRule
-from .mapping.time_mapper import SubtitleEvent, TimeMapper
-from .merging.merge_strategy import MergeConfig, MergeStrategy
-from .pipeline_context import ASRFragment, NoiseProfile, PipelineContext
-from .separation.base import SeparationEngine, SeparationResult
-from .utils.audio_utils import AudioUtils
+from .mapping.time_mapper import TimeMapper
+from .merging.merge_strategy import MergeStrategy
+from .separation.base import SeparationEngine
 from .utils.cache_manager import CacheManager
-from .utils.file_hasher import compute_config_hash, compute_file_hash
-from .utils.gpu_detector import GPUDetector
-from .utils.logger import get_logger, setup_logging
+from .utils.logger import setup_logging
 from .utils.progress import ProgressManager
 from .utils.task_history import TaskHistoryManager
-from .vad.base import SpeechSegment, VADEngine
+from .vad.base import VADEngine
 
 logger = logging.getLogger(__name__)
 
 
-class Pipeline(PipelineASRPathMixin, PipelinePhysicalPathMixin, PipelineStageMixin, PipelineRunMixin, PipelineStreamingMixin, PipelineDiarizationMixin, PipelineMappingMixin, PipelineChunkMixin, PipelinePostprocessMixin, PipelineFeedbackMixin):
+class Pipeline(
+    PipelineASRPathMixin,
+    PipelinePhysicalPathMixin,
+    PipelineStageMixin,
+    PipelineRunMixin,
+    PipelineStreamingMixin,
+    PipelineDiarizationMixin,
+    PipelineMappingMixin,
+    PipelineChunkMixin,
+    PipelinePostprocessMixin,
+    PipelineFeedbackMixin,
+):
     """人声分离 + 字幕生成管道
 
     编排 5 个处理阶段，将原始音频转换为字幕文件。
@@ -69,7 +68,7 @@ class Pipeline(PipelineASRPathMixin, PipelinePhysicalPathMixin, PipelineStageMix
         )
     """
 
-    def __init__(self, config: Optional[PipelineConfig] = None):
+    def __init__(self, config: PipelineConfig | None = None):
         """
         Args:
             config: 管道配置，默认加载 default 配置
@@ -82,16 +81,16 @@ class Pipeline(PipelineASRPathMixin, PipelinePhysicalPathMixin, PipelineStageMix
         self._setup_logging()
 
         # 初始化各阶段组件
-        self._separation_engine: Optional[SeparationEngine] = None
-        self._vad_engine: Optional[VADEngine] = None
-        self._asr_engine: Optional[ASREngine] = None
-        self._merge_strategy: Optional[MergeStrategy] = None
-        self._time_mapper: Optional[TimeMapper] = None
-        self._subtitle_builder: Optional[SubtitleBuilder] = None
+        self._separation_engine: SeparationEngine | None = None
+        self._vad_engine: VADEngine | None = None
+        self._asr_engine: ASREngine | None = None
+        self._merge_strategy: MergeStrategy | None = None
+        self._time_mapper: TimeMapper | None = None
+        self._subtitle_builder: SubtitleBuilder | None = None
         self._embedding_engine = None  # 说话人嵌入引擎（惰性初始化）
-        self._cache: Optional[CacheManager] = None
-        self._history: Optional[TaskHistoryManager] = None
-        self._progress: Optional[ProgressManager] = None
+        self._cache: CacheManager | None = None
+        self._history: TaskHistoryManager | None = None
+        self._progress: ProgressManager | None = None
 
         # 当前任务的输入文件哈希（用于缓存键）
         self._file_hash: str = ""
@@ -99,15 +98,15 @@ class Pipeline(PipelineASRPathMixin, PipelinePhysicalPathMixin, PipelineStageMix
 
         # ASR 路径追踪
         self._requested_asr_path: str = ""
-        self._asr_route_decision: Optional[ASRRouteDecision] = None
-        self._asr_engines: Dict[str, ASREngine] = {}
+        self._asr_route_decision: ASRRouteDecision | None = None
+        self._asr_engines: dict[str, ASREngine] = {}
         self._global_evidence_attempted: bool = False
-        self._global_evidence_diagnostics: Dict[str, Any] = {}
+        self._global_evidence_diagnostics: dict[str, Any] = {}
 
         # [层1] 说话人身份主干（early_turns）：全局 pass 结果与骨架×turns
         # 跨度，由 run() 在分离之后填充；未启用时保持 None/空。
         self._early_turns_state = None
-        self._early_turn_spans: List[Any] = []
+        self._early_turn_spans: list[Any] = []
 
     # Direct full-audio ASR is intentionally bounded until the existing
     # GlobalTranscriber windowing path is promoted to the main route.
@@ -117,8 +116,6 @@ class Pipeline(PipelineASRPathMixin, PipelinePhysicalPathMixin, PipelineStageMix
     # ------------------------------------------------------------------
     # ASR path resolution (global vs. segmented)
     # ------------------------------------------------------------------
-
-
 
     def _prepare_task_language(self, audio, sample_rate: int) -> str | None:
         """Detect language once from the full task audio.
@@ -200,7 +197,7 @@ class Pipeline(PipelineASRPathMixin, PipelinePhysicalPathMixin, PipelineStageMix
     def _get_asr_engine_for(
         self,
         engine_name: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         cache: bool = True,
     ) -> ASREngine:
         """Compatibility adapter for the application dependency service."""
@@ -228,21 +225,14 @@ class Pipeline(PipelineASRPathMixin, PipelinePhysicalPathMixin, PipelineStageMix
         if self._history is None:
             self._history = self._services.get_history()
         return self._history
+
     # ------------------------------------------------------------------
     # 核心处理流程
     # ------------------------------------------------------------------
 
-
-
-
-
-
-
-
     # ------------------------------------------------------------------
     # 反馈学习通道 (Phase 5)
     # ------------------------------------------------------------------
-
 
     # ------------------------------------------------------------------
     # 字幕构建器

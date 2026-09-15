@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from ..asr.evidence import EvidenceDecision, EvidenceWord
 from .ir import GlobalTranscript, GlobalTranscriptSegment, GlobalWord
@@ -11,7 +11,7 @@ from .ir import GlobalTranscript, GlobalTranscriptSegment, GlobalWord
 def decisions_to_global_transcript(
     decisions: Sequence[EvidenceDecision],
     *,
-    audio_duration: Optional[float] = None,
+    audio_duration: float | None = None,
     backend: str = "evidence-decision",
 ) -> GlobalTranscript:
     """Materialize accepted decisions as one global segment per decision.
@@ -34,11 +34,13 @@ def decisions_to_global_transcript(
         if decision.decision == "drop":
             continue
         if not decision.final_text or decision.start is None or decision.end is None:
-            diagnostics["skipped_decisions"].append({
-                "index": index,
-                "candidate_ids": list(decision.candidate_ids),
-                "reason": "missing_final_text_or_time",
-            })
+            diagnostics["skipped_decisions"].append(
+                {
+                    "index": index,
+                    "candidate_ids": list(decision.candidate_ids),
+                    "reason": "missing_final_text_or_time",
+                }
+            )
             continue
 
         start = max(0.0, float(decision.start))
@@ -46,11 +48,13 @@ def decisions_to_global_transcript(
         if audio_duration is not None:
             end = min(end, float(audio_duration))
         if end <= start:
-            diagnostics["skipped_decisions"].append({
-                "index": index,
-                "candidate_ids": list(decision.candidate_ids),
-                "reason": "outside_audio_duration",
-            })
+            diagnostics["skipped_decisions"].append(
+                {
+                    "index": index,
+                    "candidate_ids": list(decision.candidate_ids),
+                    "reason": "outside_audio_duration",
+                }
+            )
             continue
 
         segment_id = f"decision-segment:{index:06d}"
@@ -120,11 +124,13 @@ def _materialize_words(
     items = [item for _, item in ordered_items]
     if not items:
         diagnostics["synthetic_word_count"] += 1
-        items = [EvidenceWord(
-            id=f"{decision_id}:text",
-            text=decision.final_text,
-            time_source="segment_boundary",
-        )]
+        items = [
+            EvidenceWord(
+                id=f"{decision_id}:text",
+                text=decision.final_text,
+                time_source="segment_boundary",
+            )
+        ]
 
     ranges: list[tuple[float, float, bool]] = []
     for word in items:
@@ -153,8 +159,11 @@ def _materialize_words(
             run_end += 1
         left = ranges[cursor - 1][1] if cursor else start
         right = next(
-            (ranges[pos][0] for pos in range(run_end, len(items))
-             if ranges[pos][2] or ranges[pos][1] > ranges[pos][0]),
+            (
+                ranges[pos][0]
+                for pos in range(run_end, len(items))
+                if ranges[pos][2] or ranges[pos][1] > ranges[pos][0]
+            ),
             end,
         )
         if right <= left:

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from .event_constraints import _clip_id, _span_end, _span_start
 from .time_mapper import SubtitleEvent
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -56,7 +60,9 @@ def validate_events(
             diagnostics["physical_clamped_count"] += 1
         if event.end <= event.start:
             diagnostics["removed_count"] += 1
-            diagnostics["reasons"]["empty_after_clamp"] = diagnostics["reasons"].get("empty_after_clamp", 0) + 1
+            diagnostics["reasons"]["empty_after_clamp"] = (
+                diagnostics["reasons"].get("empty_after_clamp", 0) + 1
+            )
             continue
         if getattr(event, "alignment_warning", None):
             diagnostics["warning_count"] += len(str(event.alignment_warning).split(";"))
@@ -81,6 +87,66 @@ def validate_events(
         event.index = index
     diagnostics["output_event_count"] = len(result)
     return FinalValidationResult(result, diagnostics)
+
+
+def enforce_non_overlap(
+    events: Sequence[SubtitleEvent],
+    *,
+    source: str = "final",
+) -> tuple[list[SubtitleEvent], dict[str, Any]]:
+    """最后防线：强制相邻事件零重叠。
+
+    finalize 的最终校验之后仍有可能改动边界（如显示 cue 能量对齐的
+    end 延长），此函数应放在所有改动之后、导出之前执行。触发即告警
+    ——重叠意味着上游某处又产生了倒置，需要回源头修复，而不是被
+    这里静默吞掉。
+
+    Returns:
+        (修复后的事件列表, 诊断信息)。诊断含 overlap_count 与逐条
+        repair 明细（索引、重叠毫秒数、文本预览）。
+    """
+    diagnostics: dict[str, Any] = {
+        "source": source,
+        "input_event_count": len(events),
+        "overlap_count": 0,
+        "repairs": [],
+    }
+    ordered: list[SubtitleEvent] = []
+    for event in sorted(events, key=lambda item: float(item.start)):
+        if ordered and event.start < ordered[-1].end:
+            previous = ordered[-1]
+            overlap_ms = round((previous.end - event.start) * 1000, 1)
+            diagnostics["overlap_count"] += 1
+            diagnostics["repairs"].append(
+                {
+                    "previous_index": previous.index,
+                    "event_index": event.index,
+                    "overlap_ms": overlap_ms,
+                    "previous_text": str(previous.text)[:30],
+                    "event_text": str(event.text)[:30],
+                }
+            )
+            logger.warning(
+                "[%s] 相邻字幕重叠 %.1fms：#%s %r end=%.3f → %.3f"
+                "（下一句 #%s %r start=%.3f）",
+                source,
+                overlap_ms,
+                previous.index,
+                str(previous.text)[:20],
+                previous.end,
+                event.start,
+                event.index,
+                str(event.text)[:20],
+                event.start,
+            )
+            previous.end = event.start
+            if previous.end <= previous.start:
+                ordered.pop()
+        ordered.append(event)
+    for new_index, event in enumerate(ordered, start=1):
+        event.index = new_index
+    diagnostics["output_event_count"] = len(ordered)
+    return ordered, diagnostics
 
 
 def _validate_event(
@@ -118,8 +184,16 @@ def _validate_event(
 
     source_ids = list(getattr(event, "source_word_ids", None) or [])
     words = list(getattr(event, "words", None) or [])
-    word_ids = {str(getattr(word, "id")) for word in words if getattr(word, "id", None) is not None}
-    if strict and word_ids and any(source_id not in word_ids for source_id in source_ids):
+    word_ids = {
+        str(getattr(word, "id"))
+        for word in words
+        if getattr(word, "id", None) is not None
+    }
+    if (
+        strict
+        and word_ids
+        and any(source_id not in word_ids for source_id in source_ids)
+    ):
         return "dangling_source_word"
     if strict and not str(getattr(event, "text", "")).strip():
         return "empty_text"

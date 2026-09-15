@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
 from .models import (
-    ASRAutoRoutingConfig,
-    ASREnginePairConfig,
-    ASRConfig,
     AcousticValidationConfig,
+    ASRAutoRoutingConfig,
+    ASRConfig,
+    ASREnginePairConfig,
     BoundaryRedundancyConfig,
     BoundaryRefinementConfig,
     CacheConfig,
     DegradationConfig,
     DiarizationConfig,
     EvidenceReviewConfig,
-    FFmpegVADConfig,
     FeedbackConfig,
+    FFmpegVADConfig,
     FusionConfig,
     GapHandlingConfig,
     GlobalASRConfig,
@@ -38,11 +38,11 @@ from .models import (
     VADConfig,
 )
 from .overrides import (
-    _set_nested_attr,
     apply_user_profile_overrides,
     merge_with_overrides,
 )
-from .validation import validate_config_consistency
+from .validation import validate_config_consistency  # noqa: F401 (re-export)
+
 
 class ConfigLoader:
     """YAML 配置文件加载与校验
@@ -51,7 +51,7 @@ class ConfigLoader:
     """
 
     # 内置场景模板路径
-    BUILTIN_PROFILES: Dict[str, str] = {
+    BUILTIN_PROFILES: dict[str, str] = {
         "default": "default.yaml",
         "podcast": "podcast.yaml",
         "education": "education.yaml",
@@ -61,14 +61,14 @@ class ConfigLoader:
         "tts_clean": "tts_clean.yaml",
     }
 
-    def __init__(self, configs_dir: Optional[Path] = None):
+    def __init__(self, configs_dir: Path | None = None):
         if configs_dir is None:
             # loader.py lives one package below vocal_subtitle; keep the
             # historical project-level configs directory as the default.
             configs_dir = Path(__file__).parent.parent.parent / "configs"
         self._configs_dir = Path(configs_dir)
 
-    def list_profiles(self) -> List[str]:
+    def list_profiles(self) -> list[str]:
         """列出可用的场景模板名称"""
         profiles = list(self.BUILTIN_PROFILES.keys())
         return profiles
@@ -105,7 +105,7 @@ class ConfigLoader:
         Returns:
             PipelineConfig 实例
         """
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             raw = yaml.safe_load(f)
 
         return ConfigLoader._parse_config(raw)
@@ -196,7 +196,9 @@ class ConfigLoader:
             window_overlap=global_asr_raw.get("window_overlap", 0.5),
             min_word_confidence=global_asr_raw.get("min_word_confidence", 0.0),
             hallucination_filter=global_asr_raw.get("hallucination_filter", True),
-            language_switch_threshold=global_asr_raw.get("language_switch_threshold", 0.7),
+            language_switch_threshold=global_asr_raw.get(
+                "language_switch_threshold", 0.7
+            ),
         )
         auto_routing = ASRAutoRoutingConfig(
             enabled=auto_routing_raw.get("enabled", True),
@@ -253,9 +255,7 @@ class ConfigLoader:
             whisper_cpp_model_path=asr_raw.get("whisper_cpp_model_path"),
             beam_size=asr_raw.get("beam_size", 5),
             word_timestamps=asr_raw.get("word_timestamps", True),
-            condition_on_previous_text=asr_raw.get(
-                "condition_on_previous_text", False
-            ),
+            condition_on_previous_text=asr_raw.get("condition_on_previous_text", False),
             vad_filter=asr_raw.get("vad_filter", False),
             language_mode=asr_raw.get("language_mode", "single"),
             global_asr=global_asr,
@@ -269,24 +269,38 @@ class ConfigLoader:
             authoritative_mode=review_raw.get("authoritative_mode", False),
             context_reasr_enabled=review_raw.get("context_reasr_enabled", False),
             context_reasr_min_level=review_raw.get("context_reasr_min_level", "medium"),
-            global_alternative_enabled=review_raw.get("global_alternative_enabled", False),
+            global_alternative_enabled=review_raw.get(
+                "global_alternative_enabled", False
+            ),
             qwen_enabled=review_raw.get("qwen_enabled", False),
             forced_aligner_enabled=review_raw.get("forced_aligner_enabled", False),
             sed_enabled=review_raw.get("sed_enabled", False),
             semantic_review_enabled=review_raw.get("semantic_review_enabled", False),
-            unresolved_keeps_candidate=review_raw.get("unresolved_keeps_candidate", True),
+            unresolved_keeps_candidate=review_raw.get(
+                "unresolved_keeps_candidate", True
+            ),
             require_multi_source_drop=review_raw.get("require_multi_source_drop", True),
             fallback_to_segmented=review_raw.get("fallback_to_segmented", True),
             local_recovery_enabled=review_raw.get("local_recovery_enabled", True),
-            local_recovery_max_attempts=review_raw.get("local_recovery_max_attempts", 3),
-            local_recovery_min_confidence=review_raw.get("local_recovery_min_confidence", 0.5),
-            local_recovery_context_seconds=review_raw.get("local_recovery_context_seconds", 0.5),
-            local_recovery_request_tolerance=review_raw.get("local_recovery_request_tolerance", 0.15),
+            local_recovery_max_attempts=review_raw.get(
+                "local_recovery_max_attempts", 3
+            ),
+            local_recovery_min_confidence=review_raw.get(
+                "local_recovery_min_confidence", 0.5
+            ),
+            local_recovery_context_seconds=review_raw.get(
+                "local_recovery_context_seconds", 0.5
+            ),
+            local_recovery_request_tolerance=review_raw.get(
+                "local_recovery_request_tolerance", 0.15
+            ),
             qwen_model_path=review_raw.get("qwen_model_path"),
             forced_aligner_model_path=review_raw.get("forced_aligner_model_path"),
             sed_model_path=review_raw.get("sed_model_path"),
             review_device=review_raw.get("review_device", "auto"),
-            allow_remote_model_download=review_raw.get("allow_remote_model_download", False),
+            allow_remote_model_download=review_raw.get(
+                "allow_remote_model_download", False
+            ),
             left_context=review_raw.get("left_context", 0.8),
             right_context=review_raw.get("right_context", 0.8),
             max_group_duration=review_raw.get("max_group_duration", 12.0),
@@ -296,29 +310,53 @@ class ConfigLoader:
             critical_threshold=review_raw.get("critical_threshold", 0.75),
             max_workers=review_raw.get("max_workers", 2),
             window_timeout_seconds=review_raw.get("window_timeout_seconds", 60.0),
-            review_policy_version=review_raw.get("review_policy_version", "review-policy-v1"),
-            cover_policy=review_raw.get("cover_policy", review_raw.get("review_policy", "")),
-            engine_policy=review_raw.get("engine_policy", review_raw.get("review_policy", "")),
+            review_policy_version=review_raw.get(
+                "review_policy_version", "review-policy-v1"
+            ),
+            cover_policy=review_raw.get(
+                "cover_policy", review_raw.get("review_policy", "")
+            ),
+            engine_policy=review_raw.get(
+                "engine_policy", review_raw.get("review_policy", "")
+            ),
             risk_policy_version=review_raw.get("risk_policy_version", "risk-policy-v1"),
-            decision_policy_version=review_raw.get("decision_policy_version", "decision-policy-v1"),
-            evidence_schema_version=review_raw.get("evidence_schema_version", "evidence-v1"),
-            golden_quality_gate_version=review_raw.get("golden_quality_gate_version", "golden-quality-v1"),
+            decision_policy_version=review_raw.get(
+                "decision_policy_version", "decision-policy-v1"
+            ),
+            evidence_schema_version=review_raw.get(
+                "evidence_schema_version", "evidence-v1"
+            ),
+            golden_quality_gate_version=review_raw.get(
+                "golden_quality_gate_version", "golden-quality-v1"
+            ),
         )
-        if asr.engine not in {"auto", "faster-whisper", "funasr", "qwen", "whisper-cpp"}:
+        if asr.engine not in {
+            "auto",
+            "faster-whisper",
+            "funasr",
+            "qwen",
+            "whisper-cpp",
+        }:
             raise ValueError(
-                "Unknown asr.engine '%s'; expected auto, faster-whisper, funasr, qwen or whisper-cpp"
-                % asr.engine
+                f"Unknown asr.engine '{asr.engine}'; "
+                "expected auto, faster-whisper, funasr, qwen or whisper-cpp"
             )
         if not 0.0 <= float(asr.auto_routing.zh_min_probability) <= 1.0:
-            raise ValueError("asr.auto_routing.zh_min_probability must be between 0 and 1")
+            raise ValueError(
+                "asr.auto_routing.zh_min_probability must be between 0 and 1"
+            )
         if not 0.0 <= float(asr.auto_routing.zh_required_window_ratio) <= 1.0:
             raise ValueError(
                 "asr.auto_routing.zh_required_window_ratio must be between 0 and 1"
             )
         if float(asr.auto_routing.language_probe_window_seconds) <= 0:
-            raise ValueError("asr.auto_routing.language_probe_window_seconds must be positive")
+            raise ValueError(
+                "asr.auto_routing.language_probe_window_seconds must be positive"
+            )
         if int(asr.auto_routing.language_probe_max_windows) < 2:
-            raise ValueError("asr.auto_routing.language_probe_max_windows must be at least 2")
+            raise ValueError(
+                "asr.auto_routing.language_probe_max_windows must be at least 2"
+            )
         if asr.auto_routing.uncertain_window_policy != "faster-whisper":
             raise ValueError(
                 "asr.auto_routing.uncertain_window_policy must be faster-whisper"
@@ -377,19 +415,24 @@ class ConfigLoader:
             stationary=noise_raw.get("stationary", False),
             engine=noise_raw.get("engine", "spectral_gate"),
             spectral_noise_reduction_db=noise_raw.get(
-                "spectral_noise_reduction_db", 12.0,
+                "spectral_noise_reduction_db",
+                12.0,
             ),
             spectral_noise_estimation_frames=noise_raw.get(
-                "spectral_noise_estimation_frames", 10,
+                "spectral_noise_estimation_frames",
+                10,
             ),
             burst_noise_protection=noise_raw.get(
-                "burst_noise_protection", True,
+                "burst_noise_protection",
+                True,
             ),
             burst_noise_threshold_db=noise_raw.get(
-                "burst_noise_threshold_db", 15.0,
+                "burst_noise_threshold_db",
+                15.0,
             ),
             burst_noise_max_duration_ms=noise_raw.get(
-                "burst_noise_max_duration_ms", 200,
+                "burst_noise_max_duration_ms",
+                200,
             ),
         )
 
@@ -489,12 +532,12 @@ class ConfigLoader:
             hard_split_min_gap=merge_dec_raw.get("hard_split_min_gap", 1.20),
             max_combined_duration=merge_dec_raw.get("max_combined_duration", 5.0),
             min_fragment_duration=merge_dec_raw.get("min_fragment_duration", 0.15),
-            local_nlp_gap_range=tuple(merge_dec_raw.get(
-                "local_nlp_gap_range", [0.15, 0.60]
-            )),
-            cloud_llm_gap_range=tuple(merge_dec_raw.get(
-                "cloud_llm_gap_range", [0.60, 1.20]
-            )),
+            local_nlp_gap_range=tuple(
+                merge_dec_raw.get("local_nlp_gap_range", [0.15, 0.60])
+            ),
+            cloud_llm_gap_range=tuple(
+                merge_dec_raw.get("cloud_llm_gap_range", [0.60, 1.20])
+            ),
             llm_tier=merge_dec_raw.get("llm_tier", "cascading"),
             llm_model=merge_dec_raw.get("llm_model", "deepseek-v4-pro"),
             llm_base_url=merge_dec_raw.get("llm_base_url"),
@@ -521,14 +564,21 @@ class ConfigLoader:
             unified_ffmpeg_pass=acoustic_raw.get("unified_ffmpeg_pass", True),
             skeleton_mode=acoustic_raw.get("skeleton_mode", True),
             reproject_grouped_windows=acoustic_raw.get(
-                "reproject_grouped_windows", True,
+                "reproject_grouped_windows",
+                True,
             ),
             member_split_min_gap=acoustic_raw.get("member_split_min_gap", 0.3),
-            member_split_max_duration=acoustic_raw.get("member_split_max_duration", 5.0),
-            skeleton_adaptive_noise_db=acoustic_raw.get("skeleton_adaptive_noise_db", True),
+            member_split_max_duration=acoustic_raw.get(
+                "member_split_max_duration", 5.0
+            ),
+            skeleton_adaptive_noise_db=acoustic_raw.get(
+                "skeleton_adaptive_noise_db", True
+            ),
             skeleton_priority=acoustic_raw.get("skeleton_priority", False),
             skeleton_noise_margin_db=acoustic_raw.get("skeleton_noise_margin_db", 10.0),
-            export_skeleton_segments=acoustic_raw.get("export_skeleton_segments", False),
+            export_skeleton_segments=acoustic_raw.get(
+                "export_skeleton_segments", False
+            ),
             export_skeleton_dir=acoustic_raw.get("export_skeleton_dir", ""),
             allow_end_shorten=acoustic_raw.get("allow_end_shorten", True),
             allow_start_pull_earlier=acoustic_raw.get("allow_start_pull_earlier", True),
@@ -538,13 +588,16 @@ class ConfigLoader:
             # arbitration_evidence_regions 是运行期注入字段，不从 yaml 加载。
             timeline_arbitration=acoustic_raw.get("timeline_arbitration", False),
             arbitration_r1_min_overlap_chars=acoustic_raw.get(
-                "arbitration_r1_min_overlap_chars", 6,
+                "arbitration_r1_min_overlap_chars",
+                6,
             ),
             arbitration_r1_min_similarity=acoustic_raw.get(
-                "arbitration_r1_min_similarity", 0.85,
+                "arbitration_r1_min_similarity",
+                0.85,
             ),
             arbitration_r2_local_noise=acoustic_raw.get(
-                "arbitration_r2_local_noise", True,
+                "arbitration_r2_local_noise",
+                True,
             ),
         )
 
@@ -556,7 +609,9 @@ class ConfigLoader:
         boundary_redundancy = BoundaryRedundancyConfig(
             enabled=boundary_red_raw.get("enabled", True),
             min_gap_trigger=confidence_raw.get("min_gap_trigger", 0.05),
-            max_energy_slope_trigger=confidence_raw.get("max_energy_slope_trigger", 3.0),
+            max_energy_slope_trigger=confidence_raw.get(
+                "max_energy_slope_trigger", 3.0
+            ),
             confidence_threshold=confidence_raw.get("confidence_threshold", 0.5),
             base_overlap_ms=window_raw.get("base_overlap_ms", 500),
             fast_speech_wps=window_raw.get("fast_speech_wps", 4.0),
@@ -578,14 +633,20 @@ class ConfigLoader:
         feedback_raw = raw.get("feedback", {})
         feedback = FeedbackConfig(
             enabled=feedback_raw.get("enabled", True),
-            user_profile_dir=feedback_raw.get("user_profile_dir", "~/.vocal_subtitle/profiles"),
+            user_profile_dir=feedback_raw.get(
+                "user_profile_dir", "~/.vocal_subtitle/profiles"
+            ),
             active_profile=feedback_raw.get("active_profile", "user_default"),
             apply_overrides_on_run=feedback_raw.get("apply_overrides_on_run", False),
             alignment_min_iou=feedback_raw.get("alignment_min_iou", 0.3),
             alignment_min_coverage=feedback_raw.get("alignment_min_coverage", 0.60),
             alignment_text_weight=feedback_raw.get("alignment_text_weight", 0.30),
-            alignment_semantic_weight=feedback_raw.get("alignment_semantic_weight", 0.35),
-            alignment_semantic_enabled=feedback_raw.get("alignment_semantic_enabled", True),
+            alignment_semantic_weight=feedback_raw.get(
+                "alignment_semantic_weight", 0.35
+            ),
+            alignment_semantic_enabled=feedback_raw.get(
+                "alignment_semantic_enabled", True
+            ),
             min_samples_to_learn=feedback_raw.get("min_samples_to_learn", 3),
             base_learn_rate=feedback_raw.get("base_learn_rate", 0.10),
             max_learn_rate=feedback_raw.get("max_learn_rate", 0.35),
@@ -594,22 +655,36 @@ class ConfigLoader:
             decay_medium_term_days=feedback_raw.get("decay_medium_term_days", 90),
             decay_short_term_days=feedback_raw.get("decay_short_term_days", 60),
             fingerprint_enabled=feedback_raw.get("fingerprint_enabled", True),
-            fingerprint_distance_method=feedback_raw.get("fingerprint_distance_method", "mahalanobis"),
+            fingerprint_distance_method=feedback_raw.get(
+                "fingerprint_distance_method", "mahalanobis"
+            ),
             fingerprint_knn_k=feedback_raw.get("fingerprint_knn_k", 3),
-            fingerprint_min_absolute_similarity=feedback_raw.get("fingerprint_min_absolute_similarity", 0.70),
-            fingerprint_relative_margin=feedback_raw.get("fingerprint_relative_margin", 0.08),
+            fingerprint_min_absolute_similarity=feedback_raw.get(
+                "fingerprint_min_absolute_similarity", 0.70
+            ),
+            fingerprint_relative_margin=feedback_raw.get(
+                "fingerprint_relative_margin", 0.08
+            ),
             shadow_mode_enabled=feedback_raw.get("shadow_mode_enabled", False),
             shadow_min_runs=feedback_raw.get("shadow_min_runs", 10),
             shadow_upgrade_threshold=feedback_raw.get("shadow_upgrade_threshold", 0.05),
             shadow_max_duration_days=feedback_raw.get("shadow_max_duration_days", 14),
-            auto_rollback_on_quality_drop=feedback_raw.get("auto_rollback_on_quality_drop", True),
+            auto_rollback_on_quality_drop=feedback_raw.get(
+                "auto_rollback_on_quality_drop", True
+            ),
             quality_drop_threshold=feedback_raw.get("quality_drop_threshold", 0.3),
-            oscillation_detection_window=feedback_raw.get("oscillation_detection_window", 5),
+            oscillation_detection_window=feedback_raw.get(
+                "oscillation_detection_window", 5
+            ),
             few_shot_max_examples=feedback_raw.get("few_shot_max_examples", 3),
             few_shot_max_cache=feedback_raw.get("few_shot_max_cache", 20),
-            few_shot_min_weight_to_inject=feedback_raw.get("few_shot_min_weight_to_inject", 0.3),
+            few_shot_min_weight_to_inject=feedback_raw.get(
+                "few_shot_min_weight_to_inject", 0.3
+            ),
             few_shot_enabled=feedback_raw.get("few_shot_enabled", True),
-            journal_sink_retention=feedback_raw.get("journal_sink_retention", "archive"),
+            journal_sink_retention=feedback_raw.get(
+                "journal_sink_retention", "archive"
+            ),
             journal_sink_ttl_days=feedback_raw.get("journal_sink_ttl_days", 30),
         )
 
@@ -640,13 +715,15 @@ class ConfigLoader:
             feedback=feedback,
         )
 
-    def merge_with_overrides(self, config: PipelineConfig, **overrides) -> PipelineConfig:
+    def merge_with_overrides(
+        self, config: PipelineConfig, **overrides
+    ) -> PipelineConfig:
         return merge_with_overrides(config, **overrides)
 
     @staticmethod
     def apply_user_profile_overrides(
         config: PipelineConfig,
-        user_overrides: Dict[str, Any],
+        user_overrides: dict[str, Any],
     ) -> PipelineConfig:
         """将用户配置文件的覆盖参数合并到管道配置
 

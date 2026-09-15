@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -17,19 +16,24 @@ logger = logging.getLogger(__name__)
 class PipelinePostprocessMixin:
     def _run_llm_merge(
         self,
-        events: List[SubtitleEvent],
-        audio: Optional[np.ndarray],
+        events: list[SubtitleEvent],
+        audio: np.ndarray | None,
         sample_rate: int,
         stats: PipelineStats,
-    ) -> List[SubtitleEvent]:
+    ) -> list[SubtitleEvent]:
         """LLM 语义合并（方案五）—— 改变事件边界，必须在声学校验之前执行"""
         try:
             from ..merging.llm_merge_engine import (
                 LLMMergeEngine,
+            )
+            from ..merging.llm_merge_engine import (
                 MergeDecisionConfig as LLMMergeDecisionConfig,
             )
+
             self._progress.start_stage(
-                "llm_merge", description="LLM 语义合并", total_items=1,
+                "llm_merge",
+                description="LLM 语义合并",
+                total_items=1,
             )
             llm_merge_config = LLMMergeDecisionConfig(
                 fast_merge_max_gap=self.config.merge_decision.fast_merge_max_gap,
@@ -55,23 +59,28 @@ class PipelinePostprocessMixin:
                 if i < len(events) - 1:
                     gap = events[i + 1].start - evt.end
                     gap_is_silent = gap > 0.05
-                fragments.append({
-                    "id": i + 1,
-                    "start": evt.start,
-                    "end": evt.end,
-                    "text": evt.text,
-                    # Use the stable numeric identity as the merge key. The
-                    # display label may be changed by role labeling and must
-                    # not decide whether acoustic speaker boundaries merge.
-                    "speaker": (
-                        str(evt.speaker_id)
-                        if evt.speaker_id is not None else "unknown"
-                    ),
-                    "physical_bin_id": getattr(evt, "physical_bin_id", None),
-                    "physical_spans": list(getattr(evt, "physical_spans", []) or []),
-                    "gap_to_next_sec": round(gap, 3) if gap is not None else None,
-                    "gap_is_silent": gap_is_silent,
-                })
+                fragments.append(
+                    {
+                        "id": i + 1,
+                        "start": evt.start,
+                        "end": evt.end,
+                        "text": evt.text,
+                        # Use the stable numeric identity as the merge key. The
+                        # display label may be changed by role labeling and must
+                        # not decide whether acoustic speaker boundaries merge.
+                        "speaker": (
+                            str(evt.speaker_id)
+                            if evt.speaker_id is not None
+                            else "unknown"
+                        ),
+                        "physical_bin_id": getattr(evt, "physical_bin_id", None),
+                        "physical_spans": list(
+                            getattr(evt, "physical_spans", []) or []
+                        ),
+                        "gap_to_next_sec": round(gap, 3) if gap is not None else None,
+                        "gap_is_silent": gap_is_silent,
+                    }
+                )
 
             merged_fragments = merge_engine.merge(
                 fragments,
@@ -99,12 +108,16 @@ class PipelinePostprocessMixin:
                         base.end = frag.get("end", base.end)
                         base.text = frag.get("text", base.text)
                         base.original_text = base.text
-                        base.words = [word for member in members for word in member.words]
-                        base.source_word_ids = list(dict.fromkeys(
-                            word_id
-                            for member in members
-                            for word_id in member.source_word_ids
-                        ))
+                        base.words = [
+                            word for member in members for word in member.words
+                        ]
+                        base.source_word_ids = list(
+                            dict.fromkeys(
+                                word_id
+                                for member in members
+                                for word_id in member.source_word_ids
+                            )
+                        )
                         physical_starts = [
                             member.physical_start
                             for member in members
@@ -123,7 +136,8 @@ class PipelinePostprocessMixin:
                 if new_events:
                     logger.info(
                         "LLM merge: %d → %d events",
-                        len(events), len(new_events),
+                        len(events),
+                        len(new_events),
                     )
                     events = new_events
                     stats.subtitle_count = len(events)
@@ -134,19 +148,20 @@ class PipelinePostprocessMixin:
             stats.stage_timings["llm_merge"] = self._progress.finish_stage()
         except Exception as e:
             logger.warning(
-                "LLM merge failed, continuing with unmerged events: %s", e,
+                "LLM merge failed, continuing with unmerged events: %s",
+                e,
             )
         return events
 
     def _post_process_events(
         self,
-        events: List[SubtitleEvent],
+        events: list[SubtitleEvent],
         vocals_path: Path,
         audio: np.ndarray,
         sample_rate: int,
         stats: PipelineStats,
-        ffmpeg_unified_result: Optional[Dict] = None,
-    ) -> List[SubtitleEvent]:
+        ffmpeg_unified_result: dict | None = None,
+    ) -> list[SubtitleEvent]:
         """后处理管线（三种路径共用）
 
         执行顺序经过精心设计：
@@ -180,26 +195,29 @@ class PipelinePostprocessMixin:
                 )
 
                 _skeleton = resolve_speech_skeleton(
-                    vocals_path, ffmpeg_unified_result,
-                    self.config.acoustic_validation, audio, sample_rate,
+                    vocals_path,
+                    ffmpeg_unified_result,
+                    self.config.acoustic_validation,
+                    audio,
+                    sample_rate,
                 )
                 if _skeleton:
                     _before = len(events)
                     events = absorb_silent_fragments(events, _skeleton)
                     if len(events) < _before:
                         stats.subtitle_count = len(events)
-                        stats.quality_diagnostics[
-                            "silent_fragments_absorbed"
-                        ] = _before - len(events)
+                        stats.quality_diagnostics["silent_fragments_absorbed"] = (
+                            _before - len(events)
+                        )
                 # 词级时间戳能量重锚定：finalize 的显示拆行以词起点为准，
                 # 句内停顿处偏早的词起点会把静音吞进下一行行首。
                 reanchored = reanchor_word_timestamps(
-                    events, audio, sample_rate,
+                    events,
+                    audio,
+                    sample_rate,
                 )
                 if reanchored:
-                    stats.quality_diagnostics[
-                        "words_re_anchored"
-                    ] = reanchored
+                    stats.quality_diagnostics["words_re_anchored"] = reanchored
             except Exception as e:
                 logger.warning("Silent fragment absorption failed: %s", e)
 
@@ -220,7 +238,9 @@ class PipelinePostprocessMixin:
                     from ..diarization.early_turns import assign_event_speakers
 
                     diar_cfg = self.config.diarization
-                    word_split_cfg = bool(getattr(diar_cfg, "word_split_on_turn", False))
+                    word_split_cfg = bool(
+                        getattr(diar_cfg, "word_split_on_turn", False)
+                    )
                     # 单说话人短路：归一后 turns ≤1 个说话人时跳过切分与
                     # 多说话人路径（TTS/口播素材零额外开销）。
                     single = (
@@ -232,7 +252,9 @@ class PipelinePostprocessMixin:
                         early_state.turns,
                         word_split=word_split_cfg and not single,
                         min_part_duration=getattr(
-                            diar_cfg, "min_local_segment_seconds", 0.25,
+                            diar_cfg,
+                            "min_local_segment_seconds",
+                            0.25,
                         ),
                         language=self._resolved_language_or_config(),
                         model_ref=early_state.model_ref,
@@ -246,36 +268,39 @@ class PipelinePostprocessMixin:
                     )
                     stats.speaker_conflict_count = early_diag.get("conflict_count", 0)
                     stats.unknown_speaker_count = early_diag.get("unknown_count", 0)
-                    stats.quality_diagnostics.update({
-                        "embedding_model": "",
-                        "embedding_status": "skipped",
-                        "embedding_silhouette": None,
-                        "global_model": early_state.model_ref,
-                        "global_status": early_state.diagnostics.get(
-                            "global_status", "ok"
-                        ),
-                        "global_turn_count": len(early_state.turns),
-                        "local_split_count": early_diag.get("local_split_count", 0),
-                        "fallback_split_count": early_diag.get(
-                            "fallback_split_count", 0
-                        ),
-                        "overlapped_count": early_diag.get("overlapped_count", 0),
-                        "conflict_count": 0,
-                        "unknown_count": early_diag.get("unknown_count", 0),
-                        "expected_speakers": early_state.diagnostics.get(
-                            "expected_speakers"
-                        ),
-                        "early_turns_status": "ok",
-                        "early_turn_word_split": word_split_cfg and not single,
-                        "single_speaker_shortcut": single,
-                        # D5:事件级聚类退役为校验诊断，不再是标签来源
-                        "event_clustering": "retired_by_early_turns",
-                    })
+                    stats.quality_diagnostics.update(
+                        {
+                            "embedding_model": "",
+                            "embedding_status": "skipped",
+                            "embedding_silhouette": None,
+                            "global_model": early_state.model_ref,
+                            "global_status": early_state.diagnostics.get(
+                                "global_status", "ok"
+                            ),
+                            "global_turn_count": len(early_state.turns),
+                            "local_split_count": early_diag.get("local_split_count", 0),
+                            "fallback_split_count": early_diag.get(
+                                "fallback_split_count", 0
+                            ),
+                            "overlapped_count": early_diag.get("overlapped_count", 0),
+                            "conflict_count": 0,
+                            "unknown_count": early_diag.get("unknown_count", 0),
+                            "expected_speakers": early_state.diagnostics.get(
+                                "expected_speakers"
+                            ),
+                            "early_turns_status": "ok",
+                            "early_turn_word_split": word_split_cfg and not single,
+                            "single_speaker_shortcut": single,
+                            # D5:事件级聚类退役为校验诊断，不再是标签来源
+                            "event_clustering": "retired_by_early_turns",
+                        }
+                    )
                     early_done = True
                 except Exception as e:
                     logger.warning(
                         "Early turns labeling failed; falling back to "
-                        "event-level fusion: %s", e,
+                        "event-level fusion: %s",
+                        e,
                     )
                     stats.quality_diagnostics["early_turns_fallback_reason"] = str(e)
             if not early_done:
@@ -302,7 +327,9 @@ class PipelinePostprocessMixin:
                     stats.unknown_speaker_count = fusion.unknown_count
                     stats.quality_diagnostics.update(fusion.diagnostics)
                 except Exception as e:
-                    logger.warning("Speaker fusion failed; preserving unknown speakers: %s", e)
+                    logger.warning(
+                        "Speaker fusion failed; preserving unknown speakers: %s", e
+                    )
                     stats.diarization_backend = "unknown"
                     stats.diarization_status = "failed"
                     stats.quality_diagnostics["speaker_fusion_error"] = str(e)
@@ -317,6 +344,7 @@ class PipelinePostprocessMixin:
         # ---- 1. 帧级无缝衔接（方案六） ----
         try:
             from ..merging.llm_merge_engine import apply_frame_seamless_stitching
+
             stitch_gap = self.config.subtitle.max_stitch_gap
             events = apply_frame_seamless_stitching(events, max_stitch_gap=stitch_gap)
         except Exception as e:
@@ -329,9 +357,7 @@ class PipelinePostprocessMixin:
             for event in events
             if getattr(event, "physical_bin_id", None) is not None
         }
-        skeleton_constrained = bool(
-            (ffmpeg_unified_result or {}).get("skeleton")
-        )
+        skeleton_constrained = bool((ffmpeg_unified_result or {}).get("skeleton"))
         if (
             self.config.merge_decision.llm_tier != "rule_only"
             and len(events) > 1
@@ -354,8 +380,11 @@ class PipelinePostprocessMixin:
         if self.config.acoustic_validation.enabled:
             try:
                 from ..acoustic import AcousticValidator
+
                 self._progress.start_stage(
-                    "acoustic", description="声学校验", total_items=1,
+                    "acoustic",
+                    description="声学校验",
+                    total_items=1,
                 )
                 validator = AcousticValidator(self.config.acoustic_validation)
                 events, validation_report = validator.validate(
@@ -368,7 +397,8 @@ class PipelinePostprocessMixin:
                 health = validation_report.get("health_score")
                 if health is not None:
                     logger.info(
-                        "Acoustic validation health: %.1f%%", health,
+                        "Acoustic validation health: %.1f%%",
+                        health,
                     )
                     self._progress.update_stage(
                         1, extra={"detail": f"声学健康度: {health:.1f}%"}
@@ -383,6 +413,7 @@ class PipelinePostprocessMixin:
         # 重新引入重叠重复。此处做全量扫描确保输出无重复。
         try:
             from ..mapping.time_mapper import TimeMapper
+
             events = TimeMapper._deduplicate_overlapping(events)
             stats.subtitle_count = len(events)
         except Exception as e:

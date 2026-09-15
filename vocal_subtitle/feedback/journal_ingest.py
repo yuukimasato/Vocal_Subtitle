@@ -15,9 +15,10 @@ import logging
 import math
 import re
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 from ..mapping.time_mapper import SubtitleEvent
 from .aligner import parse_subtitle_file
@@ -40,7 +41,7 @@ class JournalIngestError(ValueError):
     """日志文件解析或校验失败"""
 
 
-def event_session_id(record: Dict[str, Any]) -> Optional[str]:
+def event_session_id(record: dict[str, Any]) -> str | None:
     """事件/头部的会话 ID：session_id 为契约字段，session 为早期字段名（双读）"""
     value = record.get("session_id") or record.get("session")
     return str(value) if value else None
@@ -51,8 +52,8 @@ class JournalFile:
     """一份 NDJSON 日志的解析结果"""
 
     path: Path
-    header: Optional[Dict[str, Any]]
-    events: List[Dict[str, Any]]
+    header: dict[str, Any] | None
+    events: list[dict[str, Any]]
     skipped: int = 0  # 被拒绝的行数
 
 
@@ -60,10 +61,10 @@ class JournalFile:
 class ReplayResult:
     """重放还原结果"""
 
-    final_events: List[SubtitleEvent]
-    matched_ids: int          # 日志 id 与原始事件成功对应的数量
-    unmatched_ids: int        # 未能对应（新增行等）
-    exact: bool               # 重放是否「精确」（全部修改行都能对应回原始事件）
+    final_events: list[SubtitleEvent]
+    matched_ids: int  # 日志 id 与原始事件成功对应的数量
+    unmatched_ids: int  # 未能对应（新增行等）
+    exact: bool  # 重放是否「精确」（全部修改行都能对应回原始事件）
 
 
 @dataclass
@@ -72,20 +73,24 @@ class JournalStats:
 
     event_count: int = 0
     session_count: int = 0
-    actors: Dict[str, int] = field(default_factory=dict)
-    commands: Dict[str, int] = field(default_factory=dict)
-    structural: Dict[str, int] = field(default_factory=dict)  # remove/split/merge/insert 计数
-    start_delta_median: Optional[float] = None
-    start_delta_mean: Optional[float] = None
-    end_delta_median: Optional[float] = None
-    end_delta_mean: Optional[float] = None
-    gap_after_median: Optional[float] = None
-    cps_p90: Optional[float] = None
-    boundary_snap_rate: Optional[float] = None  # 终点微调贴近最近语音边界的比例
-    provenance_coverage: float = 0.0            # 带 manifest 出处的事件占比
-    by_scenario: Dict[str, "JournalStats"] = field(default_factory=dict)  # 按场景分层（D27）
+    actors: dict[str, int] = field(default_factory=dict)
+    commands: dict[str, int] = field(default_factory=dict)
+    structural: dict[str, int] = field(
+        default_factory=dict
+    )  # remove/split/merge/insert 计数
+    start_delta_median: float | None = None
+    start_delta_mean: float | None = None
+    end_delta_median: float | None = None
+    end_delta_mean: float | None = None
+    gap_after_median: float | None = None
+    cps_p90: float | None = None
+    boundary_snap_rate: float | None = None  # 终点微调贴近最近语音边界的比例
+    provenance_coverage: float = 0.0  # 带 manifest 出处的事件占比
+    by_scenario: dict[str, JournalStats] = field(
+        default_factory=dict
+    )  # 按场景分层（D27）
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "event_count": self.event_count,
             "session_count": self.session_count,
@@ -100,7 +105,9 @@ class JournalStats:
             "cps_p90": self.cps_p90,
             "boundary_snap_rate": self.boundary_snap_rate,
             "provenance_coverage": self.provenance_coverage,
-            "by_scenario": {name: sub.to_dict() for name, sub in self.by_scenario.items()},
+            "by_scenario": {
+                name: sub.to_dict() for name, sub in self.by_scenario.items()
+            },
         }
 
 
@@ -108,14 +115,17 @@ class JournalStats:
 # 解析与校验
 # ---------------------------------------------------------------------------
 
-def parse_journal_text(text: str, source: Path | None = None) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], int]:
+
+def parse_journal_text(
+    text: str, source: Path | None = None
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], int]:
     """解析 NDJSON 文本 → (header, events, rejected_lines)。
 
     契约：首行 session header，其后每行一个事件；只追加可选字段，
     未知字段保留原样（向前兼容）。
     """
-    header: Optional[Dict[str, Any]] = None
-    events: List[Dict[str, Any]] = []
+    header: dict[str, Any] | None = None
+    events: list[dict[str, Any]] = []
     rejected = 0
     for line_no, line in enumerate(text.splitlines(), 1):
         line = line.strip()
@@ -124,7 +134,9 @@ def parse_journal_text(text: str, source: Path | None = None) -> Tuple[Optional[
         try:
             record = json.loads(line)
         except json.JSONDecodeError as exc:
-            logger.warning("Journal %s line %d is not valid JSON: %s", source or "?", line_no, exc)
+            logger.warning(
+                "Journal %s line %d is not valid JSON: %s", source or "?", line_no, exc
+            )
             rejected += 1
             continue
         if not isinstance(record, dict) or record.get("schema") != JOURNAL_SCHEMA:
@@ -133,31 +145,40 @@ def parse_journal_text(text: str, source: Path | None = None) -> Tuple[Optional[
         if record.get("type") == "header":
             header = record
             continue
-        if record.get("type") == "event" and _EVENT_REQUIRED_FIELDS <= set(record) and event_session_id(record):
+        if (
+            record.get("type") == "event"
+            and _EVENT_REQUIRED_FIELDS <= set(record)
+            and event_session_id(record)
+        ):
             events.append(record)
             continue
         rejected += 1
     return header, events, rejected
 
 
-def load_journal_files(paths: Iterable[Path | str]) -> List[JournalFile]:
+def load_journal_files(paths: Iterable[Path | str]) -> list[JournalFile]:
     """读取并校验多份日志文件；跨文件按 (session_id, seq) 去重（重复导出幂等）。"""
-    files: List[JournalFile] = []
-    seen: set[Tuple[str, int]] = set()
+    files: list[JournalFile] = []
+    seen: set[tuple[str, int]] = set()
     for path in paths:
         path = Path(path)
         if not path.exists():
             raise JournalIngestError(f"Journal file not found: {path}")
         text = path.read_text(encoding="utf-8")
         header, events, rejected = parse_journal_text(text, source=path)
-        deduped: List[Dict[str, Any]] = []
+        deduped: list[dict[str, Any]] = []
         for event in events:
-            key = (event_session_id(event) or "unknown-session", int(event.get("seq", -1)))
+            key = (
+                event_session_id(event) or "unknown-session",
+                int(event.get("seq", -1)),
+            )
             if key in seen:
                 continue
             seen.add(key)
             deduped.append(event)
-        files.append(JournalFile(path=path, header=header, events=deduped, skipped=rejected))
+        files.append(
+            JournalFile(path=path, header=header, events=deduped, skipped=rejected)
+        )
     return files
 
 
@@ -165,14 +186,17 @@ def load_journal_files(paths: Iterable[Path | str]) -> List[JournalFile]:
 # 重放（原始字幕 + 日志 = 最终字幕）
 # ---------------------------------------------------------------------------
 
-def _cue_state_from_diff(diff: List[Dict[str, Any]]) -> None:
+
+def _cue_state_from_diff(diff: list[dict[str, Any]]) -> None:
     """规范化 diff 条目（就地）：确保 modify.changes 存在"""
     for entry in diff:
         if entry.get("op") == "modify" and not isinstance(entry.get("changes"), list):
             entry["changes"] = []
 
 
-def replay_journal(original_events: List[SubtitleEvent], events: List[Dict[str, Any]]) -> ReplayResult:
+def replay_journal(
+    original_events: list[SubtitleEvent], events: list[dict[str, Any]]
+) -> ReplayResult:
     """按事件序重放日志，还原最终字幕。
 
     id ↔ 原始事件对应：编辑器加载字幕时 cue 初值即原事件；首个 modify 的 before 值
@@ -180,12 +204,12 @@ def replay_journal(original_events: List[SubtitleEvent], events: List[Dict[str, 
     新增行按快照插入，删除行剔除。返回按 (start, end) 稳定排序的事件列表。
     """
     # id → 最终状态与首次出现时的原值（before）
-    final_state: Dict[str, Dict[str, Any]] = {}
-    initial_state: Dict[str, Dict[str, Any]] = {}
-    first_change_index: Dict[str, int] = {}
+    final_state: dict[str, dict[str, Any]] = {}
+    initial_state: dict[str, dict[str, Any]] = {}
+    first_change_index: dict[str, int] = {}
     removed: set[str] = set()
-    added: Dict[str, Dict[str, Any]] = {}
-    add_order: List[str] = []
+    added: dict[str, dict[str, Any]] = {}
+    add_order: list[str] = []
 
     for seq_no, event in enumerate(events):
         diff = event.get("diff") or []
@@ -221,7 +245,7 @@ def replay_journal(original_events: List[SubtitleEvent], events: List[Dict[str, 
                     add_order.append(cue_id)
 
     # id → 原始事件：按初值最近匹配（start 优先，其次 end，最后文本），容差内唯一占用
-    by_id: Dict[str, SubtitleEvent] = {}
+    by_id: dict[str, SubtitleEvent] = {}
     taken: set[int] = set()
 
     def _nearest(key_fn, value):
@@ -237,7 +261,9 @@ def replay_journal(original_events: List[SubtitleEvent], events: List[Dict[str, 
         return best_index
 
     candidates = [
-        (cue_id, initial) for cue_id, initial in initial_state.items() if cue_id not in added
+        (cue_id, initial)
+        for cue_id, initial in initial_state.items()
+        if cue_id not in added
     ]
     # Pass 1: 有初值 start 的 id 按 start 匹配
     for cue_id, initial in sorted(
@@ -251,8 +277,11 @@ def replay_journal(original_events: List[SubtitleEvent], events: List[Dict[str, 
         by_id[cue_id] = original_events[index]
     # Pass 2: 只有初值 end 的 id（首改只动 end，如合并句尾）按 end 匹配
     for cue_id, initial in sorted(
-        (item for item in candidates
-         if item[1].get("start") is None and item[1].get("end") is not None),
+        (
+            item
+            for item in candidates
+            if item[1].get("start") is None and item[1].get("end") is not None
+        ),
         key=lambda item: float(item[1]["end"]),
     ):
         index = _nearest(lambda e: e.end, initial["end"])
@@ -274,8 +303,8 @@ def replay_journal(original_events: List[SubtitleEvent], events: List[Dict[str, 
     unmatched_ids = len(candidates) - len(by_id)
 
     # 组装最终事件列表：原事件 − 删除 + 重放终态 + 新增
-    owner_by_object: Dict[int, str] = {id(cue): cid for cid, cue in by_id.items()}
-    rebuilt: List[SubtitleEvent] = []
+    owner_by_object: dict[int, str] = {id(cue): cid for cid, cue in by_id.items()}
+    rebuilt: list[SubtitleEvent] = []
     for original in original_events:
         owner_id = owner_by_object.get(id(original))
         if owner_id is None:
@@ -284,25 +313,29 @@ def replay_journal(original_events: List[SubtitleEvent], events: List[Dict[str, 
         if owner_id in removed:
             continue
         state = final_state.get(owner_id, {})
-        rebuilt.append(SubtitleEvent(
-            index=original.index,
-            start=float(state.get("start", original.start)),
-            end=float(state.get("end", original.end)),
-            text=str(state.get("text", original.text)),
-            original_text=original.original_text,
-            speaker_id=original.speaker_id,
-            speaker_label=original.speaker_label,
-        ))
+        rebuilt.append(
+            SubtitleEvent(
+                index=original.index,
+                start=float(state.get("start", original.start)),
+                end=float(state.get("end", original.end)),
+                text=str(state.get("text", original.text)),
+                original_text=original.original_text,
+                speaker_id=original.speaker_id,
+                speaker_label=original.speaker_label,
+            )
+        )
     for cue_id in add_order:
         if cue_id in removed:
             continue
         state = added[cue_id]
-        rebuilt.append(SubtitleEvent(
-            index=0,
-            start=float(state["start"]),
-            end=float(state["end"]),
-            text=str(state.get("text", "")),
-        ))
+        rebuilt.append(
+            SubtitleEvent(
+                index=0,
+                start=float(state["start"]),
+                end=float(state["end"]),
+                text=str(state.get("text", "")),
+            )
+        )
 
     rebuilt.sort(key=lambda e: (e.start, e.end))
     for new_index, event in enumerate(rebuilt, 1):
@@ -321,7 +354,8 @@ def replay_journal(original_events: List[SubtitleEvent], events: List[Dict[str, 
 # V1 统计
 # ---------------------------------------------------------------------------
 
-def _median(values: List[float]) -> Optional[float]:
+
+def _median(values: list[float]) -> float | None:
     if not values:
         return None
     ordered = sorted(values)
@@ -331,7 +365,7 @@ def _median(values: List[float]) -> Optional[float]:
     return (ordered[middle - 1] + ordered[middle]) / 2
 
 
-def _percentile(values: List[float], q: float) -> Optional[float]:
+def _percentile(values: list[float], q: float) -> float | None:
     if not values:
         return None
     ordered = sorted(values)
@@ -361,13 +395,13 @@ def journal_scenario(journal: JournalFile) -> str:
     return str(header.get("scenario") or "")
 
 
-def _aggregate_journal_stats(files: List[JournalFile]) -> JournalStats:
+def _aggregate_journal_stats(files: list[JournalFile]) -> JournalStats:
     """聚合单层统计：命令分布、时间偏移、留白、CPS、边界吸附、出处覆盖。"""
     stats = JournalStats(session_count=len(files))
-    start_deltas: List[float] = []
-    end_deltas: List[float] = []
-    gap_afters: List[float] = []
-    cps_values: List[float] = []
+    start_deltas: list[float] = []
+    end_deltas: list[float] = []
+    gap_afters: list[float] = []
+    cps_values: list[float] = []
     boundary_hits = 0
     boundary_total = 0
     with_provenance = 0
@@ -382,7 +416,9 @@ def _aggregate_journal_stats(files: List[JournalFile]) -> JournalStats:
             structural = _STRUCTURAL_COMMANDS.get(command)
             if structural:
                 stats.structural[structural] = stats.structural.get(structural, 0) + 1
-            if event.get("provenance") or (event.get("context") or {}).get("provenance"):
+            if event.get("provenance") or (event.get("context") or {}).get(
+                "provenance"
+            ):
                 with_provenance += 1
 
             context = event.get("context") or {}
@@ -407,29 +443,39 @@ def _aggregate_journal_stats(files: List[JournalFile]) -> JournalStats:
                     if change.get("before") is None or change.get("after") is None:
                         continue
                     if change.get("field") == "start":
-                        start_deltas.append(float(change["after"]) - float(change["before"]))
+                        start_deltas.append(
+                            float(change["after"]) - float(change["before"])
+                        )
                     elif change.get("field") == "end":
-                        end_deltas.append(float(change["after"]) - float(change["before"]))
+                        end_deltas.append(
+                            float(change["after"]) - float(change["before"])
+                        )
 
     stats.start_delta_median = _median(start_deltas)
-    stats.start_delta_mean = sum(start_deltas) / len(start_deltas) if start_deltas else None
+    stats.start_delta_mean = (
+        sum(start_deltas) / len(start_deltas) if start_deltas else None
+    )
     stats.end_delta_median = _median(end_deltas)
     stats.end_delta_mean = sum(end_deltas) / len(end_deltas) if end_deltas else None
     stats.gap_after_median = _median(gap_afters)
     stats.cps_p90 = _percentile(cps_values, 0.9)
-    stats.boundary_snap_rate = (boundary_hits / boundary_total) if boundary_total else None
-    stats.provenance_coverage = with_provenance / stats.event_count if stats.event_count else 0.0
+    stats.boundary_snap_rate = (
+        (boundary_hits / boundary_total) if boundary_total else None
+    )
+    stats.provenance_coverage = (
+        with_provenance / stats.event_count if stats.event_count else 0.0
+    )
     return stats
 
 
-def journal_statistics(files: List[JournalFile]) -> JournalStats:
+def journal_statistics(files: list[JournalFile]) -> JournalStats:
     """汇总 V1 统计：命令分布、时间偏移、留白、CPS、边界吸附、出处覆盖。
 
     header 携带可选 scenario（D27）时按场景分层（by_scenario）；
     无该字段的旧日志照常计入总体统计，不产生场景分层条目。
     """
     stats = _aggregate_journal_stats(files)
-    grouped: Dict[str, List[JournalFile]] = {}
+    grouped: dict[str, list[JournalFile]] = {}
     for journal in files:
         scenario = journal_scenario(journal)
         if scenario:
@@ -439,18 +485,28 @@ def journal_statistics(files: List[JournalFile]) -> JournalStats:
     return stats
 
 
-def derive_editor_preferences(stats: JournalStats) -> Dict[str, float]:
+def derive_editor_preferences(stats: JournalStats) -> dict[str, float]:
     """从统计中推导编辑器维度偏好（写入 user_profile，独立于管线参数）。
 
     只在样本量足以体现系统性偏移时产出（|中位数| 超阈值）。
     """
-    preferences: Dict[str, float] = {}
-    if stats.start_delta_median is not None and abs(stats.start_delta_median) >= _SYSTEMATIC_SHIFT_THRESHOLD:
-        preferences["editor.offset_start_ms"] = round(stats.start_delta_median * 1000, 1)
-    if stats.end_delta_median is not None and abs(stats.end_delta_median) >= _SYSTEMATIC_SHIFT_THRESHOLD:
+    preferences: dict[str, float] = {}
+    if (
+        stats.start_delta_median is not None
+        and abs(stats.start_delta_median) >= _SYSTEMATIC_SHIFT_THRESHOLD
+    ):
+        preferences["editor.offset_start_ms"] = round(
+            stats.start_delta_median * 1000, 1
+        )
+    if (
+        stats.end_delta_median is not None
+        and abs(stats.end_delta_median) >= _SYSTEMATIC_SHIFT_THRESHOLD
+    ):
         preferences["editor.offset_end_ms"] = round(stats.end_delta_median * 1000, 1)
     if stats.gap_after_median is not None:
-        preferences["editor.gap_preference_ms"] = round(stats.gap_after_median * 1000, 1)
+        preferences["editor.gap_preference_ms"] = round(
+            stats.gap_after_median * 1000, 1
+        )
     if stats.cps_p90 is not None:
         preferences["editor.cps_ceiling"] = round(stats.cps_p90, 2)
     if stats.boundary_snap_rate is not None and stats.boundary_snap_rate >= 0.5:
@@ -462,26 +518,36 @@ def derive_editor_preferences(stats: JournalStats) -> Dict[str, float]:
 # V3 触发机制（D16：只定机制，不定数值；阈值可配置，未配置则不提示）
 # ---------------------------------------------------------------------------
 
+
 def check_v3_trigger(
     sample_count: int,
     coverage: float,
     conflict_rate: float,
     *,
-    min_samples: Optional[int] = None,
-    min_coverage: Optional[float] = None,
-    max_conflict_rate: Optional[float] = None,
-) -> Tuple[bool, str]:
+    min_samples: int | None = None,
+    min_coverage: float | None = None,
+    max_conflict_rate: float | None = None,
+) -> tuple[bool, str]:
     """判断数据是否达到训练轻量序列模型（V3）的门槛。
 
     任一阈值未配置（None）即跳过该项检查；全部未配置则不触发。
     """
-    checks: List[Tuple[bool, str]] = []
+    checks: list[tuple[bool, str]] = []
     if min_samples is not None:
-        checks.append((sample_count >= min_samples, f"样本数 {sample_count}/{min_samples}"))
+        checks.append(
+            (sample_count >= min_samples, f"样本数 {sample_count}/{min_samples}")
+        )
     if min_coverage is not None:
-        checks.append((coverage >= min_coverage, f"覆盖率 {coverage:.2f}/{min_coverage:.2f}"))
+        checks.append(
+            (coverage >= min_coverage, f"覆盖率 {coverage:.2f}/{min_coverage:.2f}")
+        )
     if max_conflict_rate is not None:
-        checks.append((conflict_rate <= max_conflict_rate, f"冲突率 {conflict_rate:.2f}/{max_conflict_rate:.2f}"))
+        checks.append(
+            (
+                conflict_rate <= max_conflict_rate,
+                f"冲突率 {conflict_rate:.2f}/{max_conflict_rate:.2f}",
+            )
+        )
     if not checks:
         return False, "V3 触发阈值未配置（feedback.v3_trigger_*），跳过检查"
     ok = all(passed for passed, _ in checks)
@@ -497,7 +563,7 @@ def journal_original_stem(journal_path: Path | str) -> str:
     return re.sub(r"\.journal\.jsonl$", "", name, flags=re.IGNORECASE)
 
 
-def find_original_subtitle(journal_path: Path | str) -> Optional[Path]:
+def find_original_subtitle(journal_path: Path | str) -> Path | None:
     """在日志同目录寻找原始字幕文件（与导出时搭车的 <同名>.journal.jsonl 配对）"""
     path = Path(journal_path)
     stem = journal_original_stem(path)
@@ -508,25 +574,32 @@ def find_original_subtitle(journal_path: Path | str) -> Optional[Path]:
     return None
 
 
-def load_original_events(subtitle_path: Path | str) -> List[SubtitleEvent]:
+def load_original_events(subtitle_path: Path | str) -> list[SubtitleEvent]:
     return parse_subtitle_file(Path(subtitle_path))
 
 
-def journal_to_text_sample(auto_events: List[SubtitleEvent], final_events: List[SubtitleEvent]) -> Tuple[str, str]:
+def journal_to_text_sample(
+    auto_events: list[SubtitleEvent], final_events: list[SubtitleEvent]
+) -> tuple[str, str]:
     """事件列表 → D2 入库用的 SRT 风格文本（复用 learn 命令的格式约定）"""
-    def to_text(events: List[SubtitleEvent]) -> str:
+
+    def to_text(events: list[SubtitleEvent]) -> str:
         lines = []
         for index, event in enumerate(events, 1):
-            lines.append(f"{index}\n{event.start:.3f} --> {event.end:.3f}\n{event.text}\n")
+            lines.append(
+                f"{index}\n{event.start:.3f} --> {event.end:.3f}\n{event.text}\n"
+            )
         return "\n".join(lines)
 
     return to_text(auto_events), to_text(final_events)
 
 
-def summarize_commands(files: List[JournalFile]) -> Counter:
+def summarize_commands(files: list[JournalFile]) -> Counter:
     counter: Counter = Counter()
     for journal in files:
-        counter.update(str(event.get("command") or "unknown") for event in journal.events)
+        counter.update(
+            str(event.get("command") or "unknown") for event in journal.events
+        )
     return counter
 
 

@@ -1,7 +1,7 @@
 """Contract tests for the optional Qwen primary ASR adapter."""
 
-from types import ModuleType, SimpleNamespace
 import importlib.machinery
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
 

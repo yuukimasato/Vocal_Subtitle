@@ -72,8 +72,7 @@ class FailingAlignEngine(AligningEngine):
 
 def _word_times(result):
     return {
-        word.text: (word.raw_start, word.raw_end)
-        for word in result.transcript.words
+        word.text: (word.raw_start, word.raw_end) for word in result.transcript.words
     }
 
 

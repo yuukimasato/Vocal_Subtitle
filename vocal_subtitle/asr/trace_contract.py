@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-
 TRACE_SCHEMA_VERSION = "offline-trace-v1"
 
 
@@ -19,14 +18,19 @@ def attach_event_trace(
     """Attach one idempotent evidence-contract record to a subtitle event."""
     source_word_ids = list(getattr(event, "source_word_ids", ()) or ())
     dedup_key = hashlib.sha1(
-        "|".join(map(str, (
-            source_id,
-            offset_id,
-            window_id,
-            *source_word_ids,
-            getattr(event, "start", None),
-            getattr(event, "end", None),
-        ))).encode("utf-8")
+        "|".join(
+            map(
+                str,
+                (
+                    source_id,
+                    offset_id,
+                    window_id,
+                    *source_word_ids,
+                    getattr(event, "start", None),
+                    getattr(event, "end", None),
+                ),
+            )
+        ).encode("utf-8")
     ).hexdigest()[:16]
     context = {
         **dict(getattr(event, "trace_context", {}) or {}),
@@ -47,8 +51,7 @@ def attach_event_trace(
     }
     traces = list(getattr(event, "revision_trace", ()) or ())
     if not any(
-        item.get("stage") == "evidence_contract"
-        and item.get("dedup_key") == dedup_key
+        item.get("stage") == "evidence_contract" and item.get("dedup_key") == dedup_key
         for item in traces
         if isinstance(item, dict)
     ):

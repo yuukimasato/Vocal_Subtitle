@@ -7,7 +7,6 @@ import argparse
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -31,11 +30,30 @@ EXPECTED_COMMANDS = {
 
 EXPECTED_OPTIONS = {
     "run": {
-        "--profile", "--format", "--device", "--language", "--separator",
-        "--asr-engine", "--asr-path", "--skip-separation", "--verbose",
+        "--profile",
+        "--format",
+        "--device",
+        "--language",
+        "--separator",
+        "--asr-engine",
+        "--asr-path",
+        "--skip-separation",
+        "--verbose",
     },
-    "batch": {"--profile", "--format", "--device", "--language", "--pattern", "--verbose"},
-    "download-models": {"--all", "--asr-model", "--speaker-model", "--list-speaker-models"},
+    "batch": {
+        "--profile",
+        "--format",
+        "--device",
+        "--language",
+        "--pattern",
+        "--verbose",
+    },
+    "download-models": {
+        "--all",
+        "--asr-model",
+        "--speaker-model",
+        "--list-speaker-models",
+    },
     "preflight": {"--profile", "--output", "--verbose"},
 }
 
@@ -51,7 +69,9 @@ def _option_names(command) -> set[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--report", action="store_true", help="Print the discovered tree")
+    parser.add_argument(
+        "--report", action="store_true", help="Print the discovered tree"
+    )
     args = parser.parse_args()
 
     from vocal_subtitle.cli import main as cli
@@ -77,7 +97,10 @@ def main() -> int:
         for command_name in sorted(EXPECTED_OPTIONS):
             command = cli.commands.get(command_name)
             if command is not None:
-                print(f"{command_name} options:", ", ".join(sorted(_option_names(command))))
+                print(
+                    f"{command_name} options:",
+                    ", ".join(sorted(_option_names(command))),
+                )
     for error in errors:
         print(error, file=sys.stderr)
     return 1 if errors else 0

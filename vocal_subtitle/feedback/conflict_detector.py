@@ -9,9 +9,7 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
-
-import numpy as np
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +33,11 @@ class ConflictReport:
     param_path: str
     is_oscillating: bool = False
     oscillation_count: int = 0  # 连续翻转次数
-    entries: List[OscillationEntry] = field(default_factory=list)
+    entries: list[OscillationEntry] = field(default_factory=list)
     total_flips: int = 0
     recommended_action: str = ""  # "lock" | "branch" | "continue"
-    possible_causes: List[str] = field(default_factory=list)
-    suggested_actions: List[Dict[str, str]] = field(default_factory=list)
+    possible_causes: list[str] = field(default_factory=list)
+    suggested_actions: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def severity(self) -> str:
@@ -67,8 +65,8 @@ class ConflictDetector:
     def detect_oscillation(
         self,
         param_path: str,
-        history: List[Dict[str, Any]],
-    ) -> Optional[ConflictReport]:
+        history: list[dict[str, Any]],
+    ) -> ConflictReport | None:
         """检测参数调整震荡
 
         Args:
@@ -84,7 +82,7 @@ class ConflictDetector:
             return None
 
         # 取最近 window 条
-        recent = entries[-self._window:]
+        recent = entries[-self._window :]
 
         # 计算方向符号序列
         signs = []
@@ -146,7 +144,9 @@ class ConflictDetector:
             ]
             logger.warning(
                 "Oscillation detected for '%s': %d flips in last %d adjustments",
-                param_path, flips, len(recent),
+                param_path,
+                flips,
+                len(recent),
             )
 
         elif flips >= 2:
@@ -154,15 +154,16 @@ class ConflictDetector:
             report.recommended_action = "continue"  # 2次翻转可能是巧合
             logger.info(
                 "Mild oscillation for '%s': %d flips — monitoring",
-                param_path, flips,
+                param_path,
+                flips,
             )
 
         return report
 
     def detect_all_oscillations(
         self,
-        history: List[Dict[str, Any]],
-    ) -> List[ConflictReport]:
+        history: list[dict[str, Any]],
+    ) -> list[ConflictReport]:
         """检测所有参数中的震荡
 
         Args:
@@ -191,7 +192,7 @@ class ConflictDetector:
         self,
         report: ConflictReport,
         user_choice: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """根据用户选择执行冲突解决
 
         Args:
@@ -210,17 +211,22 @@ class ConflictDetector:
         if user_choice == "lock":
             result["status"] = "locked"
             result["message"] = f"参数 '{report.param_path}' 已被锁定，不再自动学习"
-            logger.info("Param '%s' locked by user — auto-learning disabled", report.param_path)
+            logger.info(
+                "Param '%s' locked by user — auto-learning disabled", report.param_path
+            )
 
         elif user_choice == "branch":
             result["status"] = "branch_requested"
-            result["message"] = f"建议为不同音频类型创建独立配置模板"
+            result["message"] = "建议为不同音频类型创建独立配置模板"
             logger.info("Branch template requested for param '%s'", report.param_path)
 
         elif user_choice == "continue":
             result["status"] = "continued"
             result["message"] = f"忽略冲突警告，继续学习 '{report.param_path}'"
-            logger.info("User chose to continue learning '%s' despite oscillation", report.param_path)
+            logger.info(
+                "User chose to continue learning '%s' despite oscillation",
+                report.param_path,
+            )
 
         else:
             result["status"] = "unknown"
@@ -231,8 +237,8 @@ class ConflictDetector:
     @staticmethod
     def _extract_param_history(
         param_path: str,
-        history: List[Dict[str, Any]],
-    ) -> List[OscillationEntry]:
+        history: list[dict[str, Any]],
+    ) -> list[OscillationEntry]:
         """从历史记录中提取某参数的全部调整序列"""
         entries = []
         for h in history:
@@ -248,21 +254,23 @@ class ConflictDetector:
             delta = new_val - old_val
             direction = "increase" if delta > 0 else "decrease"
 
-            entries.append(OscillationEntry(
-                timestamp=h.get("timestamp", ""),
-                direction=direction,
-                param_value_before=old_val,
-                param_value_after=new_val,
-                delta=delta,
-                summary=h.get("diff_report_summary", ""),
-            ))
+            entries.append(
+                OscillationEntry(
+                    timestamp=h.get("timestamp", ""),
+                    direction=direction,
+                    param_value_before=old_val,
+                    param_value_after=new_val,
+                    delta=delta,
+                    summary=h.get("diff_report_summary", ""),
+                )
+            )
 
         return entries
 
     @staticmethod
     def is_param_locked(
         param_path: str,
-        locked_params: List[str],
+        locked_params: list[str],
     ) -> bool:
         """检查参数是否已被锁定"""
         return param_path in locked_params

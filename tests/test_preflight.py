@@ -3,8 +3,8 @@
 from types import SimpleNamespace
 
 from vocal_subtitle.application import preflight
-from vocal_subtitle.reporting.run_report_schema import EngineStatusEntry
 from vocal_subtitle.reporting.engine_availability import EngineAvailabilitySnapshot
+from vocal_subtitle.reporting.run_report_schema import EngineStatusEntry
 
 
 class _FakeChecker:
@@ -39,8 +39,12 @@ def _config():
     )
 
 
-def test_preflight_blocks_when_selected_separation_is_unavailable(monkeypatch, tmp_path):
-    monkeypatch.setattr(preflight, "_sync_lifecycle_from_availability", lambda config: None)
+def test_preflight_blocks_when_selected_separation_is_unavailable(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        preflight, "_sync_lifecycle_from_availability", lambda config: None
+    )
     monkeypatch.setattr(
         "vocal_subtitle.reporting.engine_availability.EngineAvailabilityChecker",
         _FakeChecker,
@@ -56,11 +60,16 @@ def test_preflight_blocks_when_selected_separation_is_unavailable(monkeypatch, t
     assert separation.critical is True
     assert separation.passed is False
     assert result.passed is False
-    assert preflight._error_category_from_checks(result.failed_critical()) == "separation_unavailable"
+    assert (
+        preflight._error_category_from_checks(result.failed_critical())
+        == "separation_unavailable"
+    )
 
 
 def test_preflight_allows_explicit_skip_separation(monkeypatch, tmp_path):
-    monkeypatch.setattr(preflight, "_sync_lifecycle_from_availability", lambda config: None)
+    monkeypatch.setattr(
+        preflight, "_sync_lifecycle_from_availability", lambda config: None
+    )
     monkeypatch.setattr(
         "vocal_subtitle.reporting.engine_availability.EngineAvailabilityChecker",
         _FakeChecker,

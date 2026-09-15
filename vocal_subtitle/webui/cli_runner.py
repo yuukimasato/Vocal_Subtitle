@@ -23,11 +23,12 @@ def main(host: str, port: int, no_browser: bool, reload: bool):
     可视化、字幕预览编辑和格式导出功能。
     """
     if not no_browser:
-        import webbrowser
         import threading
+        import webbrowser
 
         def _open_browser():
             import time
+
             time.sleep(1.0)  # 等待服务器启动
             webbrowser.open(f"http://{host}:{port}")
 

@@ -8,11 +8,9 @@
 - PyannoteEmbeddingEngine: pyannote.audio ECAPA-TDNN 实现 (~100MB)
 """
 
-import hashlib
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 
@@ -22,7 +20,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CACHE_DIR = Path(__file__).parent.parent.parent / "cache" / "speaker_models"
 
 
-def is_huggingface_model_cached(model_ref: str, cache_dir: Optional[Path] = None) -> bool:
+def is_huggingface_model_cached(model_ref: str, cache_dir: Path | None = None) -> bool:
     """Check whether a Hugging Face model is already fully cached locally.
 
     Does NOT initiate any network request. Only inspects the local filesystem.
@@ -58,7 +56,11 @@ def is_huggingface_model_cached(model_ref: str, cache_dir: Optional[Path] = None
             for path in snapshot.rglob("*"):
                 if path.is_symlink() and not path.exists():
                     break
-                if path.is_file() and path not in config_files and path.stat().st_size > 0:
+                if (
+                    path.is_file()
+                    and path not in config_files
+                    and path.stat().st_size > 0
+                ):
                     has_model_file = True
             else:
                 if has_model_file:
@@ -84,8 +86,8 @@ class SpeakerEmbeddingEngine(ABC):
     @abstractmethod
     def load_model(
         self,
-        model_ref: Optional[str] = None,
-        token: Optional[str] = None,
+        model_ref: str | None = None,
+        token: str | None = None,
         **kwargs,
     ) -> None:
         """加载说话人嵌入模型
@@ -97,9 +99,7 @@ class SpeakerEmbeddingEngine(ABC):
         ...
 
     @abstractmethod
-    def extract_embedding(
-        self, audio: np.ndarray, sample_rate: int
-    ) -> np.ndarray:
+    def extract_embedding(self, audio: np.ndarray, sample_rate: int) -> np.ndarray:
         """提取单个音频片段的说话人嵌入向量
 
         Args:
@@ -113,7 +113,7 @@ class SpeakerEmbeddingEngine(ABC):
 
     @abstractmethod
     def extract_embeddings_batch(
-        self, audios: List[np.ndarray], sample_rate: int
+        self, audios: list[np.ndarray], sample_rate: int
     ) -> np.ndarray:
         """批量提取嵌入向量
 
@@ -205,16 +205,18 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
         },
     }
 
-    def __init__(self, cache_dir: Optional[Path] = None):
-        if cache_dir is None or (isinstance(cache_dir, Path) and str(cache_dir) in ("", ".")):
+    def __init__(self, cache_dir: Path | None = None):
+        if cache_dir is None or (
+            isinstance(cache_dir, Path) and str(cache_dir) in ("", ".")
+        ):
             self._cache_dir = DEFAULT_CACHE_DIR
         else:
             self._cache_dir = Path(cache_dir)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
-        self._model = None          # speechbrain EncoderClassifier 或通用
-        self._inference = None      # pyannote.audio Inference
+        self._model = None  # speechbrain EncoderClassifier 或通用
+        self._inference = None  # pyannote.audio Inference
         self._model_loaded = False
-        self._model_ref: Optional[str] = None
+        self._model_ref: str | None = None
         self._model_type: str = ""  # "pyannote" | "speechbrain"
         self._embedding_dim: int = 512
 
@@ -246,8 +248,8 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
 
     def load_model(
         self,
-        model_ref: Optional[str] = None,
-        token: Optional[str] = None,
+        model_ref: str | None = None,
+        token: str | None = None,
         **kwargs,
     ) -> None:
         """加载说话人嵌入模型
@@ -265,12 +267,17 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
         logger.info("Loading speaker embedding model: %s", model_ref)
 
         # 解析 token
-        use_auth_token = token if token and token != "***" else kwargs.get("use_auth_token")
+        use_auth_token = (
+            token if token and token != "***" else kwargs.get("use_auth_token")
+        )
         if use_auth_token == "***":
             use_auth_token = None
         if use_auth_token is None:
             import os
-            use_auth_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+
+            use_auth_token = os.environ.get("HF_TOKEN") or os.environ.get(
+                "HUGGING_FACE_HUB_TOKEN"
+            )
         if use_auth_token is None:
             try:
                 from ..utils.hf_token_store import load_hf_token
@@ -280,6 +287,7 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
                 use_auth_token = None
 
         import torch
+
         _torch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # speechbrain @ PyTorch 2.x 兼容：run_opts["device"] 需要字符串
         device_str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -288,6 +296,7 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
             # ---- SpeechBrain 模型 ----
             # 预注册 dummy k2 模块，防止其懒加载失败阻塞整个 speechbrain import
             import sys as _sys
+
             _k2_mod = type(_sys)("speechbrain.integrations.k2_fsa")
             _k2_mod.__file__ = "k2_not_installed"
             _k2_mod.__package__ = "speechbrain.integrations.k2_fsa"
@@ -303,16 +312,22 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
 
             logger.info("SpeechBrain embedding using device: %s", device_str)
             try:
-                _savedir = str((self._cache_dir / model_ref.replace("/", "_")).resolve())
+                _savedir = str(
+                    (self._cache_dir / model_ref.replace("/", "_")).resolve()
+                )
 
                 # Patch fetch 确保所有文件从本地 savedir 加载
                 import speechbrain.utils.fetching as _sb_fetch
+
                 _orig_fetch = _sb_fetch.fetch
                 _patched_modules = []
                 import sys
 
-                def _offline_fetch(filename, source, savedir=None, save_filename=None, **kw):
+                def _offline_fetch(
+                    filename, source, savedir=None, save_filename=None, **kw
+                ):
                     import pathlib as _pl
+
                     fname = save_filename or filename
                     if savedir is not None:
                         local = _pl.Path(savedir) / fname
@@ -327,9 +342,18 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
                         for _sd in (savedir, _savedir):
                             if _sd is not None:
                                 local_txt = _pl.Path(_sd) / txt_name
-                                if local_txt.exists() and local_txt.stat().st_size > 200:
+                                if (
+                                    local_txt.exists()
+                                    and local_txt.stat().st_size > 200
+                                ):
                                     return local_txt
-                    return _orig_fetch(filename, source, savedir=savedir, save_filename=save_filename, **kw)
+                    return _orig_fetch(
+                        filename,
+                        source,
+                        savedir=savedir,
+                        save_filename=save_filename,
+                        **kw,
+                    )
 
                 _sb_fetch.fetch = _offline_fetch
                 for _mn, _m in list(sys.modules.items()):
@@ -361,18 +385,22 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
                 self._model_loaded = True
                 self._model_type = "speechbrain"
                 # speechbrain ECAPA 实际嵌入维度
-                if hasattr(self._model, 'hparams'):
+                if hasattr(self._model, "hparams"):
                     self._embedding_dim = getattr(
-                        self._model.hparams, 'emb_dim', self._embedding_dim,
+                        self._model.hparams,
+                        "emb_dim",
+                        self._embedding_dim,
                     )
                 logger.info(
                     "SpeechBrain model loaded: %s (dim=%d)",
-                    model_ref, self._embedding_dim,
+                    model_ref,
+                    self._embedding_dim,
                 )
             except Exception as e:
                 logger.error(
                     "Failed to load speechbrain model '%s': %s",
-                    model_ref, e,
+                    model_ref,
+                    e,
                 )
                 raise
 
@@ -390,9 +418,11 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
             try:
                 # Authenticate model first when Model class is available
                 try:
-                    from pyannote.audio.core.model import Model
+                    from pyannote.audio.core.model import (
+                        Model,  # noqa: N806 (可用性探测)
+                    )
                 except ImportError:
-                    Model = None
+                    Model = None  # noqa: N806 (可用性探测)
 
                 if Model is not None:
                     loaded_model = Model.from_pretrained(
@@ -421,7 +451,8 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
                 self._model_type = "pyannote"
                 logger.info(
                     "Pyannote model loaded: %s (dim=%d)",
-                    model_ref, self._embedding_dim,
+                    model_ref,
+                    self._embedding_dim,
                 )
             except Exception as e:
                 logger.error(
@@ -430,19 +461,19 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
                     "  1. Accepted the license at https://huggingface.co/%s\n"
                     "  2. Set HF_TOKEN or passed token parameter\n"
                     "  3. Installed pyannote.audio: pip install pyannote.audio",
-                    model_ref, e, model_ref,
+                    model_ref,
+                    e,
+                    model_ref,
                 )
                 raise
 
-    def extract_embedding(
-        self, audio: np.ndarray, sample_rate: int
-    ) -> np.ndarray:
+    def extract_embedding(self, audio: np.ndarray, sample_rate: int) -> np.ndarray:
         """提取单个音频片段的嵌入向量"""
         self._ensure_loaded()
         return self._extract_single(audio, sample_rate)
 
     def extract_embeddings_batch(
-        self, audios: List[np.ndarray], sample_rate: int
+        self, audios: list[np.ndarray], sample_rate: int
     ) -> np.ndarray:
         """批量提取嵌入向量"""
         self._ensure_loaded()
@@ -462,9 +493,7 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
                 "Speaker embedding model not loaded. Call load_model() first."
             )
 
-    def _extract_single(
-        self, audio: np.ndarray, sample_rate: int
-    ) -> np.ndarray:
+    def _extract_single(self, audio: np.ndarray, sample_rate: int) -> np.ndarray:
         """提取单个音频的嵌入（自动适配 pyannote / speechbrain）"""
         import torch
 
@@ -478,7 +507,7 @@ class PyannoteEmbeddingEngine(SpeakerEmbeddingEngine):
         min_samples = int(0.6 * sample_rate)
         if len(audio) < min_samples:
             padded = np.zeros(min_samples, dtype=np.float32)
-            padded[:len(audio)] = audio
+            padded[: len(audio)] = audio
             audio = padded
 
         waveform = torch.from_numpy(audio).unsqueeze(0)  # (1, samples)
@@ -531,7 +560,10 @@ class DummyEmbeddingEngine(SpeakerEmbeddingEngine):
 
     @staticmethod
     def license_info() -> dict:
-        return {"engine": "none", "note": "请配置 pyannote 模型以获得最佳说话人分离效果"}
+        return {
+            "engine": "none",
+            "note": "请配置 pyannote 模型以获得最佳说话人分离效果",
+        }
 
     def load_model(self, **kwargs) -> None:
         pass
@@ -564,6 +596,7 @@ def create_embedding_engine(config) -> SpeakerEmbeddingEngine:
         try:
             # 缩短 HuggingFace Hub 下载超时，避免离线环境下长时间阻塞
             import os as _os
+
             _prev_timeout = _os.environ.get("HF_HUB_DOWNLOAD_TIMEOUT")
             _prev_requests_timeout = _os.environ.get("REQUESTS_TIMEOUT_SECONDS")
             _os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "3"
@@ -582,21 +615,27 @@ def create_embedding_engine(config) -> SpeakerEmbeddingEngine:
                 else:
                     _os.environ.pop("REQUESTS_TIMEOUT_SECONDS", None)
             return engine
-        except ImportError as e:
+        except ImportError:
             # 缺少依赖包
-            pkg = "speechbrain" if model_ref.startswith("speechbrain/") else "pyannote.audio"
+            pkg = (
+                "speechbrain"
+                if model_ref.startswith("speechbrain/")
+                else "pyannote.audio"
+            )
             logger.warning(
                 "Speaker embedding package '%s' not installed. "
                 "Install with: pip install %s. "
                 "Speaker identity will remain unknown unless another acoustic backend is available.",
-                pkg, pkg,
+                pkg,
+                pkg,
             )
             return DummyEmbeddingEngine()
         except Exception as e:
             logger.warning(
                 "Speaker embedding engine failed to load '%s': %s. "
                 "Speaker identity will remain unknown unless another acoustic backend is available.",
-                model_ref, e,
+                model_ref,
+                e,
             )
             return DummyEmbeddingEngine()
 

@@ -40,13 +40,14 @@ def _validator(**overrides):
 
 def test_skeleton_priority_clamps_events_into_skeleton_segments():
     events = [
-        _event(1, 1.05, 1.95),   # 段内,基本不动
-        _event(2, 2.4, 3.5),     # 跨骨架间静音,钳制回主段 seg2
-        _event(3, 3.6, 3.9),     # seg2 内
+        _event(1, 1.05, 1.95),  # 段内,基本不动
+        _event(2, 2.4, 3.5),  # 跨骨架间静音,钳制回主段 seg2
+        _event(3, 3.6, 3.9),  # seg2 内
     ]
 
     validated, report = _validator().validate(
-        events, ffmpeg_unified_result=FFMPEG_RESULT,
+        events,
+        ffmpeg_unified_result=FFMPEG_RESULT,
     )
 
     assert report["skeleton_priority"] is True
@@ -77,7 +78,8 @@ def test_skeleton_priority_pulls_start_to_skeleton_onset():
     events = [_event(1, 1.3, 1.9)]
 
     validated, report = _validator().validate(
-        events, ffmpeg_unified_result=FFMPEG_RESULT,
+        events,
+        ffmpeg_unified_result=FFMPEG_RESULT,
     )
 
     assert validated[0].start == 1.0
@@ -89,7 +91,8 @@ def test_skeleton_priority_leaves_uncovered_events_untouched():
     events = [_event(1, 5.0, 5.5)]
 
     validated, report = _validator().validate(
-        events, ffmpeg_unified_result=FFMPEG_RESULT,
+        events,
+        ffmpeg_unified_result=FFMPEG_RESULT,
     )
 
     assert validated[0].start == 5.0
@@ -101,19 +104,22 @@ def test_default_config_behavior_unchanged_without_skeleton_priority():
     events = [_event(1, 2.4, 3.5)]
 
     # 不带 skeleton_priority:跨静音事件不会被强制钳回单个骨架段。
-    validator = AcousticValidator(AcousticValidationConfig(
-        enabled=True,
-        unified_ffmpeg_pass=True,
-        skeleton_priority=False,
-        allow_end_extend=False,
-        allow_end_shorten=False,
-        allow_start_pull_earlier=False,
-        max_snap_distance=0.0,
-        max_start_snap_distance=0.0,
-        confidence_threshold=1.1,
-    ))
+    validator = AcousticValidator(
+        AcousticValidationConfig(
+            enabled=True,
+            unified_ffmpeg_pass=True,
+            skeleton_priority=False,
+            allow_end_extend=False,
+            allow_end_shorten=False,
+            allow_start_pull_earlier=False,
+            max_snap_distance=0.0,
+            max_start_snap_distance=0.0,
+            confidence_threshold=1.1,
+        )
+    )
     validated, report = validator.validate(
-        events, ffmpeg_unified_result=FFMPEG_RESULT,
+        events,
+        ffmpeg_unified_result=FFMPEG_RESULT,
     )
 
     assert report.get("skeleton_priority") is not True

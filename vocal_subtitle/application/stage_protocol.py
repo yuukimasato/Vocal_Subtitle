@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from .run_context import RunContext
 
@@ -28,8 +28,7 @@ class PipelineStage(Protocol):
 
     name: str
 
-    def execute(self, context: RunContext) -> RunContext:
-        ...
+    def execute(self, context: RunContext) -> RunContext: ...
 
 
 @dataclass
@@ -39,9 +38,9 @@ class StageResult:
     stage: str
     status: str
     elapsed_seconds: float
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
 
-    def as_payload(self) -> Dict[str, Any]:
+    def as_payload(self) -> dict[str, Any]:
         return {
             "status": self.status,
             "elapsed_seconds": round(self.elapsed_seconds, 6),
@@ -64,24 +63,30 @@ class Stage:
             result = self.run(context)
         except Exception as exc:
             elapsed = time.perf_counter() - started
-            context.add_diagnostic(self.name, {
-                "status": STAGE_STATUS_FAILED,
-                "elapsed_seconds": round(elapsed, 6),
-                "error": str(exc),
-            })
+            context.add_diagnostic(
+                self.name,
+                {
+                    "status": STAGE_STATUS_FAILED,
+                    "elapsed_seconds": round(elapsed, 6),
+                    "error": str(exc),
+                },
+            )
             logger.warning("Stage %s failed after %.3fs: %s", self.name, elapsed, exc)
             raise
         elapsed = time.perf_counter() - started
         payload = dict(result or {})
         status = str(payload.pop("status", STAGE_STATUS_OK))
-        context.add_diagnostic(self.name, {
-            "status": status,
-            "elapsed_seconds": round(elapsed, 6),
-            **payload,
-        })
+        context.add_diagnostic(
+            self.name,
+            {
+                "status": status,
+                "elapsed_seconds": round(elapsed, 6),
+                **payload,
+            },
+        )
         return context
 
-    def run(self, context: RunContext) -> Dict[str, Any]:
+    def run(self, context: RunContext) -> dict[str, Any]:
         """执行阶段本体,返回摘要 payload(可含 'status')。"""
         raise NotImplementedError
 

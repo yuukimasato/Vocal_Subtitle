@@ -22,9 +22,7 @@ def _make_segments(
     starts_ends: list[tuple[float, float]], sr: int = 16000
 ) -> list[SpeechSegment]:
     """从 (start, end) 列表创建 SpeechSegment（不含音频）"""
-    return [
-        SpeechSegment(start=s, end=e) for s, e in starts_ends
-    ]
+    return [SpeechSegment(start=s, end=e) for s, e in starts_ends]
 
 
 def _make_audio_with_segments(
@@ -91,14 +89,16 @@ class TestTwoSpeakerSeparation:
 
     def test_two_distinct_speakers_clustered(self):
         """220Hz vs 880Hz（差两个八度）→ 2 个簇，轮廓系数 > 0.5"""
-        segments = _make_segments([
-            (0.0, 0.8),   # 说话人 A
-            (1.0, 1.8),   # 说话人 B
-            (2.0, 2.8),   # 说话人 A
-            (3.0, 3.8),   # 说话人 B
-            (4.0, 4.8),   # 说话人 A
-            (5.0, 5.8),   # 说话人 B
-        ])
+        segments = _make_segments(
+            [
+                (0.0, 0.8),  # 说话人 A
+                (1.0, 1.8),  # 说话人 B
+                (2.0, 2.8),  # 说话人 A
+                (3.0, 3.8),  # 说话人 B
+                (4.0, 4.8),  # 说话人 A
+                (5.0, 5.8),  # 说话人 B
+            ]
+        )
         frequencies = [220.0, 880.0, 220.0, 880.0, 220.0, 880.0]
         audio = _make_audio_with_segments(segments, frequencies)
 
@@ -130,12 +130,14 @@ class TestTwoSpeakerSeparation:
 
     def test_two_similar_speakers_lower_silhouette(self):
         """220Hz vs 260Hz（接近的频率）→ 轮廓系数较低"""
-        segments = _make_segments([
-            (0.0, 0.8),   # 说话人 A
-            (1.0, 1.8),   # 说话人 B
-            (2.0, 2.8),   # 说话人 A
-            (3.0, 3.8),   # 说话人 B
-        ])
+        segments = _make_segments(
+            [
+                (0.0, 0.8),  # 说话人 A
+                (1.0, 1.8),  # 说话人 B
+                (2.0, 2.8),  # 说话人 A
+                (3.0, 3.8),  # 说话人 B
+            ]
+        )
         frequencies = [220.0, 260.0, 220.0, 260.0]
         audio = _make_audio_with_segments(segments, frequencies)
 
@@ -152,21 +154,29 @@ class TestThreeSpeakerSeparation:
 
     def test_three_distinct_speakers(self):
         """220Hz vs 440Hz vs 880Hz → 3 个簇"""
-        segments = _make_segments([
-            (0.0, 0.6),   # 说话人 A (220Hz)
-            (0.8, 1.4),   # 说话人 B (440Hz)
-            (1.6, 2.2),   # 说话人 C (880Hz)
-            (2.4, 3.0),   # 说话人 A
-            (3.2, 3.8),   # 说话人 B
-            (4.0, 4.6),   # 说话人 C
-            (4.8, 5.4),   # 说话人 A
-            (5.6, 6.2),   # 说话人 B
-            (6.4, 7.0),   # 说话人 C
-        ])
+        segments = _make_segments(
+            [
+                (0.0, 0.6),  # 说话人 A (220Hz)
+                (0.8, 1.4),  # 说话人 B (440Hz)
+                (1.6, 2.2),  # 说话人 C (880Hz)
+                (2.4, 3.0),  # 说话人 A
+                (3.2, 3.8),  # 说话人 B
+                (4.0, 4.6),  # 说话人 C
+                (4.8, 5.4),  # 说话人 A
+                (5.6, 6.2),  # 说话人 B
+                (6.4, 7.0),  # 说话人 C
+            ]
+        )
         frequencies = [
-            220.0, 440.0, 880.0,
-            220.0, 440.0, 880.0,
-            220.0, 440.0, 880.0,
+            220.0,
+            440.0,
+            880.0,
+            220.0,
+            440.0,
+            880.0,
+            220.0,
+            440.0,
+            880.0,
         ]
         audio = _make_audio_with_segments(segments, frequencies)
 
@@ -188,10 +198,15 @@ class TestThreeSpeakerSeparation:
 
     def test_min_max_speaker_constraints(self):
         """min_speakers / max_speakers 约束生效"""
-        segments = _make_segments([
-            (0.0, 0.5), (1.0, 1.5), (2.0, 2.5),
-            (3.0, 3.5), (4.0, 4.5),
-        ])
+        segments = _make_segments(
+            [
+                (0.0, 0.5),
+                (1.0, 1.5),
+                (2.0, 2.5),
+                (3.0, 3.5),
+                (4.0, 4.5),
+            ]
+        )
         # 全部使用不同频率 → 理论上可产生多达 5 个簇
         frequencies = [220.0, 330.0, 440.0, 550.0, 660.0]
         audio = _make_audio_with_segments(segments, frequencies)
@@ -211,14 +226,20 @@ class TestSilhouetteReporting:
     def test_single_cluster_silhouette_one(self):
         """单说话人（相同频率相近音频）→ 轮廓系数应为合理值"""
         # 使用相同频率但略加变化以避免零方差
-        segments = _make_segments([
-            (0.0, 0.5), (1.0, 1.5), (2.0, 2.5),
-        ])
+        segments = _make_segments(
+            [
+                (0.0, 0.5),
+                (1.0, 1.5),
+                (2.0, 2.5),
+            ]
+        )
         # 微小随机幅度差异模拟同一人说话的细微变化
         audio = _make_audio_with_segments(segments, [220.0, 221.0, 219.0])
 
         diarizer = SpeakerDiarizer(
-            distance_threshold=0.9, min_speakers=1, max_speakers=10,
+            distance_threshold=0.9,
+            min_speakers=1,
+            max_speakers=10,
         )
         diarizer.diarize(segments, audio, 16000)
 

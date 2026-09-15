@@ -4,11 +4,11 @@ import os
 
 import pytest
 
+from vocal_subtitle.diarization import model_registry
 from vocal_subtitle.diarization.model_registry import (
     is_model_cached,
     model_status,
 )
-from vocal_subtitle.diarization import model_registry
 from vocal_subtitle.diarization.speaker_embedding import is_huggingface_model_cached
 
 
@@ -30,13 +30,7 @@ def test_global_model_status_is_non_networking(tmp_path):
 
 
 def test_huggingface_cache_requires_model_file(tmp_path):
-    snapshot = (
-        tmp_path
-        / "hub"
-        / "models--example--model"
-        / "snapshots"
-        / "revision"
-    )
+    snapshot = tmp_path / "hub" / "models--example--model" / "snapshots" / "revision"
     snapshot.mkdir(parents=True)
     (snapshot / "config.json").write_text("{}", encoding="utf-8")
     assert not is_huggingface_model_cached("example/model", tmp_path)
@@ -49,7 +43,9 @@ def test_download_temporarily_enables_huggingface_network(monkeypatch, tmp_path)
     observed = {}
 
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
-    monkeypatch.setattr(model_registry, "is_model_cached", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        model_registry, "is_model_cached", lambda *args, **kwargs: False
+    )
 
     def fake_download(**kwargs):
         observed["offline"] = os.environ.get("HF_HUB_OFFLINE")
@@ -67,10 +63,14 @@ def test_download_temporarily_enables_huggingface_network(monkeypatch, tmp_path)
     assert os.environ["HF_HUB_OFFLINE"] == "1"
 
 
-def test_download_uses_encrypted_token_when_request_token_is_missing(monkeypatch, tmp_path):
+def test_download_uses_encrypted_token_when_request_token_is_missing(
+    monkeypatch, tmp_path
+):
     observed = {}
 
-    monkeypatch.setattr(model_registry, "is_model_cached", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        model_registry, "is_model_cached", lambda *args, **kwargs: False
+    )
     monkeypatch.setattr(
         model_registry,
         "_download_snapshot",
@@ -107,7 +107,9 @@ def test_download_rejects_incomplete_snapshot(monkeypatch, tmp_path):
     monkeypatch.setattr(model_registry, "_download_snapshot", fake_download)
 
     try:
-        model_registry.download_model("community-1", token="hf_test", cache_dir=tmp_path)
+        model_registry.download_model(
+            "community-1", token="hf_test", cache_dir=tmp_path
+        )
     except RuntimeError as exc:
         assert "incomplete" in str(exc)
     else:

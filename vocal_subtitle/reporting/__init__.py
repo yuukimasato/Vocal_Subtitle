@@ -6,8 +6,8 @@
   - ENGINE_LIFECYCLE.md (engine-lifecycle-v1)
 """
 
-from .degradation_log import DegradationLogger
 from .capability_maturity import build_capability_maturity
+from .degradation_log import DegradationLogger
 from .engine_availability import EngineAvailabilityChecker, EngineAvailabilitySnapshot
 from .feedback_profile import inspect_feedback_profile
 from .noise_shadow import build_noise_shadow

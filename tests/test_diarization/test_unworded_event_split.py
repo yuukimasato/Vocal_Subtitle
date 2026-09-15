@@ -34,7 +34,10 @@ def test_worded_event_splits_into_two_speakers():
     turns = [_turn(0, 0.0, 2.0), _turn(1, 2.0, 4.0)]
 
     output, diagnostics = assign_event_speakers(
-        [event], turns, word_split=True, min_part_duration=0.05,
+        [event],
+        turns,
+        word_split=True,
+        min_part_duration=0.05,
     )
 
     assert len(output) == 2
@@ -58,7 +61,10 @@ def test_unworded_event_stays_whole_and_marks_degraded():
     turns = [_turn(0, 0.0, 2.9), _turn(1, 2.9, 2.96), _turn(0, 2.96, 4.0)]
 
     output, diagnostics = assign_event_speakers(
-        [event], turns, word_split=True, min_part_duration=0.05,
+        [event],
+        turns,
+        word_split=True,
+        min_part_duration=0.05,
     )
 
     assert len(output) == 1
@@ -85,7 +91,10 @@ def test_invalid_word_times_are_not_fabricated_into_splits():
     turns = [_turn(0, 0.0, 2.0), _turn(1, 2.0, 4.0)]
 
     output, diagnostics = assign_event_speakers(
-        [event], turns, word_split=True, min_part_duration=0.05,
+        [event],
+        turns,
+        word_split=True,
+        min_part_duration=0.05,
     )
 
     assert len(output) == 1

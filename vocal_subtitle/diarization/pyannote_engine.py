@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
@@ -26,15 +26,17 @@ class PyannoteDiarizationEngine:
     def __init__(
         self,
         model_ref: str = "pyannote/speaker-diarization-community-1",
-        token: Optional[str] = None,
+        token: str | None = None,
         device: str = "auto",
         offline: bool = False,
-        cache_dir: Optional[str] = None,
+        cache_dir: str | None = None,
     ) -> None:
         self.model_ref = model_ref
         self.token = token if token and token != "***" else None
-        self.token = self.token or os.environ.get("HF_TOKEN") or os.environ.get(
-            "HUGGING_FACE_HUB_TOKEN"
+        self.token = (
+            self.token
+            or os.environ.get("HF_TOKEN")
+            or os.environ.get("HUGGING_FACE_HUB_TOKEN")
         )
         if not self.token:
             try:
@@ -50,7 +52,9 @@ class PyannoteDiarizationEngine:
 
     @property
     def name(self) -> str:
-        return "pyannote-community-1" if "community" in self.model_ref else "pyannote-3.1"
+        return (
+            "pyannote-community-1" if "community" in self.model_ref else "pyannote-3.1"
+        )
 
     # 预置全局说话人分离模型
     PRESET_MODELS = {
@@ -70,10 +74,10 @@ class PyannoteDiarizationEngine:
 
     @staticmethod
     def _restore_env(
-        previous_offline: Optional[str],
-        previous_hf_home: Optional[str],
-        previous_telemetry: Optional[str],
-        previous_timeout: Optional[str],
+        previous_offline: str | None,
+        previous_hf_home: str | None,
+        previous_telemetry: str | None,
+        previous_timeout: str | None,
     ) -> None:
         """Restore environment variables to their previous values."""
         for key, prev in (
@@ -95,7 +99,7 @@ class PyannoteDiarizationEngine:
             "model_access": "Hugging Face user conditions and token may be required",
         }
 
-    def _local_model_config(self) -> Optional[Path]:
+    def _local_model_config(self) -> Path | None:
         """Locate a complete local Hugging Face snapshot before using the network."""
         model_path = Path(self.model_ref).expanduser()
         if model_path.is_file():
@@ -106,8 +110,8 @@ class PyannoteDiarizationEngine:
         hf_home = self.cache_dir or Path(
             os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")
         )
-        model_dir = Path(hf_home) / "hub" / (
-            "models--" + self.model_ref.replace("/", "--")
+        model_dir = (
+            Path(hf_home) / "hub" / ("models--" + self.model_ref.replace("/", "--"))
         )
         refs_main = model_dir / "refs" / "main"
         revisions = []
@@ -155,8 +159,10 @@ class PyannoteDiarizationEngine:
             from pyannote.audio import Pipeline
         except ImportError as exc:
             self._restore_env(
-                previous_offline, previous_hf_home,
-                previous_telemetry, previous_timeout,
+                previous_offline,
+                previous_hf_home,
+                previous_telemetry,
+                previous_timeout,
             )
             raise ImportError(
                 "pyannote.audio is required for the pyannote diarization backend. "
@@ -169,7 +175,7 @@ class PyannoteDiarizationEngine:
             os.environ["HF_HUB_OFFLINE"] = "1"
 
         local_config = self._local_model_config()
-        _need_network = (local_config is None and not self.offline)
+        _need_network = local_config is None and not self.offline
 
         # ── 刷新 huggingface_hub 模块级离线常量 ──
         # vocal_subtitle.__init__ 在导入时设置 HF_HUB_OFFLINE=1，
@@ -180,12 +186,14 @@ class PyannoteDiarizationEngine:
             # 仅在确实需要网络时才关闭离线模式
             try:
                 import huggingface_hub.constants as _hf_constants
+
                 _saved_hf_offline = _hf_constants.HF_HUB_OFFLINE
                 _hf_constants.HF_HUB_OFFLINE = False
             except ImportError:
                 pass
             try:
                 import transformers.utils.hub as _tf_hub
+
                 _saved_tf_offline = _tf_hub._is_offline_mode
                 _tf_hub._is_offline_mode = False
             except (ImportError, ValueError, AttributeError):
@@ -241,19 +249,23 @@ class PyannoteDiarizationEngine:
                 self._pipeline = Pipeline.from_pretrained(self.model_ref, **kwargs)
         finally:
             self._restore_env(
-                previous_offline, previous_hf_home,
-                previous_telemetry, previous_timeout,
+                previous_offline,
+                previous_hf_home,
+                previous_telemetry,
+                previous_timeout,
             )
             # 恢复离线模式常量
             if _saved_hf_offline is not None:
                 try:
                     import huggingface_hub.constants as _hf_c
+
                     _hf_c.HF_HUB_OFFLINE = _saved_hf_offline
                 except ImportError:
                     pass
             if _saved_tf_offline is not None:
                 try:
                     import transformers.utils.hub as _tf_h
+
                     _tf_h._is_offline_mode = _saved_tf_offline
                 except ImportError:
                     pass
@@ -302,11 +314,9 @@ class PyannoteDiarizationEngine:
 
     @staticmethod
     def _overlap_duration(turns: list[tuple[float, float, str]]) -> float:
-        boundaries = sorted({
-            point
-            for start, end, _ in turns
-            for point in (start, end)
-        })
+        boundaries = sorted(
+            {point for start, end, _ in turns for point in (start, end)}
+        )
         total = 0.0
         for start, end in zip(boundaries, boundaries[1:]):
             if end <= start:
@@ -322,12 +332,12 @@ class PyannoteDiarizationEngine:
 
     def diarize(
         self,
-        audio_path: Optional[Path] = None,
-        audio: Optional[np.ndarray] = None,
+        audio_path: Path | None = None,
+        audio: np.ndarray | None = None,
         sample_rate: int = 16000,
         *,
-        min_speakers: Optional[int] = None,
-        max_speakers: Optional[int] = None,
+        min_speakers: int | None = None,
+        max_speakers: int | None = None,
     ) -> DiarizationResult:
         """对完整音频运行 diarization，并返回稳定的全局 speaker id。"""
         if audio_path is None and audio is None:
@@ -345,7 +355,8 @@ class PyannoteDiarizationEngine:
             if array.size < min_samples:
                 logger.debug(
                     "Audio too short for diarization (%d samples < %d min); returning empty result",
-                    array.size, min_samples,
+                    array.size,
+                    min_samples,
                 )
                 return DiarizationResult(
                     turns=[],
@@ -367,9 +378,7 @@ class PyannoteDiarizationEngine:
             kwargs["max_speakers"] = int(max_speakers)
         output = self._pipeline(source, **kwargs)
 
-        regular_annotation = self._get_annotation(
-            output, "speaker_diarization", output
-        )
+        regular_annotation = self._get_annotation(output, "speaker_diarization", output)
         exclusive_annotation = self._get_annotation(
             output, "exclusive_speaker_diarization", regular_annotation
         )

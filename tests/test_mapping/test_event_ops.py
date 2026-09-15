@@ -1,7 +1,5 @@
 """Tests for provenance-preserving event operations."""
 
-import pytest
-
 from vocal_subtitle.mapping.event_ops import (
     can_merge_events,
     clone_event,
@@ -12,7 +10,9 @@ from vocal_subtitle.mapping.event_ops import (
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 
 
-def _make_event(index: int, start: float, end: float, text: str, **kwargs) -> SubtitleEvent:
+def _make_event(
+    index: int, start: float, end: float, text: str, **kwargs
+) -> SubtitleEvent:
     defaults = {
         "index": index,
         "start": start,
@@ -30,7 +30,10 @@ def _make_event(index: int, start: float, end: float, text: str, **kwargs) -> Su
 class TestCloneEvent:
     def test_clone_preserves_all_fields(self):
         original = _make_event(
-            1, 0.0, 1.0, "hello",
+            1,
+            0.0,
+            1.0,
+            "hello",
             physical_bin_id="bin-1",
             source_word_ids=["w1", "w2"],
             speaker_status="confirmed",
@@ -68,8 +71,12 @@ class TestCloneEvent:
 class TestShiftEvent:
     def test_shift_moves_all_time_fields(self):
         event = _make_event(
-            1, 1.0, 2.0, "test",
-            physical_bin_start=1.0, physical_bin_end=2.0,
+            1,
+            1.0,
+            2.0,
+            "test",
+            physical_bin_start=1.0,
+            physical_bin_end=2.0,
             physical_spans=[{"start": 1.0, "end": 2.0, "physical_clip_id": "c1"}],
         )
         shifted = shift_event(event, 10.0)
@@ -120,12 +127,18 @@ class TestCanMerge:
         from vocal_subtitle.asr.base import WordTimestamp
 
         left = _make_event(
-            1, 0.0, 0.5, "hello",
+            1,
+            0.0,
+            0.5,
+            "hello",
             words=[WordTimestamp("hello", 0.0, 0.5)],
             source_word_ids=["left-word"],
         )
         right = _make_event(
-            2, 0.5, 1.0, "world",
+            2,
+            0.5,
+            1.0,
+            "world",
             words=[WordTimestamp("world", 0.0, 0.5)],
             source_word_ids=["right-word"],
         )
@@ -139,8 +152,12 @@ class TestCanMerge:
         assert merged.source_word_ids == ["left-word", "right-word"]
 
     def test_different_confirmed_speakers_prevent_merge(self):
-        left = _make_event(1, 0.0, 0.5, "hello", speaker_id=1, speaker_status="confirmed")
-        right = _make_event(2, 0.52, 1.0, "world", speaker_id=2, speaker_status="confirmed")
+        left = _make_event(
+            1, 0.0, 0.5, "hello", speaker_id=1, speaker_status="confirmed"
+        )
+        right = _make_event(
+            2, 0.52, 1.0, "world", speaker_id=2, speaker_status="confirmed"
+        )
 
         ok, reason = can_merge_events([left, right])
         assert ok is False
@@ -188,7 +205,15 @@ class TestMergeEventGroup:
         assert merged.text == "hello world"
 
     def test_merge_preserves_confirmed_speaker(self):
-        left = _make_event(1, 0.0, 0.5, "a", speaker_id=1, speaker_status="confirmed", speaker_source="diarization")
+        left = _make_event(
+            1,
+            0.0,
+            0.5,
+            "a",
+            speaker_id=1,
+            speaker_status="confirmed",
+            speaker_source="diarization",
+        )
         right = _make_event(2, 0.5, 1.0, "b", speaker_id=1, speaker_status="unknown")
 
         merged = merge_event_group([left, right], reason="speaker")

@@ -11,11 +11,12 @@ from __future__ import annotations
 import inspect
 import threading
 import time
+from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Optional, Sequence
+from typing import Any
 
-from .review_engines import ReviewEngineUnavailable
+from .review_engines import ReviewEngineUnavailableError
 
 
 class CancellationToken:
@@ -42,10 +43,10 @@ class CancellationToken:
 
     def raise_if_cancelled(self) -> None:
         if self.cancelled:
-            raise ReviewWindowCancelled(self.reason)
+            raise ReviewWindowCancelledError(self.reason)
 
 
-class ReviewWindowCancelled(RuntimeError):
+class ReviewWindowCancelledError(RuntimeError):
     """Raised by an adapter that cooperatively stops a window."""
 
 
@@ -54,8 +55,8 @@ class WindowExecutionResult:
     window_id: str
     candidates: tuple[Any, ...] = ()
     status: str = "ok"
-    reason: Optional[str] = None
-    error: Optional[str] = None
+    reason: str | None = None
+    error: str | None = None
     wall_time_seconds: float = 0.0
     resources: dict[str, Any] = field(default_factory=dict)
 
@@ -67,7 +68,7 @@ class WindowExecutionCoordinator:
         self,
         *,
         max_workers: int = 2,
-        timeout_seconds: Optional[float] = None,
+        timeout_seconds: float | None = None,
     ) -> None:
         if isinstance(max_workers, bool) or max_workers < 1:
             raise ValueError("max_workers must be a positive integer")
@@ -75,7 +76,7 @@ class WindowExecutionCoordinator:
             raise ValueError("timeout_seconds must be positive when provided")
         self.max_workers = int(max_workers)
         self.timeout_seconds = timeout_seconds
-        self._active_token: Optional[CancellationToken] = None
+        self._active_token: CancellationToken | None = None
         self._active_futures: set[Future[Any]] = set()
         self._lock = threading.Lock()
 
@@ -96,8 +97,8 @@ class WindowExecutionCoordinator:
         windows: Sequence[Any],
         engine: Any,
         *,
-        language: Optional[str] = None,
-        token: Optional[CancellationToken] = None,
+        language: str | None = None,
+        token: CancellationToken | None = None,
     ) -> tuple[list[Any], dict[str, Any]]:
         selected_token = token or CancellationToken()
         executor = ThreadPoolExecutor(
@@ -131,54 +132,66 @@ class WindowExecutionCoordinator:
                 item_started = time.perf_counter()
                 if selected_token.cancelled and not future.done():
                     future.cancel()
-                    results.append(WindowExecutionResult(
-                        window_id=window.id,
-                        status="cancelled",
-                        reason=selected_token.reason,
-                    ))
+                    results.append(
+                        WindowExecutionResult(
+                            window_id=window.id,
+                            status="cancelled",
+                            reason=selected_token.reason,
+                        )
+                    )
                     continue
                 try:
                     result = future.result(timeout=self.timeout_seconds)
                     if isinstance(result, WindowExecutionResult):
                         results.append(result)
                     else:
-                        results.append(WindowExecutionResult(
-                            window_id=window.id,
-                            candidates=tuple(result or ()),
-                            wall_time_seconds=time.perf_counter() - item_started,
-                        ))
+                        results.append(
+                            WindowExecutionResult(
+                                window_id=window.id,
+                                candidates=tuple(result or ()),
+                                wall_time_seconds=time.perf_counter() - item_started,
+                            )
+                        )
                 except TimeoutError:
                     selected_token.cancel("window_timeout")
                     future.cancel()
-                    results.append(WindowExecutionResult(
-                        window_id=window.id,
-                        status="timeout",
-                        reason="window_timeout",
-                        wall_time_seconds=time.perf_counter() - item_started,
-                    ))
-                except ReviewWindowCancelled as exc:
-                    results.append(WindowExecutionResult(
-                        window_id=window.id,
-                        status="cancelled",
-                        reason=str(exc) or selected_token.reason,
-                        wall_time_seconds=time.perf_counter() - item_started,
-                    ))
-                except ReviewEngineUnavailable as exc:
-                    results.append(WindowExecutionResult(
-                        window_id=window.id,
-                        status="unavailable",
-                        reason=exc.reason,
-                        error=exc.detail or str(exc),
-                        wall_time_seconds=time.perf_counter() - item_started,
-                    ))
+                    results.append(
+                        WindowExecutionResult(
+                            window_id=window.id,
+                            status="timeout",
+                            reason="window_timeout",
+                            wall_time_seconds=time.perf_counter() - item_started,
+                        )
+                    )
+                except ReviewWindowCancelledError as exc:
+                    results.append(
+                        WindowExecutionResult(
+                            window_id=window.id,
+                            status="cancelled",
+                            reason=str(exc) or selected_token.reason,
+                            wall_time_seconds=time.perf_counter() - item_started,
+                        )
+                    )
+                except ReviewEngineUnavailableError as exc:
+                    results.append(
+                        WindowExecutionResult(
+                            window_id=window.id,
+                            status="unavailable",
+                            reason=exc.reason,
+                            error=exc.detail or str(exc),
+                            wall_time_seconds=time.perf_counter() - item_started,
+                        )
+                    )
                 except Exception as exc:  # adapter failures are window-scoped
-                    results.append(WindowExecutionResult(
-                        window_id=window.id,
-                        status="failed",
-                        reason="execution_failed",
-                        error=str(exc),
-                        wall_time_seconds=time.perf_counter() - item_started,
-                    ))
+                    results.append(
+                        WindowExecutionResult(
+                            window_id=window.id,
+                            status="failed",
+                            reason="execution_failed",
+                            error=str(exc),
+                            wall_time_seconds=time.perf_counter() - item_started,
+                        )
+                    )
                 finally:
                     with self._lock:
                         self._active_futures.discard(future)
@@ -189,23 +202,28 @@ class WindowExecutionCoordinator:
                         status="cancelled",
                         reason=selected_token.reason,
                     )
-                    for window in windows[len(results):]
+                    for window in windows[len(results) :]
                 )
-            candidates = [candidate for result in results for candidate in result.candidates]
+            candidates = [
+                candidate for result in results for candidate in result.candidates
+            ]
             diagnostics = {
                 "engine": getattr(engine, "name", "unknown"),
                 "model": getattr(engine, "model_name", None),
                 "max_workers": self.max_workers,
                 "timeout_seconds": self.timeout_seconds,
                 "window_count": len(windows),
-                "cancelled_count": sum(1 for item in results if item.status == "cancelled"),
+                "cancelled_count": sum(
+                    1 for item in results if item.status == "cancelled"
+                ),
                 "timeout_count": sum(1 for item in results if item.status == "timeout"),
                 "failed_count": sum(1 for item in results if item.status == "failed"),
-
                 "completed_window_count": len(results),
                 "candidate_count": len(candidates),
                 "cancelled": selected_token.cancelled,
-                "cancel_reason": selected_token.reason if selected_token.cancelled else None,
+                "cancel_reason": selected_token.reason
+                if selected_token.cancelled
+                else None,
                 "status_counts": self._status_counts(results),
                 "windows": [self._result_to_dict(item) for item in results],
                 "wall_time_seconds": round(time.perf_counter() - started, 6),
@@ -226,7 +244,7 @@ class WindowExecutionCoordinator:
         audio: Any,
         sample_rate: int,
         window: Any,
-        language: Optional[str],
+        language: str | None,
         token: CancellationToken,
     ) -> WindowExecutionResult:
         token.raise_if_cancelled()
@@ -269,7 +287,7 @@ class WindowExecutionCoordinator:
 
 __all__ = [
     "CancellationToken",
-    "ReviewWindowCancelled",
+    "ReviewWindowCancelledError",
     "WindowExecutionCoordinator",
     "WindowExecutionResult",
 ]

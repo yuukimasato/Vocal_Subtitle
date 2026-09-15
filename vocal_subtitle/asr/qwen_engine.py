@@ -9,13 +9,18 @@ from __future__ import annotations
 import importlib
 import importlib.util
 from pathlib import Path
-from typing import Any, Optional
+from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 
-from .base import ASREngine, ASRDependencyError, ASRModelError, TranscriptionSegment, WordTimestamp
-from .optional_adapters import _adapt_qwen_segments
-from .review_engines import ReviewEngineUnavailable
+from .base import (
+    ASRDependencyError,
+    ASREngine,
+    ASRModelError,
+    TranscriptionSegment,
+    WordTimestamp,
+)
 from .model_paths import (
     DEFAULT_QWEN_MODEL,
     default_qwen_model_path,
@@ -23,7 +28,9 @@ from .model_paths import (
     qwen_language_name,
     review_model_cache_dir,
 )
-from types import SimpleNamespace
+from .optional_adapters import _adapt_qwen_segments
+from .review_engines import ReviewEngineUnavailableError
+
 
 def qwen_model_cache_dir() -> Path:
     """Backward-compatible alias for the shared review model directory."""
@@ -37,8 +44,7 @@ def qwen_model_path_ready(model_path: str | Path | None) -> bool:
     if not (path / "config.json").is_file():
         return False
     return any(
-        item.is_file()
-        and item.suffix in {".safetensors", ".bin", ".pt", ".pth"}
+        item.is_file() and item.suffix in {".safetensors", ".bin", ".pt", ".pth"}
         for item in path.rglob("*")
     )
 
@@ -51,7 +57,7 @@ class QwenASREngine(ASREngine):
         model_path: str | None = None,
         *,
         device: str = "auto",
-        language: Optional[str] = None,
+        language: str | None = None,
     ) -> None:
         self._model_path = str(model_path or default_qwen_model_path())
         self._device = device
@@ -73,11 +79,23 @@ class QwenASREngine(ASREngine):
     def availability(self) -> dict[str, Any]:
         path = Path(self.model_path)
         if not path.is_dir():
-            return {"status": "unavailable", "reason": "model_path_missing", "model": str(path)}
+            return {
+                "status": "unavailable",
+                "reason": "model_path_missing",
+                "model": str(path),
+            }
         if not qwen_model_path_ready(path):
-            return {"status": "unavailable", "reason": "model_snapshot_incomplete", "model": str(path)}
+            return {
+                "status": "unavailable",
+                "reason": "model_snapshot_incomplete",
+                "model": str(path),
+            }
         if importlib.util.find_spec("qwen_asr") is None:
-            return {"status": "unavailable", "reason": "qwen_asr_not_installed", "model": str(path)}
+            return {
+                "status": "unavailable",
+                "reason": "qwen_asr_not_installed",
+                "model": str(path),
+            }
         return {"status": "ready", "model": str(path)}
 
     def load_model(self) -> None:
@@ -98,7 +116,11 @@ class QwenASREngine(ASREngine):
                 "and its compatible runtime dependencies."
             ) from exc
         try:
-            kwargs = {} if self._device in {"", "auto", None} else {"device_map": self._device}
+            kwargs = (
+                {}
+                if self._device in {"", "auto", None}
+                else {"device_map": self._device}
+            )
             self._model = model_type.from_pretrained(str(path), **kwargs)
         except Exception as exc:
             raise ASRModelError(f"Failed to load Qwen ASR model {path}: {exc}") from exc
@@ -107,11 +129,13 @@ class QwenASREngine(ASREngine):
         self,
         audio: np.ndarray,
         sample_rate: int = 16000,
-        language: Optional[str] = None,
+        language: str | None = None,
         **kwargs: Any,
     ) -> list[TranscriptionSegment]:
         self.load_model()
-        window = SimpleNamespace(id="qwen-primary", start=0.0, end=len(audio) / sample_rate)
+        window = SimpleNamespace(
+            id="qwen-primary", start=0.0, end=len(audio) / sample_rate
+        )
         try:
             qwen_language = qwen_language_name(language or self._language)
             raw = self._model.transcribe(
@@ -131,7 +155,7 @@ class QwenASREngine(ASREngine):
             candidates = _adapt_qwen_segments(
                 raw, window=window, model_name=self.model_name
             )
-        except (TypeError, ValueError, ReviewEngineUnavailable) as exc:
+        except (TypeError, ValueError, ReviewEngineUnavailableError) as exc:
             raise ASRModelError(f"Qwen ASR returned an invalid result: {exc}") from exc
 
         results: list[TranscriptionSegment] = []

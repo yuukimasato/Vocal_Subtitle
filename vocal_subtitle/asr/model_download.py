@@ -6,14 +6,15 @@ import os
 from pathlib import Path
 from typing import Any
 
-
 SUPPORTED_FASTER_WHISPER_MODELS = ("tiny", "small", "medium", "large-v3")
 
 
 def faster_whisper_model_ref(model: str) -> str:
     if model not in SUPPORTED_FASTER_WHISPER_MODELS:
         choices = ", ".join(SUPPORTED_FASTER_WHISPER_MODELS)
-        raise ValueError(f"unsupported faster-whisper model {model!r}; choose {choices}")
+        raise ValueError(
+            f"unsupported faster-whisper model {model!r}; choose {choices}"
+        )
     return f"Systran/faster-whisper-{model}"
 
 
@@ -34,8 +35,7 @@ def is_faster_whisper_model_cached(model: str) -> bool:
     if not snapshots.is_dir():
         return False
     return any(
-        (snapshot / "config.json").is_file()
-        and (snapshot / "model.bin").is_file()
+        (snapshot / "config.json").is_file() and (snapshot / "model.bin").is_file()
         for snapshot in snapshots.iterdir()
         if snapshot.is_dir()
     )

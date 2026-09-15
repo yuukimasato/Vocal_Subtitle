@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from typing import Any, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass
+from typing import Any
 
 from .matching import (
     DEFAULT_STRICT_MIN_OVERLAP_SECONDS,
@@ -32,7 +33,9 @@ class GoldenQualityThresholds:
     max_subtitle_overlap_rate: float = 1.0
 
 
-def _matched(expected: Mapping[str, Any], predicted: Sequence[Mapping[str, Any]]) -> bool:
+def _matched(
+    expected: Mapping[str, Any], predicted: Sequence[Mapping[str, Any]]
+) -> bool:
     return classify_expected_match(expected, predicted)["matched"]
 
 
@@ -52,7 +55,8 @@ def _range_values(item: Mapping[str, Any]) -> tuple[float, float] | None:
 
 
 def _covered_duration(
-    span: Mapping[str, Any], cues: Sequence[Mapping[str, Any]],
+    span: Mapping[str, Any],
+    cues: Sequence[Mapping[str, Any]],
 ) -> float:
     span_range = _range_values(span)
     if span_range is None:
@@ -87,7 +91,9 @@ def audit_case_coverage(
     final_cues: Sequence[Mapping[str, Any]] | None,
 ) -> dict[str, Any]:
     """Audit final cue coverage against supplied physical speech evidence."""
-    spans = [item for item in (physical_speech_spans or ()) if isinstance(item, Mapping)]
+    spans = [
+        item for item in (physical_speech_spans or ()) if isinstance(item, Mapping)
+    ]
     cues = [item for item in (final_cues or ()) if isinstance(item, Mapping)]
     valid_spans = [item for item in spans if _range_values(item) is not None]
     if not valid_spans:
@@ -100,7 +106,9 @@ def audit_case_coverage(
             "trailing_silence_ms": None,
         }
 
-    total_duration = sum(_range_values(item)[1] - _range_values(item)[0] for item in valid_spans)
+    total_duration = sum(
+        _range_values(item)[1] - _range_values(item)[0] for item in valid_spans
+    )
     covered_duration = sum(_covered_duration(item, cues) for item in valid_spans)
     last_speech_end = max(_range_values(item)[1] for item in valid_spans)
     cue_ends = [
@@ -111,7 +119,8 @@ def audit_case_coverage(
     last_cue_end = max(cue_ends, default=None)
     trailing_silence_ms = (
         round(max(0.0, last_cue_end - last_speech_end) * 1000.0, 3)
-        if last_cue_end is not None else 0.0
+        if last_cue_end is not None
+        else 0.0
     )
     blank_duration = max(0.0, total_duration - covered_duration)
     return {
@@ -124,7 +133,8 @@ def audit_case_coverage(
         "speech_duration_seconds": round(total_duration, 6),
         "blank_duration_seconds": round(blank_duration, 6),
         "audible_blank_rate": round(blank_duration / total_duration, 6)
-        if total_duration else 0.0,
+        if total_duration
+        else 0.0,
         "last_physical_speech_end": last_speech_end,
         "last_final_cue_end": last_cue_end,
         "trailing_silence_ms": trailing_silence_ms,
@@ -202,8 +212,16 @@ def evaluate_golden_set(
     }
 
     for case in normalized_cases:
-        expected = [item for item in case.get("expected_events", ()) if isinstance(item, Mapping)]
-        predicted = [item for item in case.get("predicted_events", ()) if isinstance(item, Mapping)]
+        expected = [
+            item
+            for item in case.get("expected_events", ())
+            if isinstance(item, Mapping)
+        ]
+        predicted = [
+            item
+            for item in case.get("predicted_events", ())
+            if isinstance(item, Mapping)
+        ]
         reference_role = str(case.get("reference_role", "")).casefold()
         reference_status = str(case.get("reference_status", "")).casefold()
         has_reference = (
@@ -215,7 +233,9 @@ def evaluate_golden_set(
             if reference_role == "strict":
                 strict_reference_case_count += 1
         event_total += len(predicted)
-        categories.update(str(item) for item in case.get("categories", ()) if str(item).strip())
+        categories.update(
+            str(item) for item in case.get("categories", ()) if str(item).strip()
+        )
         case_misses: list[dict[str, Any]] = []
         strict_case_misses: list[dict[str, Any]] = []
         for item in expected:
@@ -248,11 +268,13 @@ def evaluate_golden_set(
                     miss_attribution_counts[stage] = (
                         miss_attribution_counts.get(stage, 0) + 1
                     )
-                    case_misses.append({
-                        **match,
-                        "legacy_match": match,
-                        "strict_match": strict_match,
-                    })
+                    case_misses.append(
+                        {
+                            **match,
+                            "legacy_match": match,
+                            "strict_match": strict_match,
+                        }
+                    )
         detailed_case_misses = attribute_case_misses(
             expected,
             predicted,
@@ -273,7 +295,10 @@ def evaluate_golden_set(
         case_previous_end: float | None = None
         for predicted_item in sorted(
             predicted,
-            key=lambda entry: (float(entry.get("start", 0.0)), float(entry.get("end", 0.0))),
+            key=lambda entry: (
+                float(entry.get("start", 0.0)),
+                float(entry.get("end", 0.0)),
+            ),
         ):
             for word in predicted_item.get("words", ()) or ():
                 if not isinstance(word, Mapping):
@@ -301,15 +326,31 @@ def evaluate_golden_set(
             if case_previous_end is not None and item_start < case_previous_end - 1e-9:
                 overlapping_events += 1
             case_previous_end = (
-                item_end if case_previous_end is None else max(case_previous_end, item_end)
+                item_end
+                if case_previous_end is None
+                else max(case_previous_end, item_end)
             )
-        for key in ("physical_violation_count", "cross_silence_count", "raw_event_bypass_count"):
+        for key in (
+            "physical_violation_count",
+            "cross_silence_count",
+            "raw_event_bypass_count",
+        ):
             value = diagnostic.get(key)
             if value is None:
                 missing_diagnostics[key] = missing_diagnostics.get(key, 0) + 1
         physical_violations += int(diagnostic.get("physical_violation_count", 0) or 0)
-        cross_silence += int(diagnostic.get("cross_silence_count", diagnostic.get("cross_silence_events", 0)) or 0)
-        raw_bypass += int(diagnostic.get("raw_event_bypass_count", diagnostic.get("global_event_bypass_count", 0)) or 0)
+        cross_silence += int(
+            diagnostic.get(
+                "cross_silence_count", diagnostic.get("cross_silence_events", 0)
+            )
+            or 0
+        )
+        raw_bypass += int(
+            diagnostic.get(
+                "raw_event_bypass_count", diagnostic.get("global_event_bypass_count", 0)
+            )
+            or 0
+        )
         global_diagnostic = diagnostic.get("global_evidence", {})
         if isinstance(global_diagnostic, Mapping):
             for key in global_evidence_summary:
@@ -327,11 +368,19 @@ def evaluate_golden_set(
             case.get("final_cues", predicted),
         )
         coverage_status = str(coverage.get("status", "not_evaluable"))
-        coverage_case_counts[coverage_status] = coverage_case_counts.get(coverage_status, 0) + 1
+        coverage_case_counts[coverage_status] = (
+            coverage_case_counts.get(coverage_status, 0) + 1
+        )
         if coverage_status != "not_evaluable":
-            coverage_blank_duration += float(coverage.get("blank_duration_seconds", 0.0) or 0.0)
-            coverage_speech_duration += float(coverage.get("speech_duration_seconds", 0.0) or 0.0)
-            trailing_silence_values.append(float(coverage.get("trailing_silence_ms", 0.0) or 0.0))
+            coverage_blank_duration += float(
+                coverage.get("blank_duration_seconds", 0.0) or 0.0
+            )
+            coverage_speech_duration += float(
+                coverage.get("speech_duration_seconds", 0.0) or 0.0
+            )
+            trailing_silence_values.append(
+                float(coverage.get("trailing_silence_ms", 0.0) or 0.0)
+            )
 
         case_engine_status = case.get("engine_status")
         if not isinstance(case_engine_status, Mapping) or not case_engine_status:
@@ -340,38 +389,50 @@ def evaluate_golden_set(
             for engine_name, entry in case_engine_status.items():
                 if not isinstance(entry, Mapping):
                     continue
-                aggregate = engine_status_summary.setdefault(engine_name, {
-                    "case_count": 0,
-                    "selected_count": 0,
-                    "enabled_count": 0,
-                    "available_count": 0,
-                    "windows_processed": 0,
-                    "windows_failed": 0,
-                })
+                aggregate = engine_status_summary.setdefault(
+                    engine_name,
+                    {
+                        "case_count": 0,
+                        "selected_count": 0,
+                        "enabled_count": 0,
+                        "available_count": 0,
+                        "windows_processed": 0,
+                        "windows_failed": 0,
+                    },
+                )
                 aggregate["case_count"] += 1
                 aggregate["selected_count"] += int(bool(entry.get("selected")))
                 aggregate["enabled_count"] += int(bool(entry.get("enabled")))
                 aggregate["available_count"] += int(bool(entry.get("available")))
-                aggregate["windows_processed"] += int(entry.get("windows_processed", 0) or 0)
+                aggregate["windows_processed"] += int(
+                    entry.get("windows_processed", 0) or 0
+                )
                 aggregate["windows_failed"] += int(entry.get("windows_failed", 0) or 0)
 
         if case_misses or strict_case_misses or detailed_case_misses:
-            case_summaries.append({
-                "id": case.get("id"),
-                "miss_count": len(case_misses),
-                "miss_attribution": case_misses,
-                "strict_miss_count": len(strict_case_misses),
-                "strict_miss_attribution": strict_case_misses,
-                "detailed_miss_count": len(detailed_case_misses),
-                "detailed_miss_attribution": detailed_case_misses,
-                "engine_status": dict(case_engine_status or {
-                    "status": "unavailable",
-                    "reason": "case_engine_status_missing",
-                }) if isinstance(case_engine_status, Mapping) else {
-                    "status": "unavailable",
-                    "reason": "case_engine_status_missing",
-                },
-            })
+            case_summaries.append(
+                {
+                    "id": case.get("id"),
+                    "miss_count": len(case_misses),
+                    "miss_attribution": case_misses,
+                    "strict_miss_count": len(strict_case_misses),
+                    "strict_miss_attribution": strict_case_misses,
+                    "detailed_miss_count": len(detailed_case_misses),
+                    "detailed_miss_attribution": detailed_case_misses,
+                    "engine_status": dict(
+                        case_engine_status
+                        or {
+                            "status": "unavailable",
+                            "reason": "case_engine_status_missing",
+                        }
+                    )
+                    if isinstance(case_engine_status, Mapping)
+                    else {
+                        "status": "unavailable",
+                        "reason": "case_engine_status_missing",
+                    },
+                }
+            )
 
     decision_total = sum(action_counts.values())
     missing_categories = sorted(set(required_categories) - categories)
@@ -386,7 +447,9 @@ def evaluate_golden_set(
         "event_count": event_total,
         "expected_speech_count": speech_total,
         "expected_non_speech_count": hallucination_total,
-        "hallucination_retention_rate": _rate(hallucination_retained, hallucination_total),
+        "hallucination_retention_rate": _rate(
+            hallucination_retained, hallucination_total
+        ),
         "real_speech_drop_rate": _rate(speech_dropped, speech_total),
         "strict_speech_drop_rate": _rate(strict_speech_dropped, speech_total),
         "strict_match_only_failure_count": strict_match_only_failure_count,
@@ -410,15 +473,20 @@ def evaluate_golden_set(
         "detailed_miss_attribution_counts": detailed_miss_attribution_counts,
         "coverage": {
             "status": (
-                "not_evaluable" if not trailing_silence_values
-                else "fail" if coverage_case_counts.get("fail", 0) else "pass"
+                "not_evaluable"
+                if not trailing_silence_values
+                else "fail"
+                if coverage_case_counts.get("fail", 0)
+                else "pass"
             ),
             "case_counts": coverage_case_counts,
             "evaluable_case_count": len(trailing_silence_values),
             "audible_blank_rate": _rate(
                 round(coverage_blank_duration, 6),
                 round(coverage_speech_duration, 6),
-            ) if coverage_speech_duration else None,
+            )
+            if coverage_speech_duration
+            else None,
             "trailing_silence_ms": max(trailing_silence_values, default=None),
         },
         "engine_status": engine_status_summary,
@@ -426,17 +494,22 @@ def evaluate_golden_set(
         "global_evidence": global_evidence_summary,
     }
     checks = {
-        "hallucination_retention": metrics["hallucination_retention_rate"] <= policy.max_hallucination_retention_rate,
-        "real_speech_drop": metrics["real_speech_drop_rate"] <= policy.max_real_speech_drop_rate,
-        "physical_violation": metrics["physical_violation_rate"] <= policy.max_physical_violation_rate,
+        "hallucination_retention": metrics["hallucination_retention_rate"]
+        <= policy.max_hallucination_retention_rate,
+        "real_speech_drop": metrics["real_speech_drop_rate"]
+        <= policy.max_real_speech_drop_rate,
+        "physical_violation": metrics["physical_violation_rate"]
+        <= policy.max_physical_violation_rate,
         "cross_silence": metrics["cross_silence_rate"] <= policy.max_cross_silence_rate,
         "unresolved": metrics["unresolved_rate"] <= policy.max_unresolved_rate,
         "split": metrics["split_rate"] <= policy.max_split_rate,
         "drop": metrics["drop_rate"] <= policy.max_drop_rate,
         "trace": metrics["trace_missing_rate"] <= policy.max_trace_missing_rate,
         "raw_bypass": metrics["raw_bypass_count"] <= policy.max_raw_bypass_count,
-        "word_time_coverage": metrics["word_time_coverage_rate"] >= policy.min_word_time_coverage_rate,
-        "subtitle_overlap": metrics["subtitle_overlap_rate"] <= policy.max_subtitle_overlap_rate,
+        "word_time_coverage": metrics["word_time_coverage_rate"]
+        >= policy.min_word_time_coverage_rate,
+        "subtitle_overlap": metrics["subtitle_overlap_rate"]
+        <= policy.max_subtitle_overlap_rate,
         "diagnostics_complete": not missing_diagnostics,
         "required_categories": not missing_categories,
     }
@@ -448,16 +521,20 @@ def evaluate_golden_set(
     reference_applicable = speech_total > 0
     reference_passed = checks["real_speech_drop"] if reference_applicable else True
     reference_status_value = (
-        "pass" if reference_applicable and reference_passed
-        else "fail" if reference_applicable
+        "pass"
+        if reference_applicable and reference_passed
+        else "fail"
+        if reference_applicable
         else "not_applicable"
     )
     selected_passed = safety_passed and (
         reference_passed if gate_mode == "strict-reference" else True
     )
     release_status = (
-        "blocked" if not safety_passed
-        else "reference_improvement_required" if not reference_passed
+        "blocked"
+        if not safety_passed
+        else "reference_improvement_required"
+        if not reference_passed
         else "pass"
     )
     reference_quality = {
@@ -596,7 +673,9 @@ def evaluate_tts_golden_set(
         diagnostic = case.get("diagnostics", {})
         if not isinstance(diagnostic, Mapping):
             diagnostic = {}
-        start_deltas.append(float(diagnostic.get("skeleton_start_delta_ms", 0.0) or 0.0))
+        start_deltas.append(
+            float(diagnostic.get("skeleton_start_delta_ms", 0.0) or 0.0)
+        )
         end_deltas.append(float(diagnostic.get("skeleton_end_delta_ms", 0.0) or 0.0))
         coverage = diagnostic.get("skeleton_coverage_rate")
         if coverage is not None:
@@ -622,7 +701,8 @@ def evaluate_tts_golden_set(
     }
     checks = {
         "skeleton_start_delta": (
-            metrics["skeleton_start_delta_p90_ms"] <= policy.max_skeleton_start_delta_p90_ms
+            metrics["skeleton_start_delta_p90_ms"]
+            <= policy.max_skeleton_start_delta_p90_ms
         ),
         "skeleton_end_delta": (
             metrics["skeleton_end_delta_p90_ms"] <= policy.max_skeleton_end_delta_p90_ms

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional
+from typing import Any
 
 from .common import CONTRACT_VERSION, REPORT_SCHEMA_VERSION, jsonable
 
@@ -26,7 +26,7 @@ class RunReport:
         return result
 
     @classmethod
-    def from_legacy(cls, report: Any) -> "RunReport":
+    def from_legacy(cls, report: Any) -> RunReport:
         payload = report.to_dict() if hasattr(report, "to_dict") else dict(report or {})
         return cls(
             run_id=str(payload.get("run_id", getattr(report, "run_id", ""))),

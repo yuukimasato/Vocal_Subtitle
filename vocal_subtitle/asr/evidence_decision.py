@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any
 
-from .evidence import CandidateEvidence, EvidenceDecision, EvidenceWord
+from .evidence import CandidateEvidence, EvidenceDecision
 from .risk_scoring import RiskAssessment, normalize_text
 
 
@@ -21,7 +22,7 @@ class DecisionConfig:
 class EvidenceDecisionEngine:
     """Make conservative, traceable decisions from candidate evidence."""
 
-    def __init__(self, config: Optional[DecisionConfig] = None):
+    def __init__(self, config: DecisionConfig | None = None):
         self.config = config or DecisionConfig()
 
     def decide_bundle(
@@ -54,21 +55,25 @@ class EvidenceDecisionEngine:
             candidate_bundles = bundles_by_candidate.get(candidate.id, [])
             split_parts = self._split_parts(candidate, alternatives)
             if split_parts:
-                decisions.extend(self.split(
-                    candidate,
-                    split_parts,
-                    assessment=assessment,
-                    physical_timeline=physical_timeline,
-                    evidence_codes=self._bundle_codes(candidate_bundles),
-                ))
+                decisions.extend(
+                    self.split(
+                        candidate,
+                        split_parts,
+                        assessment=assessment,
+                        physical_timeline=physical_timeline,
+                        evidence_codes=self._bundle_codes(candidate_bundles),
+                    )
+                )
             else:
-                decisions.append(self.decide(
-                    candidate,
-                    assessment=assessment,
-                    alternatives=alternatives,
-                    physical_timeline=physical_timeline,
-                    secondary_bundles=candidate_bundles,
-                ))
+                decisions.append(
+                    self.decide(
+                        candidate,
+                        assessment=assessment,
+                        alternatives=alternatives,
+                        physical_timeline=physical_timeline,
+                        secondary_bundles=candidate_bundles,
+                    )
+                )
         return decisions
 
     def decide(
@@ -80,12 +85,14 @@ class EvidenceDecisionEngine:
         physical_timeline: Any = None,
         secondary_bundles: Sequence[Any] = (),
     ) -> EvidenceDecision:
-        trace: list[dict[str, Any]] = [{
-            "stage": "risk_scoring",
-            "score": assessment.score,
-            "level": assessment.level,
-            "evidence_codes": list(assessment.evidence_codes),
-        }]
+        trace: list[dict[str, Any]] = [
+            {
+                "stage": "risk_scoring",
+                "score": assessment.score,
+                "level": assessment.level,
+                "evidence_codes": list(assessment.evidence_codes),
+            }
+        ]
         selected = candidate
         decision = "keep"
         codes = list(assessment.evidence_codes)
@@ -100,7 +107,9 @@ class EvidenceDecisionEngine:
             return self._drop_from_evidence(
                 candidate,
                 assessment=assessment,
-                evidence_codes=tuple(dict.fromkeys((*codes, "multi_source_non_speech"))),
+                evidence_codes=tuple(
+                    dict.fromkeys((*codes, "multi_source_non_speech"))
+                ),
                 physical_timeline=physical_timeline,
                 sources=self._drop_sources(secondary_bundles),
             )
@@ -109,12 +118,14 @@ class EvidenceDecisionEngine:
             if selected.id != candidate.id:
                 decision = "replace"
                 codes.append(f"{selected.source}_agreement")
-                trace.append({
-                    "stage": "alternative_selection",
-                    "source": selected.source,
-                    "selected_candidate_id": selected.id,
-                    "alternative_count": len(alternatives),
-                })
+                trace.append(
+                    {
+                        "stage": "alternative_selection",
+                        "source": selected.source,
+                        "selected_candidate_id": selected.id,
+                        "alternative_count": len(alternatives),
+                    }
+                )
         elif assessment.level in {"high", "critical"}:
             decision = "unresolved"
             codes.append("review_unavailable_or_conflicting")
@@ -123,11 +134,13 @@ class EvidenceDecisionEngine:
         physical = self._validate_physical(selected, physical_timeline)
         if not physical["valid"]:
             if selected.id != candidate.id:
-                trace.append({
-                    "stage": "replacement_rejected",
-                    "reason": "physical_validation_failed",
-                    "selected_candidate_id": selected.id,
-                })
+                trace.append(
+                    {
+                        "stage": "replacement_rejected",
+                        "reason": "physical_validation_failed",
+                        "selected_candidate_id": selected.id,
+                    }
+                )
                 selected = candidate
                 physical = self._validate_physical(candidate, physical_timeline)
             decision = "unresolved"
@@ -142,14 +155,18 @@ class EvidenceDecisionEngine:
         final_text = selected.text if decision != "drop" and keep_unresolved else ""
         final_words = selected.words if decision != "drop" and keep_unresolved else ()
         return EvidenceDecision(
-            candidate_ids=tuple(dict.fromkeys([candidate.id] + [item.id for item in alternatives])),
+            candidate_ids=tuple(
+                dict.fromkeys([candidate.id] + [item.id for item in alternatives])
+            ),
             decision=decision,
             final_text=final_text,
             final_words=tuple(final_words),
             start=selected.start if decision != "drop" and keep_unresolved else None,
             end=selected.end if decision != "drop" and keep_unresolved else None,
             time_source=self._time_source(selected),
-            confidence=selected.confidence if decision != "drop" and keep_unresolved else None,
+            confidence=selected.confidence
+            if decision != "drop" and keep_unresolved
+            else None,
             risk_score=assessment.score,
             risk_level=assessment.level,
             evidence_codes=tuple(dict.fromkeys(codes)),
@@ -190,9 +207,12 @@ class EvidenceDecisionEngine:
         )
 
     @staticmethod
-    def _alternatives(candidate: CandidateEvidence, review: Sequence[CandidateEvidence]) -> list[CandidateEvidence]:
+    def _alternatives(
+        candidate: CandidateEvidence, review: Sequence[CandidateEvidence]
+    ) -> list[CandidateEvidence]:
         return [
-            item for item in review
+            item
+            for item in review
             if min(candidate.end, item.end) > max(candidate.start, item.start)
         ]
 
@@ -242,26 +262,48 @@ class EvidenceDecisionEngine:
         for part in parts:
             physical = self._validate_physical(part, physical_timeline)
             accepted = physical["valid"]
-            result.append(EvidenceDecision(
-                candidate_ids=(candidate.id, part.id),
-                decision="split" if accepted else "unresolved",
-                final_text=part.text if accepted or self.config.unresolved_keeps_candidate else "",
-                final_words=part.words if accepted or self.config.unresolved_keeps_candidate else (),
-                start=part.start if accepted or self.config.unresolved_keeps_candidate else None,
-                end=part.end if accepted or self.config.unresolved_keeps_candidate else None,
-                time_source=self._time_source(part),
-                confidence=part.confidence if accepted or self.config.unresolved_keeps_candidate else None,
-                risk_score=assessment.score,
-                risk_level=assessment.level,
-                evidence_codes=tuple(dict.fromkeys((*assessment.evidence_codes, *evidence_codes, "context_reasr_split"))),
-                physical_validation=physical,
-                revision_trace=({
-                    "stage": "split",
-                    "source_candidate_id": candidate.id,
-                    "part_candidate_id": part.id,
-                    "physical_valid": accepted,
-                },),
-            ))
+            result.append(
+                EvidenceDecision(
+                    candidate_ids=(candidate.id, part.id),
+                    decision="split" if accepted else "unresolved",
+                    final_text=part.text
+                    if accepted or self.config.unresolved_keeps_candidate
+                    else "",
+                    final_words=part.words
+                    if accepted or self.config.unresolved_keeps_candidate
+                    else (),
+                    start=part.start
+                    if accepted or self.config.unresolved_keeps_candidate
+                    else None,
+                    end=part.end
+                    if accepted or self.config.unresolved_keeps_candidate
+                    else None,
+                    time_source=self._time_source(part),
+                    confidence=part.confidence
+                    if accepted or self.config.unresolved_keeps_candidate
+                    else None,
+                    risk_score=assessment.score,
+                    risk_level=assessment.level,
+                    evidence_codes=tuple(
+                        dict.fromkeys(
+                            (
+                                *assessment.evidence_codes,
+                                *evidence_codes,
+                                "context_reasr_split",
+                            )
+                        )
+                    ),
+                    physical_validation=physical,
+                    revision_trace=(
+                        {
+                            "stage": "split",
+                            "source_candidate_id": candidate.id,
+                            "part_candidate_id": part.id,
+                            "physical_valid": accepted,
+                        },
+                    ),
+                )
+            )
         return result
 
     @staticmethod
@@ -270,7 +312,8 @@ class EvidenceDecisionEngine:
         alternatives: Sequence[CandidateEvidence],
     ) -> list[CandidateEvidence]:
         parts = [
-            item for item in alternatives
+            item
+            for item in alternatives
             if item.source != "segmented"
             and item.has_word_times
             and item.start >= candidate.start - 0.10
@@ -296,11 +339,27 @@ class EvidenceDecisionEngine:
                 codes.append("forced_alignment_observed")
             if source == "sed":
                 label = str(evidence.get("label", evidence.get("class", ""))).casefold()
-                if any(token in label for token in ("breath", "music", "noise", "non_speech", "non-speech")):
+                if any(
+                    token in label
+                    for token in (
+                        "breath",
+                        "music",
+                        "noise",
+                        "non_speech",
+                        "non-speech",
+                    )
+                ):
                     codes.append("sed_non_speech")
             if source == "semantic_review":
-                risk = str(evidence.get("risk", evidence.get("class", evidence.get("label", "")))).casefold()
-                if any(token in risk for token in ("non_speech", "non-speech", "hallucination")):
+                risk = str(
+                    evidence.get(
+                        "risk", evidence.get("class", evidence.get("label", ""))
+                    )
+                ).casefold()
+                if any(
+                    token in risk
+                    for token in ("non_speech", "non-speech", "hallucination")
+                ):
                     codes.append("semantic_non_speech")
         return tuple(dict.fromkeys(codes))
 
@@ -369,11 +428,13 @@ class EvidenceDecisionEngine:
             risk_level=assessment.level,
             evidence_codes=tuple(dict.fromkeys(evidence_codes)),
             physical_validation=physical,
-            revision_trace=({
-                "stage": "secondary_drop",
-                "sources": list(sources),
-                "reason": "independent_non_speech_evidence",
-            },),
+            revision_trace=(
+                {
+                    "stage": "secondary_drop",
+                    "sources": list(sources),
+                    "reason": "independent_non_speech_evidence",
+                },
+            ),
         )
 
     @staticmethod
@@ -383,7 +444,9 @@ class EvidenceDecisionEngine:
                 return word.time_source
         return "segment_boundary"
 
-    def _validate_physical(self, candidate: CandidateEvidence, timeline: Any) -> dict[str, Any]:
+    def _validate_physical(
+        self, candidate: CandidateEvidence, timeline: Any
+    ) -> dict[str, Any]:
         if timeline is None:
             return {
                 "valid": True,
@@ -396,10 +459,14 @@ class EvidenceDecisionEngine:
         candidate_start = max(0.0, candidate.start - tolerance)
         candidate_end = candidate.end + tolerance
         duration = getattr(timeline, "duration", None)
-        outside_timeline = duration is not None and candidate.end > float(duration) + tolerance
+        outside_timeline = (
+            duration is not None and candidate.end > float(duration) + tolerance
+        )
         overlap = 0.0
         for span in spans:
-            overlap += max(0.0, min(candidate_end, span.end) - max(candidate_start, span.start))
+            overlap += max(
+                0.0, min(candidate_end, span.end) - max(candidate_start, span.start)
+            )
         word_checks = self._validate_word_times(candidate, timeline, spans, tolerance)
         valid = (
             not outside_timeline
@@ -433,7 +500,8 @@ class EvidenceDecisionEngine:
     ) -> dict[str, Any]:
         """Check timed words against candidate and physical boundaries."""
         timed_words = [
-            word for word in candidate.words
+            word
+            for word in candidate.words
             if word.start is not None and word.end is not None
         ]
         invalid_word_ids: list[str] = []
@@ -445,7 +513,10 @@ class EvidenceDecisionEngine:
         }
         for word in timed_words:
             reasons: list[str] = []
-            if word.start < candidate.start - tolerance or word.end > candidate.end + tolerance:
+            if (
+                word.start < candidate.start - tolerance
+                or word.end > candidate.end + tolerance
+            ):
                 reasons.append("outside_candidate")
             if duration is not None and (
                 word.start < -tolerance or word.end > float(duration) + tolerance
@@ -459,7 +530,10 @@ class EvidenceDecisionEngine:
                 reasons.append("outside_physical_evidence")
             if candidate.physical_clip_id in clip_bounds:
                 clip_start, clip_end = clip_bounds[candidate.physical_clip_id]
-                if word.start < clip_start - tolerance or word.end > clip_end + tolerance:
+                if (
+                    word.start < clip_start - tolerance
+                    or word.end > clip_end + tolerance
+                ):
                     reasons.append("outside_physical_clip")
             if reasons:
                 invalid_word_ids.append(word.id)
@@ -474,44 +548,55 @@ class EvidenceDecisionEngine:
 
 def decisions_to_subtitle_events(decisions: Sequence[EvidenceDecision]) -> list[Any]:
     """Convert accepted decisions to the existing SubtitleEvent type."""
-    from .base import WordTimestamp
     from ..mapping.time_mapper import SubtitleEvent
+    from .base import WordTimestamp
 
     events = []
     for index, decision in enumerate(decisions, start=1):
-        if decision.decision == "drop" or not decision.final_text or decision.start is None or decision.end is None:
+        if (
+            decision.decision == "drop"
+            or not decision.final_text
+            or decision.start is None
+            or decision.end is None
+        ):
             continue
         words = []
         for word in decision.final_words:
             if word.start is None or word.end is None:
                 continue
-            words.append(WordTimestamp(
-                word=word.text,
-                start=word.start - decision.start,
-                end=word.end - decision.start,
-                confidence=word.confidence,
-                speaker_id=word.speaker_id,
-            ))
+            words.append(
+                WordTimestamp(
+                    word=word.text,
+                    start=word.start - decision.start,
+                    end=word.end - decision.start,
+                    confidence=word.confidence,
+                    speaker_id=word.speaker_id,
+                )
+            )
         source_word_ids = [word.id for word in decision.final_words]
         if not source_word_ids:
             source_word_ids = list(decision.candidate_ids)
-        events.append(SubtitleEvent(
-            index=index,
-            start=decision.start,
-            end=decision.end,
-            text=decision.final_text,
-            words=words,
-            asr_text=decision.final_text,
-            source_word_ids=source_word_ids,
-            physical_start=decision.start,
-            physical_end=decision.end,
-            physical_region_id=decision.physical_validation.get("physical_clip_id"),
-            time_source=decision.time_source,
-            alignment_warning=(
-                "unresolved evidence conflict" if decision.decision == "unresolved" else None
-            ),
-            revision_trace=list(decision.revision_trace),
-        ))
+        events.append(
+            SubtitleEvent(
+                index=index,
+                start=decision.start,
+                end=decision.end,
+                text=decision.final_text,
+                words=words,
+                asr_text=decision.final_text,
+                source_word_ids=source_word_ids,
+                physical_start=decision.start,
+                physical_end=decision.end,
+                physical_region_id=decision.physical_validation.get("physical_clip_id"),
+                time_source=decision.time_source,
+                alignment_warning=(
+                    "unresolved evidence conflict"
+                    if decision.decision == "unresolved"
+                    else None
+                ),
+                revision_trace=list(decision.revision_trace),
+            )
+        )
     return events
 
 

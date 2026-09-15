@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from ..mapping.time_mapper import SubtitleEvent
 
@@ -14,10 +13,10 @@ logger = logging.getLogger(__name__)
 class PipelineFeedbackMixin:
     def _run_feedback_learning(
         self,
-        auto_events: List[SubtitleEvent],
+        auto_events: list[SubtitleEvent],
         reference_path: Path,
         audio_path: str,
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """离线反馈学习：对齐 → 分析 → 更新配置 → 构建 Few-shot
 
         此过程不影响当前管道的输出，异常被静默捕获。
@@ -80,7 +79,9 @@ class PipelineFeedbackMixin:
             history = profile.get("history", [])
             locked_params = profile.get("locked_params", [])
 
-            detector = ConflictDetector(window=feedback_cfg.oscillation_detection_window)
+            detector = ConflictDetector(
+                window=feedback_cfg.oscillation_detection_window
+            )
             conflicts = detector.detect_all_oscillations(history)
 
             # 过滤掉已锁定的参数调整
@@ -89,7 +90,8 @@ class PipelineFeedbackMixin:
                 for param_path, adj in diff_report.attribution.items():
                     if param_path in locked_params:
                         logger.info(
-                            "Feedback: skipping locked param '%s'", param_path,
+                            "Feedback: skipping locked param '%s'",
+                            param_path,
                         )
                         continue
                     filtered_attr[param_path] = adj
@@ -97,11 +99,16 @@ class PipelineFeedbackMixin:
 
             if conflicts:
                 logger.warning(
-                    "Feedback: %d parameter oscillations detected", len(conflicts),
+                    "Feedback: %d parameter oscillations detected",
+                    len(conflicts),
                 )
                 for cr in conflicts:
-                    logger.warning("  %s: %d flips (recommend: %s)",
-                                   cr.param_path, cr.oscillation_count, cr.recommended_action)
+                    logger.warning(
+                        "  %s: %d flips (recommend: %s)",
+                        cr.param_path,
+                        cr.oscillation_count,
+                        cr.recommended_action,
+                    )
 
             # Step 4: 参数学习
             current_overrides = profile.get("overrides", {})
@@ -117,22 +124,29 @@ class PipelineFeedbackMixin:
             health_after = health_before  # 同一对齐对上的评分
             if feedback_cfg.auto_rollback_on_quality_drop and health_before > 0:
                 should_rollback, rollback_reason = should_auto_rollback(
-                    health_before, health_after,
+                    health_before,
+                    health_after,
                     drop_threshold=feedback_cfg.quality_drop_threshold,
                 )
                 if should_rollback:
                     logger.warning(
-                        "Feedback: auto-rollback triggered — %s", rollback_reason,
+                        "Feedback: auto-rollback triggered — %s",
+                        rollback_reason,
                     )
                     try:
                         profile_mgr.rollback(feedback_cfg.active_profile)
-                        logger.info("Feedback: rolled back profile '%s'", feedback_cfg.active_profile)
+                        logger.info(
+                            "Feedback: rolled back profile '%s'",
+                            feedback_cfg.active_profile,
+                        )
                     except Exception as rb_err:
                         logger.error("Feedback: rollback failed: %s", rb_err)
 
             # Step 5: Few-shot 构建
             if feedback_cfg.few_shot_enabled:
-                few_shot = FewShotBuilder(max_examples=feedback_cfg.few_shot_max_examples)
+                few_shot = FewShotBuilder(
+                    max_examples=feedback_cfg.few_shot_max_examples
+                )
                 few_shot.load_cache(feedback_cfg.active_profile)
                 few_shot.build_merge_examples(diff_report.merge_actions)
                 if diff_report.text_edits:
@@ -150,7 +164,9 @@ class PipelineFeedbackMixin:
                     )
                     fp = fingerprinter.extract(Path(audio_path))
                     if fp is not None:
-                        audio_hash = AudioFingerprinter.compute_audio_hash(Path(audio_path))
+                        audio_hash = AudioFingerprinter.compute_audio_hash(
+                            Path(audio_path)
+                        )
                         fingerprinter.store(
                             profile_id=feedback_cfg.active_profile,
                             fingerprint=fp,
@@ -172,9 +188,15 @@ class PipelineFeedbackMixin:
                             health_after=health_after,
                             health_detail=health_detail,
                         )
-                        logger.info("Feedback: audio fingerprint stored — %s", fp.audio_signature)
+                        logger.info(
+                            "Feedback: audio fingerprint stored — %s",
+                            fp.audio_signature,
+                        )
                 except Exception as fp_err:
-                    logger.warning("Feedback: fingerprint extraction failed (non-fatal): %s", fp_err)
+                    logger.warning(
+                        "Feedback: fingerprint extraction failed (non-fatal): %s",
+                        fp_err,
+                    )
 
             # 构建学习报告
             report = {
@@ -215,7 +237,9 @@ class PipelineFeedbackMixin:
                 manual_events=manual_events,
                 alignment_coverage=diff_report.alignment_coverage,
                 alignment_confidence=getattr(diff_report, "confidence", 0.8),
-                consent_level=getattr(self.config.feedback, "consent_level", "anonymous"),
+                consent_level=getattr(
+                    self.config.feedback, "consent_level", "anonymous"
+                ),
                 language=getattr(self, "_resolved_language", "unknown") or "unknown",
                 diff_report=diff_report,
             )
@@ -228,8 +252,8 @@ class PipelineFeedbackMixin:
 
     def _ingest_feedback_sample(
         self,
-        auto_events: List[SubtitleEvent],
-        manual_events: List,
+        auto_events: list[SubtitleEvent],
+        manual_events: list,
         alignment_coverage: float,
         alignment_confidence: float,
         consent_level: str,
@@ -290,4 +314,3 @@ class PipelineFeedbackMixin:
                 logger.info("D2 sample ingested: %s", sample.sample_id)
         except Exception as e:
             logger.warning("D2 sample ingestion failed (non-fatal): %s", e)
-

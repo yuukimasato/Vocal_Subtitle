@@ -9,13 +9,13 @@
 
 import pytest
 
-from vocal_subtitle.asr.window_execution import CancellationToken
 from vocal_subtitle.application.run_context import RunContext
 from vocal_subtitle.application.stage_protocol import (
     STAGE_STATUS_FAILED,
     STAGE_STATUS_OK,
     Stage,
 )
+from vocal_subtitle.asr.window_execution import CancellationToken
 
 
 def _context(**overrides):

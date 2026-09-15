@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..diarization.base import SpeakerTurn
+from .boundary_arbiter import BoundaryDecision
 from .ir import (
     GlobalSpeakerTimeline,
     GlobalTranscript,
@@ -14,7 +15,6 @@ from .ir import (
     GlobalWord,
 )
 from .subtitle_bins import PhysicalSubtitleBin
-from .boundary_arbiter import BoundaryDecision
 from .timeline import PhysicalTimeline, SpeechEvidenceSpan
 
 
@@ -77,11 +77,13 @@ class WordAllocation:
             "alignment_status": self.alignment_status,
             "start_boundary_decision": (
                 self.start_boundary_decision.to_dict()
-                if self.start_boundary_decision else None
+                if self.start_boundary_decision
+                else None
             ),
             "end_boundary_decision": (
                 self.end_boundary_decision.to_dict()
-                if self.end_boundary_decision else None
+                if self.end_boundary_decision
+                else None
             ),
             "boundary_evidence_ids": list(self.boundary_evidence_ids),
         }
@@ -339,12 +341,14 @@ def repair_late_words(
             },
         )
         repaired.append(repaired_word)
-        repairs.append({
-            "word_id": word.id,
-            "original": [word.raw_start, word.raw_end],
-            "repaired": [repaired_start, repaired_end],
-            "bin_id": late_bin.id,
-        })
+        repairs.append(
+            {
+                "word_id": word.id,
+                "original": [word.raw_start, word.raw_end],
+                "repaired": [repaired_start, repaired_end],
+                "bin_id": late_bin.id,
+            }
+        )
 
     if not repairs:
         return transcript

@@ -13,10 +13,10 @@ from vocal_subtitle.asr.base import (
 )
 from vocal_subtitle.config import PipelineConfig
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
-from vocal_subtitle.pipeline import Pipeline
-from vocal_subtitle.pipeline_context import NoiseProfile, PipelineContext
 from vocal_subtitle.physical.ir import GlobalSpeakerTimeline
 from vocal_subtitle.physical.timeline import PhysicalTimeline
+from vocal_subtitle.pipeline import Pipeline
+from vocal_subtitle.pipeline_context import NoiseProfile, PipelineContext
 from vocal_subtitle.utils.audio_utils import AudioUtils
 from vocal_subtitle.vad.base import SpeechSegment
 
@@ -82,8 +82,9 @@ def _prepare_run(monkeypatch, tmp_path, routing="auto"):
     pipeline._finalize_events = lambda events, stats, duration: events
     pipeline._get_subtitle_builder = lambda: object()
     pipeline._export_subtitles_multi_format = (
-        lambda builder, events, output_path, output_format, session_dir, label:
-        {output_format: str(output_path)}
+        lambda builder, events, output_path, output_format, session_dir, label: {
+            output_format: str(output_path)
+        }
     )
     return pipeline, input_path
 
@@ -105,7 +106,9 @@ def test_auto_global_success_keeps_segmented_as_primary_path(monkeypatch, tmp_pa
     pipeline._run_global_transcription_path = run_global
     pipeline._process_skeleton_segmented = run_skeleton
 
-    result = pipeline.run(input_path, output_path=tmp_path / "out.srt", skip_separation=True)
+    result = pipeline.run(
+        input_path, output_path=tmp_path / "out.srt", skip_separation=True
+    )
 
     assert calls == {"global": 1, "segmented": 1}
     assert result["stats"].asr_path == "segmented"
@@ -131,21 +134,27 @@ def test_auto_global_failure_keeps_segmented_output_and_records_evidence_failure
     pipeline._run_global_transcription_path = run_global
     pipeline._process_skeleton_segmented = run_skeleton
 
-    result = pipeline.run(input_path, output_path=tmp_path / "out.srt", skip_separation=True)
+    result = pipeline.run(
+        input_path, output_path=tmp_path / "out.srt", skip_separation=True
+    )
 
     assert calls == {"global": 1, "segmented": 1}
     assert result["stats"].asr_path == "segmented"
     assert result["stats"].fallback_category == ""
-    assert result["stats"].global_diagnostics["evidence"]["failure_category"] == "execution_failed"
+    assert (
+        result["stats"].global_diagnostics["evidence"]["failure_category"]
+        == "execution_failed"
+    )
     assert [event.text for event in result["events"]] == ["segmented"]
 
 
 def test_dependency_unavailable_falls_back_to_segmented_path(monkeypatch, tmp_path):
     pipeline, input_path = _prepare_run(monkeypatch, tmp_path, routing="auto")
     segmented_calls = []
-    pipeline._run_global_transcription_path = lambda **kwargs: (
-        (_ for _ in ()).throw(ImportError("WhisperX is not installed"))
+    pipeline._run_global_transcription_path = lambda **kwargs: (_ for _ in ()).throw(
+        ImportError("WhisperX is not installed")
     )
+
     def run_skeleton(**kwargs):
         segmented_calls.append(True)
         pipeline._global_review_timeline = PhysicalTimeline.from_duration(1.0)
@@ -159,7 +168,10 @@ def test_dependency_unavailable_falls_back_to_segmented_path(monkeypatch, tmp_pa
 
     assert segmented_calls == [True]
     assert result["stats"].fallback_category == ""
-    assert result["stats"].global_diagnostics["evidence"]["failure_category"] == "dependency_unavailable"
+    assert (
+        result["stats"].global_diagnostics["evidence"]["failure_category"]
+        == "dependency_unavailable"
+    )
     assert [event.text for event in result["events"]] == ["segmented"]
 
 
@@ -298,20 +310,21 @@ def test_global_path_repairs_segment_bounds_to_cover_native_word_timestamps():
 
 def test_global_path_repairs_short_ffmpeg_tail_from_longer_vad_evidence():
     timeline = PhysicalTimeline.from_duration(5.0)
-    timeline.add_evidence(
-        0.0, 3.0, "ffmpeg_skeleton", physical_clip_id="clip-000001"
-    )
+    timeline.add_evidence(0.0, 3.0, "ffmpeg_skeleton", physical_clip_id="clip-000001")
     timeline.add_evidence(0.0, 4.2, "silero", physical_clip_id="clip-000001")
 
     repair = Pipeline._repair_tail_evidence(timeline, 5.0)
 
     assert repair["status"] == "extended"
     assert repair["alternative_end"] == 4.2
-    assert max(
-        item.end
-        for item in timeline.speech_evidence_spans
-        if item.source == "ffmpeg_skeleton"
-    ) == 4.2
+    assert (
+        max(
+            item.end
+            for item in timeline.speech_evidence_spans
+            if item.source == "ffmpeg_skeleton"
+        )
+        == 4.2
+    )
 
 
 def test_segmented_asr_surfaces_all_segment_failures():
@@ -394,7 +407,9 @@ def test_skeleton_segment_skips_empty_asr_result_and_continues(monkeypatch, tmp_
     assert events[0].start == pytest.approx(1.1)
 
 
-def test_skeleton_segment_retries_failed_group_by_physical_members(monkeypatch, tmp_path):
+def test_skeleton_segment_retries_failed_group_by_physical_members(
+    monkeypatch, tmp_path
+):
     pipeline = Pipeline(PipelineConfig())
     pipeline._progress = SimpleNamespace(
         start_stage=lambda *args, **kwargs: None,
@@ -444,8 +459,8 @@ def test_skeleton_segment_raises_when_all_asr_results_are_empty(monkeypatch, tmp
         finish_stage=lambda *args, **kwargs: None,
     )
     pipeline.config.acoustic_validation.skeleton_min_speech = 0.1
-    pipeline._process_chunk_pipeline = lambda **kwargs: (
-        (_ for _ in ()).throw(ASRInvalidResultError("no subtitles"))
+    pipeline._process_chunk_pipeline = lambda **kwargs: (_ for _ in ()).throw(
+        ASRInvalidResultError("no subtitles")
     )
 
     monkeypatch.setattr(
@@ -454,7 +469,9 @@ def test_skeleton_segment_raises_when_all_asr_results_are_empty(monkeypatch, tmp
     )
     monkeypatch.setattr(AudioUtils, "save_audio", lambda *args, **kwargs: None)
 
-    with pytest.raises(ASRInvalidResultError, match="any of 1 skeleton speech segments"):
+    with pytest.raises(
+        ASRInvalidResultError, match="any of 1 skeleton speech segments"
+    ):
         pipeline._process_skeleton_segmented(
             np.zeros(16000, dtype=np.float32),
             16000,
@@ -484,7 +501,8 @@ def test_finalize_events_uses_pipeline_subtitle_config():
 
 
 def test_grouped_window_events_are_reprojected_to_physical_members(
-    monkeypatch, tmp_path,
+    monkeypatch,
+    tmp_path,
 ):
     """聚合窗口成功后，事件端点必须钳制到骨架成员包络；
     句内微停顿（间隙 < member_split_min_gap）不拆分文本。"""

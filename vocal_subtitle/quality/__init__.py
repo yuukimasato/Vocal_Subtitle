@@ -19,11 +19,11 @@ from .controlled_runner import (
     RunKind,
 )
 from .data_version_manager import (
+    RETENTION_POLICIES,
     DatasetTier,
     DatasetVersion,
     DatasetVersionStatus,
     DataVersionManager,
-    RETENTION_POLICIES,
 )
 from .golden_gate import GoldenQualityThresholds, evaluate_golden_set
 from .priority_calculator import (

@@ -35,7 +35,8 @@ def test_events_are_isolated_per_task():
     publisher.publish("a", "completion", {"result": 1})
 
     assert [event.kind for event in publisher.events_for("a")] == [
-        "start", "completion",
+        "start",
+        "completion",
     ]
     assert [event.kind for event in publisher.events_for("b")] == ["start"]
 

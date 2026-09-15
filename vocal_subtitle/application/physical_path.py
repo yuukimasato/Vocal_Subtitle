@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -35,7 +34,7 @@ class PipelinePhysicalPathMixin:
         audio: np.ndarray,
         sample_rate: int,
         vocals_path: Path,
-    ) -> Tuple[PipelineContext, List[SpeechSegment], Optional[Dict], NoiseProfile]:
+    ) -> tuple[PipelineContext, list[SpeechSegment], dict | None, NoiseProfile]:
         """Run one full-audio detector pass for the physical shadow.
 
         This deliberately reuses the existing detector implementations and
@@ -48,7 +47,9 @@ class PipelinePhysicalPathMixin:
             sample_rate=sample_rate,
         )
         noise = AudioUtils.estimate_noise_floor_per_chunk(
-            audio, sample_rate, chunk_duration=chunk_duration,
+            audio,
+            sample_rate,
+            chunk_duration=chunk_duration,
         )
         noise_profile = NoiseProfile(
             noise_rms=noise["noise_rms"],
@@ -80,12 +81,9 @@ class PipelinePhysicalPathMixin:
             selected_segments = list(fused_segments)
 
         ctx.add_diagnostic(
-            "Global shadow detection: silero=%d, ffmpeg=%d, fused=%d"
-            % (
-                len(ctx.silero_segments),
-                len(ctx.ffmpeg_segments),
-                len(ctx.fused_segments),
-            )
+            "Global shadow detection: "
+            f"silero={len(ctx.silero_segments)}, ffmpeg={len(ctx.ffmpeg_segments)}, "
+            f"fused={len(ctx.fused_segments)}"
         )
         return ctx, selected_segments, ffmpeg_result, noise_profile
 
@@ -95,8 +93,8 @@ class PipelinePhysicalPathMixin:
         sample_rate: int,
         vocals_path: Path,
         context: PipelineContext,
-        vad_segments: List[SpeechSegment],
-        ffmpeg_result: Optional[Dict],
+        vad_segments: list[SpeechSegment],
+        ffmpeg_result: dict | None,
         noise_profile: NoiseProfile,
     ):
         """Adapt detector output into one validated physical shadow."""
@@ -106,7 +104,9 @@ class PipelinePhysicalPathMixin:
         shadow = build_shadow_artifacts([context], duration)
         timeline_errors = shadow.physical_timeline.validate()
         if timeline_errors:
-            raise ValueError("invalid global physical timeline: " + "; ".join(timeline_errors))
+            raise ValueError(
+                "invalid global physical timeline: " + "; ".join(timeline_errors)
+            )
 
         # Keep detector artifacts available to the alignment and acoustic
         # validation stages without changing the ShadowBuildResult schema.
@@ -164,10 +164,7 @@ class PipelinePhysicalPathMixin:
             # Clip to audio duration
             seg_start = max(0.0, seg_start)
             seg_end = min(duration if duration > 0 else float("inf"), seg_end)
-            relevant = [
-                t for t in turns
-                if t.end > seg_start and t.start < seg_end
-            ]
+            relevant = [t for t in turns if t.end > seg_start and t.start < seg_end]
             if not relevant:
                 # No diarization data — return segment as-is with unknown speaker
                 projected_segments.append(type(seg)(seg_start, seg_end))
@@ -180,10 +177,12 @@ class PipelinePhysicalPathMixin:
                 speaker_ids.append(speakers_in_seg.pop())
                 continue
             # Split at turn boundaries
-            boundaries = sorted(set(
-                [max(seg_start, t.start) for t in relevant]
-                + [min(seg_end, t.end) for t in relevant]
-            ))
+            boundaries = sorted(
+                set(
+                    [max(seg_start, t.start) for t in relevant]
+                    + [min(seg_end, t.end) for t in relevant]
+                )
+            )
             for b_start, b_end in zip(boundaries, boundaries[1:]):
                 if b_end <= b_start:
                     continue
@@ -208,7 +207,6 @@ class PipelinePhysicalPathMixin:
         carries the correct speaker label and only the words that belong
         to that speaker.
         """
-        from ..asr.base import WordTimestamp
         turns = getattr(self, "_global_turns", []) or []
         if not turns or not events:
             return events
@@ -220,15 +218,16 @@ class PipelinePhysicalPathMixin:
                 # No word timestamps — can't split by speaker. When the event
                 # crosses a speaker boundary, mark it as UNKNOWN.
                 crosses_boundary = any(
-                    t.start > event.start and t.start < event.end
-                    for t in turns
+                    t.start > event.start and t.start < event.end for t in turns
                 )
                 if crosses_boundary:
                     first_turn = next(
                         (t for t in turns if t.start <= event.start < t.end),
                         None,
                     )
-                    event.end = min(event.end, first_turn.end if first_turn else turns[0].start)
+                    event.end = min(
+                        event.end, first_turn.end if first_turn else turns[0].start
+                    )
                     event.speaker_id = None
                     event.speaker_label = None
                 else:
@@ -245,18 +244,24 @@ class PipelinePhysicalPathMixin:
                 continue
 
             # Split at speaker boundaries.
-            split_points = sorted(set(
-                [event.start]
-                + [t.start for t in turns if event.start < t.start < event.end]
-                + [t.end for t in turns if event.start < t.end < event.end]
-                + [event.end]
-            ))
+            split_points = sorted(
+                set(
+                    [event.start]
+                    + [t.start for t in turns if event.start < t.start < event.end]
+                    + [t.end for t in turns if event.start < t.end < event.end]
+                    + [event.end]
+                )
+            )
 
             def word_midpoint(word):
-                return event.start + (
-                    float(getattr(word, "start", 0.0))
-                    + float(getattr(word, "end", 0.0))
-                ) / 2.0
+                return (
+                    event.start
+                    + (
+                        float(getattr(word, "start", 0.0))
+                        + float(getattr(word, "end", 0.0))
+                    )
+                    / 2.0
+                )
 
             piece_index = 0
             for b_start, b_end in zip(split_points, split_points[1:]):
@@ -269,15 +274,14 @@ class PipelinePhysicalPathMixin:
                 )
                 # Find words whose midpoint falls in this sub-segment
                 piece_words = [
-                    w for w in words
-                    if word_midpoint(w) < b_end
-                    and word_midpoint(w) > b_start
+                    w
+                    for w in words
+                    if word_midpoint(w) < b_end and word_midpoint(w) > b_start
                 ]
                 if not piece_words:
                     continue
                 piece_text = " ".join(str(getattr(w, "word", "")) for w in piece_words)
                 # Build a piece event
-                import copy
                 piece = copy.copy(event)
                 piece.index = piece_index
                 piece.start = b_start

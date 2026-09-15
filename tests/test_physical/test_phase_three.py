@@ -14,15 +14,15 @@ from vocal_subtitle.config import PipelineConfig
 from vocal_subtitle.diarization.base import SpeakerTurn
 from vocal_subtitle.mapping.time_mapper import SubtitleEvent
 from vocal_subtitle.physical.allocator import allocate_words
-from vocal_subtitle.physical.events import build_events
 from vocal_subtitle.physical.decision_projection import DecisionEventProjector
+from vocal_subtitle.physical.events import build_events
 from vocal_subtitle.physical.ir import (
     GlobalSpeakerTimeline,
     GlobalTranscript,
     GlobalWord,
 )
-from vocal_subtitle.physical.timeline import ContextWindow, PhysicalTimeline
 from vocal_subtitle.physical.subtitle_bins import build_physical_subtitle_bins
+from vocal_subtitle.physical.timeline import ContextWindow, PhysicalTimeline
 from vocal_subtitle.pipeline import Pipeline, PipelineStats
 from vocal_subtitle.utils.progress import ProgressManager
 
@@ -233,10 +233,12 @@ def test_physical_bin_events_split_when_words_cross_an_internal_gap():
     timeline = PhysicalTimeline(3.0)
     timeline.add_clip(0.0, 3.0, clip_id="clip-a")
     timeline.add_evidence(0.0, 3.0, "ffmpeg_skeleton", physical_clip_id="clip-a")
-    transcript = _transcript([
-        _word("w1", "第一句", 0.2, 0.4),
-        _word("w2", "第二句", 1.2, 1.4),
-    ])
+    transcript = _transcript(
+        [
+            _word("w1", "第一句", 0.2, 0.4),
+            _word("w2", "第二句", 1.2, 1.4),
+        ]
+    )
 
     events = build_events(
         allocate_words(transcript, timeline),
@@ -294,7 +296,9 @@ def test_global_shadow_pipeline_skips_legacy_asr(monkeypatch, tmp_path):
         "coarse_speech": [(0.0, 1.0)],
         "skeleton": [(0.0, 1.0)],
     }
-    pipeline._run_merging = lambda segments, audio, sample_rate, total_duration: segments
+    pipeline._run_merging = lambda segments, audio, sample_rate, total_duration: (
+        segments
+    )
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("global shadow construction must not call legacy ASR")
@@ -310,7 +314,10 @@ def test_global_shadow_pipeline_skips_legacy_asr(monkeypatch, tmp_path):
     assert events == []
     assert count == 1
     # The PipelineContext stores ASR fragments, not raw segments
-    assert getattr(context, "asr_fragments", []) == [] or getattr(context, "asr_segments", []) == []
+    assert (
+        getattr(context, "asr_fragments", []) == []
+        or getattr(context, "asr_segments", []) == []
+    )
 
 
 def test_allocator_rejects_outside_words_and_falls_back_to_exclusive_turn():
@@ -502,9 +509,7 @@ def test_pipeline_global_entry_builds_subtitle_events_from_shadow_ir():
     assert events[0].physical_spans
     assert events[0].time_source == "boundary_decision"
     assert len(events[0].revision_trace) == 2
-    assert all(
-        item["decision"]["accepted"] for item in events[0].revision_trace
-    )
+    assert all(item["decision"]["accepted"] for item in events[0].revision_trace)
 
 
 def test_micro_gap_merge_does_not_cross_physical_clip_and_preserves_provenance():

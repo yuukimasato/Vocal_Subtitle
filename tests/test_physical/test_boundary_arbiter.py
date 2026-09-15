@@ -46,9 +46,7 @@ def test_no_legal_candidate_has_structured_degradation_reason():
     assert decision.accepted is False
     assert decision.boundary_time == 1.0
     assert decision.reason_codes == ("no_legal_end_candidate",)
-    assert decision.rejected_candidates == (
-        "after_next_word:breaks_monotonicity",
-    )
+    assert decision.rejected_candidates == ("after_next_word:breaks_monotonicity",)
 
 
 def test_decision_serializes_candidate_features_and_components():

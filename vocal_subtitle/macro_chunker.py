@@ -19,7 +19,6 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -40,11 +39,13 @@ class MacroChunkConfig:
 
     # 递归切分
     recursive: bool = True
-    recursive_thresholds: List[Tuple[float, float]] = field(default_factory=lambda: [
-        (-30, 3.0),   # 第一轮
-        (-35, 1.5),   # 第二轮
-        (-40, 0.8),   # 第三轮
-    ])
+    recursive_thresholds: list[tuple[float, float]] = field(
+        default_factory=lambda: [
+            (-30, 3.0),  # 第一轮
+            (-35, 1.5),  # 第二轮
+            (-40, 0.8),  # 第三轮
+        ]
+    )
 
 
 @dataclass
@@ -54,7 +55,7 @@ class MacroChunk:
     index: int
     start: float
     end: float
-    audio: Optional[np.ndarray] = None  # 延迟加载
+    audio: np.ndarray | None = None  # 延迟加载
     overlap_with_prev: bool = False
     overlap_with_next: bool = False
 
@@ -72,11 +73,12 @@ class MacroChunker:
         chunks = chunker.split(audio_path, audio, sample_rate)
     """
 
-    def __init__(self, config: Optional[MacroChunkConfig] = None):
+    def __init__(self, config: MacroChunkConfig | None = None):
         self.config = config or MacroChunkConfig()
 
     def should_split(
-        self, total_duration: float,
+        self,
+        total_duration: float,
     ) -> bool:
         """判断是否需要进行宏观切块"""
         if not self.config.enabled:
@@ -88,7 +90,7 @@ class MacroChunker:
         audio_path: Path,
         audio: np.ndarray,
         sample_rate: int,
-    ) -> List[MacroChunk]:
+    ) -> list[MacroChunk]:
         """执行宏观切块
 
         Returns:
@@ -101,49 +103,69 @@ class MacroChunker:
             # 短音频：作为单个大块
             logger.info(
                 "Audio duration %.1fs < threshold %.0fs, skipping macro chunking",
-                total_duration, cfg.auto_enable_threshold,
+                total_duration,
+                cfg.auto_enable_threshold,
             )
-            return [MacroChunk(
-                index=0, start=0.0, end=total_duration,
-                audio=audio, overlap_with_prev=False, overlap_with_next=False,
-            )]
+            return [
+                MacroChunk(
+                    index=0,
+                    start=0.0,
+                    end=total_duration,
+                    audio=audio,
+                    overlap_with_prev=False,
+                    overlap_with_next=False,
+                )
+            ]
 
         # Step 1: 检测长静音
         silence_intervals = self._detect_long_silences(audio_path)
 
         if not silence_intervals:
             logger.info("No long silences found, treating as single chunk")
-            return [MacroChunk(
-                index=0, start=0.0, end=total_duration,
-                audio=audio, overlap_with_prev=False, overlap_with_next=False,
-            )]
+            return [
+                MacroChunk(
+                    index=0,
+                    start=0.0,
+                    end=total_duration,
+                    audio=audio,
+                    overlap_with_prev=False,
+                    overlap_with_next=False,
+                )
+            ]
 
         # Step 2: 带重叠切分
         chunks = self._split_with_overlap(
-            silence_intervals, total_duration, audio, sample_rate,
+            silence_intervals,
+            total_duration,
+            audio,
+            sample_rate,
         )
 
         # Step 3: 递归切分仍然太长的块
         if cfg.recursive:
             chunks = self._recursive_split(
-                chunks, audio_path, audio, sample_rate,
+                chunks,
+                audio_path,
+                audio,
+                sample_rate,
             )
 
         logger.info(
             "Macro chunking: %.1fs → %d chunks (avg %.1fs)",
-            total_duration, len(chunks),
+            total_duration,
+            len(chunks),
             sum(c.duration for c in chunks) / max(len(chunks), 1),
         )
         return chunks
 
     def stitch_chunks(
         self,
-        chunk_a_events: List,
-        chunk_b_events: List,
-        overlap_region: Tuple[float, float],
+        chunk_a_events: list,
+        chunk_b_events: list,
+        overlap_region: tuple[float, float],
         audio: np.ndarray,
         sample_rate: int,
-    ) -> List:
+    ) -> list:
         """缝合两个有重叠的大块的字幕结果
 
         在重叠区内找 RMS 能量最低点作为最终缝合线。
@@ -160,10 +182,10 @@ class MacroChunker:
         stitch_point = (overlap_start + overlap_end) / 2  # 默认中点
 
         for i in range(start_sample, end_sample - frame_size + 1, hop):
-            frame = audio[i: i + frame_size]
+            frame = audio[i : i + frame_size]
             if frame.size == 0:
                 continue
-            rms = float(np.sqrt(np.mean(frame ** 2)))
+            rms = float(np.sqrt(np.mean(frame**2)))
             if rms < min_rms:
                 min_rms = rms
                 stitch_point = i / sample_rate
@@ -191,8 +213,9 @@ class MacroChunker:
     # ------------------------------------------------------------------
 
     def _detect_long_silences(
-        self, audio_path: Path,
-    ) -> List[Tuple[float, float]]:
+        self,
+        audio_path: Path,
+    ) -> list[tuple[float, float]]:
         """使用 ffmpeg silencedetect 检测长静音"""
         from .vad.ffmpeg_vad import FFmpegSilenceVAD
 
@@ -205,11 +228,11 @@ class MacroChunker:
 
     def _split_with_overlap(
         self,
-        silence_intervals: List[Tuple[float, float]],
+        silence_intervals: list[tuple[float, float]],
         total_duration: float,
         audio: np.ndarray,
         sample_rate: int,
-    ) -> List[MacroChunk]:
+    ) -> list[MacroChunk]:
         """带重叠的宏观切块
 
         每个切分点前后各保留 overlap_ms 重叠区。
@@ -238,14 +261,16 @@ class MacroChunker:
             end_sample = int(chunk_end * sample_rate)
             chunk_audio = audio[start_sample:end_sample].copy()
 
-            chunks.append(MacroChunk(
-                index=len(chunks),
-                start=chunk_start,
-                end=chunk_end,
-                audio=chunk_audio,
-                overlap_with_prev=len(chunks) > 0,
-                overlap_with_next=True,
-            ))
+            chunks.append(
+                MacroChunk(
+                    index=len(chunks),
+                    start=chunk_start,
+                    end=chunk_end,
+                    audio=chunk_audio,
+                    overlap_with_prev=len(chunks) > 0,
+                    overlap_with_next=True,
+                )
+            )
 
             # 下一块的起始点 = 切分点 - overlap（回卷）
             prev_end = max(0.0, split_point - overlap_sec)
@@ -254,14 +279,16 @@ class MacroChunker:
         if prev_end < total_duration - 0.5:  # 至少 0.5s 剩余
             start_sample = int(prev_end * sample_rate)
             chunk_audio = audio[start_sample:].copy()
-            chunks.append(MacroChunk(
-                index=len(chunks),
-                start=prev_end,
-                end=total_duration,
-                audio=chunk_audio,
-                overlap_with_prev=len(chunks) > 0,
-                overlap_with_next=False,
-            ))
+            chunks.append(
+                MacroChunk(
+                    index=len(chunks),
+                    start=prev_end,
+                    end=total_duration,
+                    audio=chunk_audio,
+                    overlap_with_prev=len(chunks) > 0,
+                    overlap_with_next=False,
+                )
+            )
 
         # 修正重叠标记
         if chunks:
@@ -272,12 +299,12 @@ class MacroChunker:
 
     def _recursive_split(
         self,
-        chunks: List[MacroChunk],
+        chunks: list[MacroChunk],
         audio_path: Path,
         audio: np.ndarray,
         sample_rate: int,
         depth: int = 0,
-    ) -> List[MacroChunk]:
+    ) -> list[MacroChunk]:
         """递归切分仍然太长的块（每一层换更敏感的静音阈值）"""
         cfg = self.config
 
@@ -286,26 +313,25 @@ class MacroChunker:
 
         threshold_db, min_silence = cfg.recursive_thresholds[depth]
 
-        result: List[MacroChunk] = []
+        result: list[MacroChunk] = []
         for chunk in chunks:
             if chunk.duration <= cfg.max_chunk_duration:
                 result.append(chunk)
                 continue
 
             # 对太长的块，用更敏感的阈值找静音
-            from .vad.ffmpeg_vad import FFmpegSilenceVAD
-
             # 需要提取该块的音频到临时文件
             import tempfile
+
             from .utils.audio_utils import AudioUtils
+            from .vad.ffmpeg_vad import FFmpegSilenceVAD
 
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 tmp_path = Path(f.name)
 
             try:
                 chunk_audio = audio[
-                    int(chunk.start * sample_rate):
-                    int(chunk.end * sample_rate)
+                    int(chunk.start * sample_rate) : int(chunk.end * sample_rate)
                 ]
                 AudioUtils.save_audio(chunk_audio, tmp_path, sample_rate)
 
@@ -332,7 +358,9 @@ class MacroChunker:
                     sc.start += chunk.start
                     sc.end += chunk.start
                 result.extend(
-                    self._recursive_split(sub_chunks, audio_path, audio, sample_rate, depth + 1)
+                    self._recursive_split(
+                        sub_chunks, audio_path, audio, sample_rate, depth + 1
+                    )
                 )
             finally:
                 tmp_path.unlink(missing_ok=True)
@@ -346,6 +374,10 @@ class MacroChunker:
 
         logger.info(
             "Recursive split (depth=%d, db=%.0f, min_s=%.1f): %d → %d chunks",
-            depth, threshold_db, min_silence, len(chunks), len(result),
+            depth,
+            threshold_db,
+            min_silence,
+            len(chunks),
+            len(result),
         )
         return result

@@ -17,14 +17,13 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
 CONSUMED_SUBDIR = "consumed"
 
 RETENTION_ARCHIVE = "archive"  # 消费后移入 consumed/（可审计，默认）
-RETENTION_DELETE = "delete"    # 消费后直接删除
+RETENTION_DELETE = "delete"  # 消费后直接删除
 
 _VALID_POLICIES = {RETENTION_ARCHIVE, RETENTION_DELETE}
 
@@ -39,12 +38,16 @@ class RetentionResult:
     """单个文件保留策略的执行结果"""
 
     path: Path
-    action: str        # "archived" | "deleted" | "skipped"
-    reason: str = ""   # skipped 时的原因：missing=源已不存在（幂等）| outside-sink=不在 sink 顶层
-    detail: str = ""   # archived 时的归档目标路径
+    action: str  # "archived" | "deleted" | "skipped"
+    reason: str = (
+        ""  # skipped 时的原因：missing=源已不存在（幂等）| outside-sink=不在 sink 顶层
+    )
+    detail: str = ""  # archived 时的归档目标路径
 
 
-def apply_retention(path: Path | str, *, policy: str, sink_dir: Path | str) -> RetentionResult:
+def apply_retention(
+    path: Path | str, *, policy: str, sink_dir: Path | str
+) -> RetentionResult:
     """对成功消费的 sink 文件执行保留策略（归档或删除）。
 
     只处理 sink 顶层文件（consumed/ 内或 sink 外的路径一律跳过，
@@ -82,8 +85,8 @@ def cleanup_expired(
     sink_dir: Path | str,
     *,
     ttl_days: int,
-    now: Optional[datetime] = None,
-) -> List[Path]:
+    now: datetime | None = None,
+) -> list[Path]:
     """TTL 兜底清理：删除 sink 顶层从未被消费且超过 TTL 的 *.jsonl 文件。
 
     以文件 mtime（sink 追加式落盘，mtime 即最后上送时间）判定超期；
@@ -91,7 +94,9 @@ def cleanup_expired(
     返回被删除的文件列表（幂等：重复运行时残留文件已删，返回空）。
     """
     if ttl_days <= 0:
-        logger.info("Journal sink TTL cleanup disabled (journal_sink_ttl_days=%d)", ttl_days)
+        logger.info(
+            "Journal sink TTL cleanup disabled (journal_sink_ttl_days=%d)", ttl_days
+        )
         return []
     sink_dir = Path(sink_dir)
     if not sink_dir.is_dir():
@@ -99,7 +104,7 @@ def cleanup_expired(
     current = now or datetime.now(timezone.utc)
     deadline = current - timedelta(days=ttl_days)
 
-    removed: List[Path] = []
+    removed: list[Path] = []
     for path in sorted(sink_dir.glob("*.jsonl")):
         try:
             mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)

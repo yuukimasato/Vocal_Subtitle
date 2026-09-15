@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .file_hasher import compute_config_hash, compute_file_hash
 
@@ -107,7 +107,9 @@ def create_task_id(
     elif isinstance(input_path, bytes):
         file_hash = hashlib.sha256(input_path).hexdigest()
     else:
-        raise TypeError(f"input_path must be Path, str, or bytes, got {type(input_path)}")
+        raise TypeError(
+            f"input_path must be Path, str, or bytes, got {type(input_path)}"
+        )
 
     id_digest = file_hash[:8]
     return f"{task_type}-{date_str}-{id_digest}"
@@ -177,6 +179,7 @@ class SessionManager:
     def compute_session_key_from_bytes(data: bytes) -> str:
         """从字节数据计算会话目录键"""
         import hashlib
+
         return hashlib.sha256(data).hexdigest()[:16]
 
     def session_dir(self, session_key: str) -> Path:
@@ -221,6 +224,7 @@ class SessionManager:
         dest = session_dir / f"input{suffix}"
         if not dest.exists():
             import shutil
+
             shutil.copy2(input_path, dest)
         return dest
 
@@ -233,7 +237,7 @@ class SessionManager:
         profile: str,
         config_hash: str,
         task_id: str = "",
-        outputs: Optional[Dict[str, Dict[str, Any]]] = None,
+        outputs: dict[str, dict[str, Any]] | None = None,
     ) -> Path:
         """写入 metadata.json
 
@@ -273,11 +277,16 @@ class SessionManager:
                 if "processed_at" in existing:
                     metadata["processed_at"] = existing["processed_at"]
                 # 用已有非空值覆盖新的空值（保留原始信息）
-                for field in ("original_filename", "input_sha256", "profile",
-                              "config_hash", "task_id"):
+                for field in (
+                    "original_filename",
+                    "input_sha256",
+                    "profile",
+                    "config_hash",
+                    "task_id",
+                ):
                     if not metadata.get(field) and existing.get(field):
                         metadata[field] = existing[field]
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 pass
 
         meta_path.write_text(
@@ -287,14 +296,14 @@ class SessionManager:
         logger.info("Session metadata written: %s", meta_path)
         return meta_path
 
-    def read_metadata(self, session_dir: Path) -> Optional[Dict[str, Any]]:
+    def read_metadata(self, session_dir: Path) -> dict[str, Any] | None:
         """读取 metadata.json"""
         meta_path = session_dir / "metadata.json"
         if not meta_path.exists():
             return None
         try:
             return json.loads(meta_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return None
 
     def get_output_path(self, session_dir: Path, name_key: str) -> Path:
@@ -309,7 +318,7 @@ class SessionManager:
         """
         return session_dir / OUTPUT_NAMES[name_key]
 
-    def all_output_paths(self, session_dir: Path) -> Dict[str, Path]:
+    def all_output_paths(self, session_dir: Path) -> dict[str, Path]:
         """获取所有可能的输出文件路径"""
         return {key: session_dir / name for key, name in OUTPUT_NAMES.items()}
 

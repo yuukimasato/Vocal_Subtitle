@@ -39,7 +39,9 @@ _REGION_MERGE_GAP_SECONDS = 1.5
 _KEEP_CHAR = re.compile(r"[\w\u4e00-\u9fff]")
 
 
-def _char_tokens(text: str, times: list[float] | None = None) -> list[tuple[str, float]]:
+def _char_tokens(
+    text: str, times: list[float] | None = None
+) -> list[tuple[str, float]]:
     """文本 → [(规范化字符, 时间)]。无时间轴时用 -1 占位。"""
     tokens: list[tuple[str, float]] = []
     for index, char in enumerate(text):
@@ -96,7 +98,11 @@ def _cluster_regions(
     """把差异字符按时间相邻性聚类为差异区域,并标记是否与对方事件重叠。"""
     regions: list[dict[str, Any]] = []
     for char, moment in tokens:
-        if regions and moment >= 0 and moment - regions[-1]["end"] <= _REGION_MERGE_GAP_SECONDS:
+        if (
+            regions
+            and moment >= 0
+            and moment - regions[-1]["end"] <= _REGION_MERGE_GAP_SECONDS
+        ):
             regions[-1]["text"] += char
             regions[-1]["end"] = moment
             continue
@@ -110,7 +116,9 @@ def _cluster_regions(
     return regions
 
 
-def _timing_deltas(baseline: list[tuple[str, float]], global_: list[tuple[str, float]], matcher) -> list[float]:
+def _timing_deltas(
+    baseline: list[tuple[str, float]], global_: list[tuple[str, float]], matcher
+) -> list[float]:
     """相等块内采样双方向字符映射的时间差(global - baseline)。"""
     deltas: list[float] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
@@ -137,7 +145,9 @@ def _global_hallucination_metrics(segments: list[Any]) -> dict[str, Any]:
         "segment_count": len(segments),
         "high_no_speech_prob": sum(1 for s in segments if s.no_speech_prob >= 0.6),
         "low_avg_logprob": sum(1 for s in segments if s.avg_logprob < -1.0),
-        "high_compression_ratio": sum(1 for s in segments if s.compression_ratio >= 2.4),
+        "high_compression_ratio": sum(
+            1 for s in segments if s.compression_ratio >= 2.4
+        ),
     }
 
 
@@ -160,8 +170,11 @@ def _evidence_review_summary(diag: dict[str, Any]) -> dict[str, Any]:
         "global_evidence_counts": {
             key: global_diag.get(key)
             for key in (
-                "accepted_count", "rejected_count", "considered_count",
-                "considered_alternative_count", "considered_overlap_count",
+                "accepted_count",
+                "rejected_count",
+                "considered_count",
+                "considered_alternative_count",
+                "considered_overlap_count",
             )
             if key in global_diag
         },
@@ -172,14 +185,25 @@ def _evidence_review_summary(diag: dict[str, Any]) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--audio", type=Path, required=True, help="已分离人声的 WAV(可 --skip-separation 语义,本脚本固定跳过分离)")
+    parser.add_argument(
+        "--audio",
+        type=Path,
+        required=True,
+        help="已分离人声的 WAV(可 --skip-separation 语义,本脚本固定跳过分离)",
+    )
     parser.add_argument("--profile", default="default")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / ".scratch/evidence_diff")
-    parser.add_argument("--language", default=None, help="覆盖语言(默认沿用 profile 配置,空则自动检测)")
+    parser.add_argument(
+        "--output-dir", type=Path, default=ROOT / ".scratch/evidence_diff"
+    )
+    parser.add_argument(
+        "--language", default=None, help="覆盖语言(默认沿用 profile 配置,空则自动检测)"
+    )
     args = parser.parse_args(argv)
 
     audio_path = args.audio if args.audio.is_absolute() else ROOT / args.audio
-    output_dir = args.output_dir if args.output_dir.is_absolute() else ROOT / args.output_dir
+    output_dir = (
+        args.output_dir if args.output_dir.is_absolute() else ROOT / args.output_dir
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     output_srt = output_dir / f"{audio_path.stem}.baseline.srt"
 
@@ -203,7 +227,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     stats = result["stats"]
     events = result["events"]
-    print(f"      完成: status={stats.status}, {len(events)} 条字幕, 耗时 {time.time() - started:.1f}s", flush=True)
+    print(
+        f"      完成: status={stats.status}, {len(events)} 条字幕, 耗时 {time.time() - started:.1f}s",
+        flush=True,
+    )
 
     backend = "faster-whisper"
     global_cfg = getattr(config.asr, "global_asr", None)
@@ -215,7 +242,10 @@ def main(argv: list[str] | None = None) -> int:
     engine = pipeline._get_asr_engine_for(backend)
     language = args.language or getattr(config.asr, "language", None) or None
     global_segments = engine.transcribe(audio, sample_rate, language=language)
-    print(f"      完成: {len(global_segments)} 段, 耗时 {time.time() - started:.1f}s", flush=True)
+    print(
+        f"      完成: {len(global_segments)} 段, 耗时 {time.time() - started:.1f}s",
+        flush=True,
+    )
 
     print("[5/5] 词级 diff 与指标汇总...", flush=True)
     baseline_tokens: list[tuple[str, float]] = []
@@ -225,7 +255,11 @@ def main(argv: list[str] | None = None) -> int:
     for segment in global_segments:
         global_tokens.extend(_segment_tokens(segment))
 
-    matcher = SequenceMatcher(a=[c for c, _ in baseline_tokens], b=[c for c, _ in global_tokens], autojunk=False)
+    matcher = SequenceMatcher(
+        a=[c for c, _ in baseline_tokens],
+        b=[c for c, _ in global_tokens],
+        autojunk=False,
+    )
     baseline_only: list[tuple[str, float]] = []
     global_only: list[tuple[str, float]] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
@@ -239,7 +273,9 @@ def main(argv: list[str] | None = None) -> int:
     deltas = _timing_deltas(baseline_tokens, global_tokens, matcher)
     m5 = {
         "sample_count": len(deltas),
-        "mean_abs_seconds": round(statistics.mean(abs(d) for d in deltas), 3) if deltas else None,
+        "mean_abs_seconds": round(statistics.mean(abs(d) for d in deltas), 3)
+        if deltas
+        else None,
         "median_seconds": statistics.median(deltas) if deltas else None,
         "p90_abs_seconds": _percentile([abs(d) for d in deltas], 90),
         "max_abs_seconds": max((abs(d) for d in deltas), default=None),
@@ -255,24 +291,38 @@ def main(argv: list[str] | None = None) -> int:
         "global_char_count": len(global_tokens),
         "M1_global_only_regions": m1_regions,
         "M2_baseline_only_regions": m2_regions,
-        "M3_evidence_review": _evidence_review_summary(stats.quality_diagnostics.get("evidence_review", {})),
+        "M3_evidence_review": _evidence_review_summary(
+            stats.quality_diagnostics.get("evidence_review", {})
+        ),
         "M4_global_hallucination": _global_hallucination_metrics(global_segments),
         "M5_timing_delta_seconds": m5,
         "coverage_audit": stats.global_diagnostics.get("physical_coverage", {}),
     }
     report_path = output_dir / f"{audio_path.stem}.evidence_diff.json"
-    report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
 
     print(f"\n===== 冒烟结果: {audio_path.name} =====")
-    print(f"基线字幕 {len(events)} 条 / {len(baseline_tokens)} 字符;全程识别 {len(global_segments)} 段 / {len(global_tokens)} 字符")
-    print(f"M1 全程独有区域: {len(m1_regions)} 处(其中与基线事件时间重叠 {sum(1 for r in m1_regions if r['overlaps_baseline_events'])} 处)")
+    print(
+        f"基线字幕 {len(events)} 条 / {len(baseline_tokens)} 字符;全程识别 {len(global_segments)} 段 / {len(global_tokens)} 字符"
+    )
+    print(
+        f"M1 全程独有区域: {len(m1_regions)} 处(其中与基线事件时间重叠 {sum(1 for r in m1_regions if r['overlaps_baseline_events'])} 处)"
+    )
     for region in m1_regions[:10]:
         tag = "重叠" if region["overlaps_baseline_events"] else "空白"
-        print(f"    [{tag}] {region['start']:.2f}-{region['end']:.2f}s: {region['text']}")
-    print(f"M2 分段独有区域: {len(m2_regions)} 处(其中与全程识别时间重叠 {sum(1 for r in m2_regions if r['overlaps_baseline_events'])} 处)")
+        print(
+            f"    [{tag}] {region['start']:.2f}-{region['end']:.2f}s: {region['text']}"
+        )
+    print(
+        f"M2 分段独有区域: {len(m2_regions)} 处(其中与全程识别时间重叠 {sum(1 for r in m2_regions if r['overlaps_baseline_events'])} 处)"
+    )
     for region in m2_regions[:10]:
         print(f"    {region['start']:.2f}-{region['end']:.2f}s: {region['text']}")
-    print(f"M3 evidence 评审: decisions={payload['M3_evidence_review']['decision_count']}, actions={payload['M3_evidence_review']['actions']}")
+    print(
+        f"M3 evidence 评审: decisions={payload['M3_evidence_review']['decision_count']}, actions={payload['M3_evidence_review']['actions']}"
+    )
     print(f"     风险码直方图: {payload['M3_evidence_review']['risk_code_histogram']}")
     print(f"M4 全程识别幻觉触发: {payload['M4_global_hallucination']}")
     print(f"M5 时间轴偏差(global-baseline): {m5}")

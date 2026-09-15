@@ -36,8 +36,7 @@ def _load_prompt_file(prompt_path: str) -> str:
 
     if not file_path.exists():
         raise FileNotFoundError(
-            f"Prompt file not found: {prompt_path}.md\n"
-            f"Expected location: {file_path}"
+            f"Prompt file not found: {prompt_path}.md\nExpected location: {file_path}"
         )
 
     return file_path.read_text(encoding="utf-8")

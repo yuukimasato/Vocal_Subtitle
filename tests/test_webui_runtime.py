@@ -45,7 +45,9 @@ def test_run_server_uses_diagnostic_server(monkeypatch):
         lambda: captured.update(installed=True),
     )
 
-    app = lambda scope, receive, send: None
+    def app(scope, receive, send):
+        return None
+
     runtime.run_server(app, host="127.0.0.1", port=9876)
 
     assert captured["installed"] is True

@@ -13,9 +13,9 @@ import copy
 import logging
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
@@ -40,8 +40,14 @@ logger = logging.getLogger(__name__)
 class AlignmentError(ValueError):
     """字幕对齐失败异常 — 自动版与修订版可能不匹配同一音频"""
 
-    def __init__(self, message: str, coverage: float = 0.0,
-                 n_auto: int = 0, n_manual: int = 0, n_matched: int = 0):
+    def __init__(
+        self,
+        message: str,
+        coverage: float = 0.0,
+        n_auto: int = 0,
+        n_manual: int = 0,
+        n_matched: int = 0,
+    ):
         super().__init__(message)
         self.coverage = coverage
         self.n_auto = n_auto
@@ -58,13 +64,13 @@ class AlignmentError(ValueError):
 class AlignmentPair:
     """一对对齐结果"""
 
-    auto_events: List[SubtitleEvent]   # 1个（精确匹配）或多个（合并）
-    manual_events: List[SubtitleEvent] # 1个（精确匹配）或多个（拆分）
+    auto_events: list[SubtitleEvent]  # 1个（精确匹配）或多个（合并）
+    manual_events: list[SubtitleEvent]  # 1个（精确匹配）或多个（拆分）
     match_type: str = "1:1"  # "1:1" | "1:N" | "N:1" | "N:M" | "INSERT" | "DELETE"
     time_iou: float = 0.0
-    text_similarity: float = 0.0      # 字面文本相似度 (Levenshtein)
+    text_similarity: float = 0.0  # 字面文本相似度 (Levenshtein)
     semantic_similarity: float = 0.0  # 语义相似度 (Sentence-BERT)
-    composite_score: float = 0.0      # 综合匹配得分
+    composite_score: float = 0.0  # 综合匹配得分
 
     @property
     def is_matched(self) -> bool:
@@ -98,6 +104,7 @@ class SemanticScorer:
         if self._model is not None:
             return
         from ..utils.model_loader import load_sentence_transformer
+
         self._model = load_sentence_transformer(
             "paraphrase-multilingual-MiniLM-L12-v2",
         )
@@ -111,7 +118,7 @@ class SemanticScorer:
         self._load_model()
         return self._model is not None
 
-    def encode(self, texts: List[str]) -> np.ndarray:
+    def encode(self, texts: list[str]) -> np.ndarray:
         """编码文本列表为语义向量
 
         Args:
@@ -127,8 +134,8 @@ class SemanticScorer:
 
     def pairwise_similarity(
         self,
-        auto_texts: List[str],
-        manual_texts: List[str],
+        auto_texts: list[str],
+        manual_texts: list[str],
     ) -> np.ndarray:
         """计算 auto × manual 的语义相似度矩阵
 
@@ -146,8 +153,12 @@ class SemanticScorer:
         manual_vecs = self.encode(manual_texts)
 
         # 归一化
-        auto_norm = auto_vecs / (np.linalg.norm(auto_vecs, axis=1, keepdims=True) + 1e-8)
-        manual_norm = manual_vecs / (np.linalg.norm(manual_vecs, axis=1, keepdims=True) + 1e-8)
+        auto_norm = auto_vecs / (
+            np.linalg.norm(auto_vecs, axis=1, keepdims=True) + 1e-8
+        )
+        manual_norm = manual_vecs / (
+            np.linalg.norm(manual_vecs, axis=1, keepdims=True) + 1e-8
+        )
 
         return auto_norm @ manual_norm.T
 
@@ -157,7 +168,7 @@ class SemanticScorer:
 # ---------------------------------------------------------------------------
 
 
-def parse_subtitle_file(file_path: Path) -> List[SubtitleEvent]:
+def parse_subtitle_file(file_path: Path) -> list[SubtitleEvent]:
     """从 SRT/ASS 文件中解析字幕事件
 
     Args:
@@ -179,7 +190,7 @@ def parse_subtitle_file(file_path: Path) -> List[SubtitleEvent]:
         raise ValueError(f"Unsupported subtitle format: {suffix}")
 
 
-def _parse_srt(path: Path) -> List[SubtitleEvent]:
+def _parse_srt(path: Path) -> list[SubtitleEvent]:
     """解析 SRT 文件"""
     content = path.read_text(encoding="utf-8")
     events = []
@@ -208,7 +219,7 @@ def _parse_srt(path: Path) -> List[SubtitleEvent]:
     return events
 
 
-def _parse_ass(path: Path) -> List[SubtitleEvent]:
+def _parse_ass(path: Path) -> list[SubtitleEvent]:
     """解析 ASS 文件"""
     content = path.read_text(encoding="utf-8")
     events = []
@@ -237,20 +248,22 @@ def _parse_ass(path: Path) -> List[SubtitleEvent]:
             if not text:
                 continue
             idx += 1
-            events.append(SubtitleEvent(
-                index=idx,
-                start=start,
-                end=end,
-                text=text,
-                speaker_label=speaker if speaker else None,
-            ))
+            events.append(
+                SubtitleEvent(
+                    index=idx,
+                    start=start,
+                    end=end,
+                    text=text,
+                    speaker_label=speaker if speaker else None,
+                )
+            )
     return events
 
 
-def _split_ass_dialogue(line: str) -> List[str]:
+def _split_ass_dialogue(line: str) -> list[str]:
     """分割 ASS Dialogue 行（处理文本中可能包含逗号的情况）"""
     # 移除 "Dialogue:" 前缀
-    rest = line[len("Dialogue:"):].strip()
+    rest = line[len("Dialogue:") :].strip()
     # ASS 前 9 个字段用逗号分隔，第 10 个是文本
     parts = rest.split(",", 9)
     return parts
@@ -313,21 +326,21 @@ class SubtitleAligner:
     # ------------------------------------------------------------------
 
     # Speaker label pattern for stripping
-    SPEAKER_PATTERN = re.compile(r'^\[Speaker [A-Z]\]\s*')
+    SPEAKER_PATTERN = re.compile(r"^\[Speaker [A-Z]\]\s*")
 
     @classmethod
     def _strip_speaker_label(cls, text: str) -> str:
         """移除自动字幕中的说话人标签（如 [Speaker A]），
         因为人工修订字幕通常不包含这些标签。"""
-        return cls.SPEAKER_PATTERN.sub('', text)
+        return cls.SPEAKER_PATTERN.sub("", text)
 
     def align(
         self,
-        auto_events: List[SubtitleEvent],
-        manual_events: List[SubtitleEvent],
+        auto_events: list[SubtitleEvent],
+        manual_events: list[SubtitleEvent],
         *,
         on_low_coverage: str = "raise",
-    ) -> List[AlignmentPair]:
+    ) -> list[AlignmentPair]:
         """对齐自动版与修订版字幕
 
         Args:
@@ -401,7 +414,9 @@ class SubtitleAligner:
                 )
 
         # 语义相似度中位数检查
-        semantic_sims = [p.semantic_similarity for p in matched if p.semantic_similarity > 0]
+        semantic_sims = [
+            p.semantic_similarity for p in matched if p.semantic_similarity > 0
+        ]
         if semantic_sims:
             median_sim = float(np.median(semantic_sims))
             if median_sim < 0.5:
@@ -414,7 +429,9 @@ class SubtitleAligner:
 
         logger.info(
             "Alignment: %d events → %d pairs (coverage=%.1f%%)",
-            max(n_auto, n_manual), len(pairs), coverage * 100,
+            max(n_auto, n_manual),
+            len(pairs),
+            coverage * 100,
         )
         return pairs
 
@@ -424,10 +441,10 @@ class SubtitleAligner:
 
     def _find_global_anchors(
         self,
-        auto_events: List[SubtitleEvent],
-        manual_events: List[SubtitleEvent],
+        auto_events: list[SubtitleEvent],
+        manual_events: list[SubtitleEvent],
         large_gap_threshold: float = 2.0,
-    ) -> List[Tuple[int, int]]:
+    ) -> list[tuple[int, int]]:
         """按大时间间隔切分序列，建立段落级锚点配对
 
         策略：
@@ -440,7 +457,11 @@ class SubtitleAligner:
         # 找 auto 的大间隔点
         auto_breaks = []
         for i in range(len(auto_events) - 1):
-            gap = manual_events[min(i, len(manual_events) - 2) + 1].start if i < len(manual_events) - 1 else 0
+            gap = (
+                manual_events[min(i, len(manual_events) - 2) + 1].start
+                if i < len(manual_events) - 1
+                else 0
+            )
             if i < len(auto_events) - 1:
                 gap_auto = auto_events[i + 1].start - auto_events[i].end
                 if gap_auto > large_gap_threshold:
@@ -500,22 +521,22 @@ class SubtitleAligner:
 
     @staticmethod
     def _split_by_breaks(
-        events: List[SubtitleEvent],
-        breaks: List[int],
-    ) -> List[List[SubtitleEvent]]:
+        events: list[SubtitleEvent],
+        breaks: list[int],
+    ) -> list[list[SubtitleEvent]]:
         """按断点将事件列表切分为段落"""
         paras = []
         start = 0
         for b in sorted(breaks):
             if b + 1 > start:
-                paras.append(events[start:b + 1])
+                paras.append(events[start : b + 1])
             start = b + 1
         if start < len(events):
             paras.append(events[start:])
         return paras
 
     @staticmethod
-    def _extract_keywords(texts: List[str], top_k: int = 5) -> set:
+    def _extract_keywords(texts: list[str], top_k: int = 5) -> set:
         """使用简单启发式提取关键词（高频词 + TF-IDF 近似）
 
         在不引入 sklearn 依赖的前提下，使用词频 × 逆文档频率近似。
@@ -529,17 +550,100 @@ class SubtitleAligner:
 
         # 停用词
         stopwords = {
-            "the", "a", "an", "is", "are", "was", "were", "be", "been",
-            "being", "have", "has", "had", "do", "does", "did", "will",
-            "would", "could", "should", "may", "might", "can", "shall",
-            "i", "you", "he", "she", "it", "we", "they", "me", "him",
-            "her", "us", "them", "my", "your", "his", "its", "our",
-            "their", "this", "that", "these", "those", "and", "but",
-            "or", "nor", "not", "so", "yet", "for", "in", "on", "at",
-            "to", "from", "with", "of", "by", "as", "if", "then", "than",
-            "的", "了", "在", "是", "我", "有", "和", "就", "不", "人",
-            "都", "一", "一个", "上", "也", "很", "到", "说", "要", "去",
-            "你", "会", "着", "没有", "看", "好", "自己", "这",
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "can",
+            "shall",
+            "i",
+            "you",
+            "he",
+            "she",
+            "it",
+            "we",
+            "they",
+            "me",
+            "him",
+            "her",
+            "us",
+            "them",
+            "my",
+            "your",
+            "his",
+            "its",
+            "our",
+            "their",
+            "this",
+            "that",
+            "these",
+            "those",
+            "and",
+            "but",
+            "or",
+            "nor",
+            "not",
+            "so",
+            "yet",
+            "for",
+            "in",
+            "on",
+            "at",
+            "to",
+            "from",
+            "with",
+            "of",
+            "by",
+            "as",
+            "if",
+            "then",
+            "than",
+            "的",
+            "了",
+            "在",
+            "是",
+            "我",
+            "有",
+            "和",
+            "就",
+            "不",
+            "人",
+            "都",
+            "一",
+            "一个",
+            "上",
+            "也",
+            "很",
+            "到",
+            "说",
+            "要",
+            "去",
+            "你",
+            "会",
+            "着",
+            "没有",
+            "看",
+            "好",
+            "自己",
+            "这",
         }
 
         eng_filtered = [w for w in english_words if w not in stopwords]
@@ -547,6 +651,7 @@ class SubtitleAligner:
 
         # 统计词频
         from collections import Counter
+
         freq = Counter(all_terms)
         return {term for term, _ in freq.most_common(top_k)}
 
@@ -556,20 +661,20 @@ class SubtitleAligner:
 
     def _anchored_dtw(
         self,
-        auto_events: List[SubtitleEvent],
-        manual_events: List[SubtitleEvent],
-        anchors: List[Tuple[int, int]],
-    ) -> List[AlignmentPair]:
+        auto_events: list[SubtitleEvent],
+        manual_events: list[SubtitleEvent],
+        anchors: list[tuple[int, int]],
+    ) -> list[AlignmentPair]:
         """在锚点约束的区间内运行 DTW"""
-        all_pairs: List[AlignmentPair] = []
+        all_pairs: list[AlignmentPair] = []
 
         for k in range(len(anchors) - 1):
             a_start, m_start = anchors[k]
             a_end, m_end = anchors[k + 1]
 
             # 区间内的子序列
-            a_sub = auto_events[a_start:a_end + 1]
-            m_sub = manual_events[m_start:m_end + 1]
+            a_sub = auto_events[a_start : a_end + 1]
+            m_sub = manual_events[m_start : m_end + 1]
 
             if not a_sub or not m_sub:
                 continue
@@ -582,9 +687,9 @@ class SubtitleAligner:
 
     def _dtw_align(
         self,
-        auto_sub: List[SubtitleEvent],
-        manual_sub: List[SubtitleEvent],
-    ) -> List[AlignmentPair]:
+        auto_sub: list[SubtitleEvent],
+        manual_sub: list[SubtitleEvent],
+    ) -> list[AlignmentPair]:
         """在子序列上运行语义增强 DTW
 
         使用标准 DTW 算法，代价函数融合时间 IoU + 文本相似度 + 语义相似度。
@@ -606,16 +711,30 @@ class SubtitleAligner:
                 manual_start, manual_end = manual_sub[j].start, manual_sub[j].end
                 iou = _time_iou(auto_start, auto_end, manual_start, manual_end)
                 if iou > self.min_iou:
-                    text_sim[i, j] = _levenshtein_similarity(auto_texts[i], manual_texts[j])
+                    text_sim[i, j] = _levenshtein_similarity(
+                        auto_texts[i], manual_texts[j]
+                    )
 
         # 预计算语义相似度（仅候选池内）
         semantic_sim = np.zeros((m, n))
-        if self._semantic_enabled and self._scorer is not None and self._scorer.is_available:
+        if (
+            self._semantic_enabled
+            and self._scorer is not None
+            and self._scorer.is_available
+        ):
             for i in range(m):
-                candidates = [j for j in range(n) if text_sim[i, j] > 0 or _time_iou(
-                    auto_sub[i].start, auto_sub[i].end,
-                    manual_sub[j].start, manual_sub[j].end,
-                ) > self.min_iou]
+                candidates = [
+                    j
+                    for j in range(n)
+                    if text_sim[i, j] > 0
+                    or _time_iou(
+                        auto_sub[i].start,
+                        auto_sub[i].end,
+                        manual_sub[j].start,
+                        manual_sub[j].end,
+                    )
+                    > self.min_iou
+                ]
                 if candidates:
                     try:
                         sims = self._scorer.pairwise_similarity(
@@ -649,9 +768,9 @@ class SubtitleAligner:
         for i in range(1, m + 1):
             for j in range(1, n + 1):
                 dtw[i, j] = cost[i - 1, j - 1] + min(
-                    dtw[i - 1, j],       # 插入 (auto 对 manual 无匹配 → INSERT)
-                    dtw[i, j - 1],       # 删除 (manual 对 auto 无匹配 → DELETE)
-                    dtw[i - 1, j - 1],   # 匹配
+                    dtw[i - 1, j],  # 插入 (auto 对 manual 无匹配 → INSERT)
+                    dtw[i, j - 1],  # 删除 (manual 对 auto 无匹配 → DELETE)
+                    dtw[i - 1, j - 1],  # 匹配
                 )
 
         # 回溯路径
@@ -702,17 +821,27 @@ class SubtitleAligner:
 
             # 计算综合指标
             iou = _time_iou(
-                min(e.start for e in a_evts), max(e.end for e in a_evts),
-                min(e.start for e in m_evts), max(e.end for e in m_evts),
+                min(e.start for e in a_evts),
+                max(e.end for e in a_evts),
+                min(e.start for e in m_evts),
+                max(e.end for e in m_evts),
             )
             a_text = " ".join(e.text for e in a_evts)
             m_text = " ".join(e.text for e in m_evts)
             text_sim_val = _levenshtein_similarity(a_text, m_text)
-            sem_sim_val = float(semantic_sim[a_start_i, m_start_j]) if a_count == 1 and m_count == 1 else float(np.mean([
-                semantic_sim[ai2, mj2]
-                for ai2 in range(a_start_i, min(a_start_i + a_count, m))
-                for mj2 in range(m_start_j, min(m_start_j + m_count, n))
-            ]))
+            sem_sim_val = (
+                float(semantic_sim[a_start_i, m_start_j])
+                if a_count == 1 and m_count == 1
+                else float(
+                    np.mean(
+                        [
+                            semantic_sim[ai2, mj2]
+                            for ai2 in range(a_start_i, min(a_start_i + a_count, m))
+                            for mj2 in range(m_start_j, min(m_start_j + m_count, n))
+                        ]
+                    )
+                )
+            )
 
             composite = (
                 self._time_weight * iou
@@ -720,15 +849,17 @@ class SubtitleAligner:
                 + self.semantic_weight * sem_sim_val
             )
 
-            pairs.append(AlignmentPair(
-                auto_events=a_evts,
-                manual_events=m_evts,
-                match_type=match_type,
-                time_iou=iou,
-                text_similarity=text_sim_val,
-                semantic_similarity=sem_sim_val,
-                composite_score=composite,
-            ))
+            pairs.append(
+                AlignmentPair(
+                    auto_events=a_evts,
+                    manual_events=m_evts,
+                    match_type=match_type,
+                    time_iou=iou,
+                    text_similarity=text_sim_val,
+                    semantic_similarity=sem_sim_val,
+                    composite_score=composite,
+                )
+            )
             i += 1
 
         return pairs
@@ -739,10 +870,10 @@ class SubtitleAligner:
 
     def _residual_match(
         self,
-        pairs: List[AlignmentPair],
-        auto_events: List[SubtitleEvent],
-        manual_events: List[SubtitleEvent],
-    ) -> List[AlignmentPair]:
+        pairs: list[AlignmentPair],
+        auto_events: list[SubtitleEvent],
+        manual_events: list[SubtitleEvent],
+    ) -> list[AlignmentPair]:
         """对未匹配项做最后一次宽松匹配"""
         matched_auto = set()
         matched_manual = set()
@@ -760,19 +891,23 @@ class SubtitleAligner:
 
         # INSERT: auto 有但 manual 没有
         for e in unmatched_auto:
-            pairs.append(AlignmentPair(
-                auto_events=[e],
-                manual_events=[],
-                match_type="INSERT",
-            ))
+            pairs.append(
+                AlignmentPair(
+                    auto_events=[e],
+                    manual_events=[],
+                    match_type="INSERT",
+                )
+            )
 
         # DELETE: manual 有但 auto 没有
         for e in unmatched_manual:
-            pairs.append(AlignmentPair(
-                auto_events=[],
-                manual_events=[e],
-                match_type="DELETE",
-            ))
+            pairs.append(
+                AlignmentPair(
+                    auto_events=[],
+                    manual_events=[e],
+                    match_type="DELETE",
+                )
+            )
 
         return pairs
 
@@ -781,7 +916,7 @@ class SubtitleAligner:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _demote_unsupported_pairs(pairs: List[AlignmentPair]) -> List[AlignmentPair]:
+    def _demote_unsupported_pairs(pairs: list[AlignmentPair]) -> list[AlignmentPair]:
         """将零证据配对（时间 IoU / 文本 / 语义相似度全为 0）拆回 INSERT/DELETE
 
         DTW 的单调性约束会把无任何对应关系的行强制纳入配对路径（分组为
@@ -789,7 +924,7 @@ class SubtitleAligner:
         强制配对。按 D20 设计拆为：人工侧行标 DELETE（重构行）、自动侧行标
         INSERT，使其不计入对齐覆盖率、不参与时间轴维度学习。
         """
-        demoted: List[AlignmentPair] = []
+        demoted: list[AlignmentPair] = []
         for pair in pairs:
             if (
                 pair.match_type in ("1:1", "1:N", "N:1", "N:M")
@@ -798,19 +933,27 @@ class SubtitleAligner:
                 and pair.semantic_similarity <= 0.0
             ):
                 for event in pair.auto_events:
-                    demoted.append(AlignmentPair(
-                        auto_events=[event], manual_events=[], match_type="INSERT",
-                    ))
+                    demoted.append(
+                        AlignmentPair(
+                            auto_events=[event],
+                            manual_events=[],
+                            match_type="INSERT",
+                        )
+                    )
                 for event in pair.manual_events:
-                    demoted.append(AlignmentPair(
-                        auto_events=[], manual_events=[event], match_type="DELETE",
-                    ))
+                    demoted.append(
+                        AlignmentPair(
+                            auto_events=[],
+                            manual_events=[event],
+                            match_type="DELETE",
+                        )
+                    )
             else:
                 demoted.append(pair)
         return demoted
 
     @staticmethod
-    def _dedup_pairs(pairs: List[AlignmentPair]) -> List[AlignmentPair]:
+    def _dedup_pairs(pairs: list[AlignmentPair]) -> list[AlignmentPair]:
         """去重合并对齐对（按 auto index）"""
         seen = set()
         result = []

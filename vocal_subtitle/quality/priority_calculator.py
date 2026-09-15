@@ -11,16 +11,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
 
 class PriorityLevel(str, Enum):
     """优先级等级"""
-    IMMEDIATE = "immediate"          # ≥ 30 立即修复
-    THIS_VERSION = "this_version"    # 15-29 本版本修复
-    SCHEDULED = "scheduled"          # ≤ 14 排期
+
+    IMMEDIATE = "immediate"  # ≥ 30 立即修复
+    THIS_VERSION = "this_version"  # 15-29 本版本修复
+    SCHEDULED = "scheduled"  # ≤ 14 排期
 
 
 # 各因子的有效范围
@@ -67,10 +68,10 @@ PRIORITY_THRESHOLDS: list[tuple[int, PriorityLevel]] = [
 class PriorityFactors:
     """优先级四因子"""
 
-    impact_range: int = 1       # 1-5 影响范围
-    user_severity: int = 1      # 1-5 用户严重度
-    reproducibility: int = 1    # 1-3 可复现性
-    fix_confidence: int = 1     # 1-3 修复置信度
+    impact_range: int = 1  # 1-5 影响范围
+    user_severity: int = 1  # 1-5 用户严重度
+    reproducibility: int = 1  # 1-3 可复现性
+    fix_confidence: int = 1  # 1-3 修复置信度
 
     def validate(self) -> None:
         """验证各因子是否在有效范围内。
@@ -81,9 +82,7 @@ class PriorityFactors:
         for name, (lo, hi) in FACTOR_RANGES.items():
             value = getattr(self, name)
             if not (lo <= value <= hi):
-                raise ValueError(
-                    f"{name} 必须在 [{lo}, {hi}] 范围内，当前值: {value}"
-                )
+                raise ValueError(f"{name} 必须在 [{lo}, {hi}] 范围内，当前值: {value}")
 
     def to_dict(self) -> dict:
         return {

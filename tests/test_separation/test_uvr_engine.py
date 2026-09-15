@@ -40,7 +40,9 @@ class TestShortAudioGuard:
 
     def _write_wav(self, tmp_path, seconds, rate=24000, subtype="PCM_16"):
         frames = int(seconds * rate)
-        data = (np.sin(np.linspace(0, 440 * 2 * np.pi, frames)) * 0.3).astype(np.float32)
+        data = (np.sin(np.linspace(0, 440 * 2 * np.pi, frames)) * 0.3).astype(
+            np.float32
+        )
         path = tmp_path / f"in_{seconds:.2f}s_{rate}.wav"
         sf.write(path, data, rate, subtype=subtype)
         return path

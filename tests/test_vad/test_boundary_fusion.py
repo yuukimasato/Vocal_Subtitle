@@ -12,14 +12,16 @@ class TestBoundaryFusion:
 
     @pytest.fixture
     def fusion(self):
-        return BoundaryFusion(FusionConfig(
-            grid_resolution=0.01,
-            min_consensus=2,
-            high_conf_padding=0.03,
-            low_conf_padding=0.12,
-            min_speech_duration=0.25,
-            sample_rate=16000,
-        ))
+        return BoundaryFusion(
+            FusionConfig(
+                grid_resolution=0.01,
+                min_consensus=2,
+                high_conf_padding=0.03,
+                low_conf_padding=0.12,
+                min_speech_duration=0.25,
+                sample_rate=16000,
+            )
+        )
 
     @pytest.fixture
     def sample_audio_3s(self):
@@ -28,11 +30,13 @@ class TestBoundaryFusion:
         audio = np.zeros(int(sample_rate * 3.0), dtype=np.float32)
         # 语音段 1: 0.0-1.0s
         t1 = np.arange(0, int(1.0 * sample_rate)) / sample_rate
-        audio[:len(t1)] = np.sin(2 * np.pi * 440 * t1).astype(np.float32) * 0.5
+        audio[: len(t1)] = np.sin(2 * np.pi * 440 * t1).astype(np.float32) * 0.5
         # 语音段 2: 1.5-2.5s
         t2 = np.arange(0, int(1.0 * sample_rate)) / sample_rate
         start = int(1.5 * sample_rate)
-        audio[start:start + len(t2)] = np.sin(2 * np.pi * 880 * t2).astype(np.float32) * 0.5
+        audio[start : start + len(t2)] = (
+            np.sin(2 * np.pi * 880 * t2).astype(np.float32) * 0.5
+        )
         return audio
 
     def test_fuse_three_methods(self, fusion, sample_audio_3s):
@@ -43,7 +47,10 @@ class TestBoundaryFusion:
         # RMS 方法由融合器内部生成
 
         result = fusion.fuse(
-            silero, ffmpeg, sample_audio_3s, 16000,
+            silero,
+            ffmpeg,
+            sample_audio_3s,
+            16000,
         )
         assert len(result) >= 1
         for seg in result:
@@ -62,7 +69,10 @@ class TestBoundaryFusion:
         ]
 
         result = fusion.fuse(
-            silero, ffmpeg, sample_audio_3s, 16000,
+            silero,
+            ffmpeg,
+            sample_audio_3s,
+            16000,
         )
         # 至少应有一些结果
         assert len(result) >= 0  # 不崩溃即可，结果取决于音频内容
@@ -73,7 +83,10 @@ class TestBoundaryFusion:
         ffmpeg = [SpeechSegment(start=0.2, end=0.8, confidence=0.95)]
 
         result = fusion.fuse(
-            silero, ffmpeg, sample_audio_3s, 16000,
+            silero,
+            ffmpeg,
+            sample_audio_3s,
+            16000,
         )
         for seg in result:
             if seg.confidence >= 0.9:
@@ -122,8 +135,11 @@ class TestBoundaryFusion:
         high_conf_mask[50:151] = True
 
         result = fusion._mask_to_segments(
-            speech_mask, high_conf_mask,
-            resolution=0.01, total_duration=2.0, min_duration=0.25,
+            speech_mask,
+            high_conf_mask,
+            resolution=0.01,
+            total_duration=2.0,
+            min_duration=0.25,
         )
         assert len(result) >= 1
         # 应有一个从 0.5s 开始的段
@@ -137,12 +153,15 @@ class TestBoundaryFusion:
         high_conf_mask = np.zeros(num_bins, dtype=bool)
 
         speech_mask[50:151] = True
-        high_conf_mask[50:100] = True   # 前一半高置信
+        high_conf_mask[50:100] = True  # 前一半高置信
         high_conf_mask[100:151] = False  # 后一半低置信
 
         result = fusion._mask_to_segments(
-            speech_mask, high_conf_mask,
-            resolution=0.01, total_duration=2.0, min_duration=0.25,
+            speech_mask,
+            high_conf_mask,
+            resolution=0.01,
+            total_duration=2.0,
+            min_duration=0.25,
         )
         # 整体 confidence 应该是低置信度（因为包含低置信区域）
         assert len(result) >= 1
@@ -159,8 +178,11 @@ class TestBoundaryFusion:
         high_conf_mask[50:61] = True
 
         result = fusion._mask_to_segments(
-            speech_mask, high_conf_mask,
-            resolution=0.01, total_duration=2.0, min_duration=0.25,
+            speech_mask,
+            high_conf_mask,
+            resolution=0.01,
+            total_duration=2.0,
+            min_duration=0.25,
         )
         assert len(result) == 0
 
@@ -171,7 +193,8 @@ class TestBoundaryFusion:
     def test_rms_detection_on_speech(self, sample_audio_3s):
         """RMS 检测应能从明确语音+静音的音频中检测到语音段"""
         segments = BoundaryFusion._detect_by_rms_energy(
-            sample_audio_3s, 16000,
+            sample_audio_3s,
+            16000,
         )
         # 3s 音频含 ~2s 语音，应检测到多个语音段
         assert len(segments) >= 1
@@ -183,6 +206,7 @@ class TestBoundaryFusion:
     def test_rms_detection_on_silence(self, sample_audio_silence):
         """纯静音应返回空列表"""
         segments = BoundaryFusion._detect_by_rms_energy(
-            sample_audio_silence, 16000,
+            sample_audio_silence,
+            16000,
         )
         assert segments == []

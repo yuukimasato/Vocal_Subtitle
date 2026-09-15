@@ -1,27 +1,29 @@
 from vocal_subtitle.asr.base import TranscriptionSegment, WordTimestamp
+from vocal_subtitle.asr.evidence import EvidenceDecision, EvidenceWord
 from vocal_subtitle.diarization.base import DiarizationResult, SpeakerTurn
+from vocal_subtitle.physical.decision_ir import decisions_to_global_transcript
 from vocal_subtitle.physical.ir import (
     GlobalSpeakerTimeline,
     GlobalTranscript,
     adapt_diarization_result,
     adapt_transcription_segments,
 )
-from vocal_subtitle.physical.decision_ir import decisions_to_global_transcript
-from vocal_subtitle.asr.evidence import EvidenceDecision, EvidenceWord
 
 
 def test_transcription_adapter_creates_stable_absolute_word_ids():
-    source = [TranscriptionSegment(
-        text="hello world",
-        start=0.5,
-        end=2.0,
-        words=[
-            WordTimestamp("hello", 0.5, 1.0, confidence=0.8, speaker_id=2),
-            WordTimestamp("world", 1.1, 2.0, confidence=0.9),
-        ],
-        avg_logprob=-0.2,
-        language="en",
-    )]
+    source = [
+        TranscriptionSegment(
+            text="hello world",
+            start=0.5,
+            end=2.0,
+            words=[
+                WordTimestamp("hello", 0.5, 1.0, confidence=0.8, speaker_id=2),
+                WordTimestamp("world", 1.1, 2.0, confidence=0.9),
+            ],
+            avg_logprob=-0.2,
+            language="en",
+        )
+    ]
     transcript = adapt_transcription_segments(
         source,
         source_window_id="ctx-a",
@@ -34,9 +36,15 @@ def test_transcription_adapter_creates_stable_absolute_word_ids():
         "gw:ctx-a:seg-a:0000:w0000",
         "gw:ctx-a:seg-a:0000:w0001",
     ]
-    assert [(word.raw_start, word.raw_end) for word in transcript.words] == [(10.5, 11.0), (11.1, 12.0)]
+    assert [(word.raw_start, word.raw_end) for word in transcript.words] == [
+        (10.5, 11.0),
+        (11.1, 12.0),
+    ]
     assert transcript.words[0].speaker_id == 2
-    assert GlobalTranscript.from_dict(transcript.to_dict()).to_dict() == transcript.to_dict()
+    assert (
+        GlobalTranscript.from_dict(transcript.to_dict()).to_dict()
+        == transcript.to_dict()
+    )
 
 
 def test_global_speaker_timeline_preserves_canonical_ids_and_derives_speaker_list():
@@ -49,7 +57,10 @@ def test_global_speaker_timeline_preserves_canonical_ids_and_derives_speaker_lis
     timeline = adapt_diarization_result(result, duration=2.0)
     assert timeline.speaker_ids == [2, 4]
     assert [turn.speaker_id for turn in timeline.turns] == [4, 2]
-    assert GlobalSpeakerTimeline.from_dict(timeline.to_dict()).to_dict() == timeline.to_dict()
+    assert (
+        GlobalSpeakerTimeline.from_dict(timeline.to_dict()).to_dict()
+        == timeline.to_dict()
+    )
 
 
 def test_decision_projection_repairs_word_order_before_global_ir_validation():
