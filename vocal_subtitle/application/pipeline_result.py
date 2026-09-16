@@ -57,6 +57,10 @@ class PipelineStats:
     speaker_conflict_count: int = 0
     unknown_speaker_count: int = 0
 
+    hallucination_filter_version: str = ""
+    hallucination_dropped_count: int = 0
+    hallucination_drop_reasons: dict[str, int] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
         result = {
             "run_id": self.run_id,
@@ -98,12 +102,9 @@ class PipelineStats:
             "language_probability": self.language_probability,
             "asr_route_version": self.asr_route_version,
             "quality_gate_version": self.quality_gate_version,
-            "hallucination_filter_version": getattr(
-                self, "hallucination_filter_version", ""
-            ),
-            "hallucination_dropped_count": getattr(
-                self, "hallucination_dropped_count", 0
-            ),
+            "hallucination_filter_version": self.hallucination_filter_version,
+            "hallucination_dropped_count": self.hallucination_dropped_count,
+            "hallucination_drop_reasons": self.hallucination_drop_reasons,
         }
         if self.speaker_count:
             result["speaker_count"] = self.speaker_count
@@ -163,4 +164,6 @@ class PipelineStats:
             stats.hallucination_filter_version = payload["hallucination_filter_version"]
         if "hallucination_dropped_count" in payload:
             stats.hallucination_dropped_count = payload["hallucination_dropped_count"]
+        if "hallucination_drop_reasons" in payload:
+            stats.hallucination_drop_reasons = payload["hallucination_drop_reasons"]
         return stats

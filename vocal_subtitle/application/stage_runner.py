@@ -263,15 +263,16 @@ class PipelineStageMixin:
         return getattr(self, "_resolved_language", None) or self.config.asr.language
 
     @staticmethod
-    def _filter_asr_results(seg_results: list) -> list:
+    def _filter_asr_results(seg_results: list) -> tuple[list, dict[str, int]]:
         """Filter hallucinated ASR segments using configured thresholds.
 
         Training phrases, duplicate cadences, and low-confidence regions
         that look like ASR artefacts are dropped so they never become
         subtitle events.
 
-        Returns the same list shape as input: a flat list of segments per
-        VAD chunk, or an empty list when every segment is filtered.
+        Returns a tuple of (filtered segments, drop counts by reason),
+        keeping the input shape: a flat list of segments per VAD chunk,
+        or an empty list when every segment is filtered.
         """
         # Common training/evaluation phrases that Whisper often hallucinates
         training_phrases = frozenset(
@@ -284,7 +285,7 @@ class PipelineStageMixin:
             }
         )
         filtered = []
-        _dropped = 0
+        drop_reasons: dict[str, int] = {}
         from ..asr.hallucination import collapse_repeated_cjk_tokens
 
         for seg in seg_results:
@@ -303,17 +304,43 @@ class PipelineStageMixin:
             # Strip trailing punctuation that text normalizer may have added
             cleaned = text.rstrip(".,!?;:，。！？；：")
             if cleaned in training_phrases:
-                _dropped += 1
+                drop_reasons["training_phrase"] = (
+                    drop_reasons.get("training_phrase", 0) + 1
+                )
                 continue
             filtered.append(seg)
-        return filtered, _dropped
+        return filtered, drop_reasons
 
-    @staticmethod
-    def _apply_hallucination_stats(stats) -> None:
+    def _reset_hallucination_counters(self) -> None:
+        """Reset per-run hallucination-filter accumulators."""
+        self._hallucination_dropped_count = 0
+        self._hallucination_drop_reasons = {}
+
+    def _record_hallucination_drops(self, drop_reasons: dict[str, int]) -> None:
+        """Accumulate hallucination-filter drop counts across VAD chunks."""
+        if not drop_reasons:
+            return
+        totals = getattr(self, "_hallucination_drop_reasons", None)
+        if not isinstance(totals, dict):
+            totals = {}
+        self._hallucination_drop_reasons = totals
+        for reason, count in drop_reasons.items():
+            totals[reason] = totals.get(reason, 0) + count
+        self._hallucination_dropped_count = getattr(
+            self, "_hallucination_dropped_count", 0
+        ) + sum(drop_reasons.values())
+
+    def _apply_hallucination_stats(self, stats) -> None:
         """Write hallucination-filter diagnostics into PipelineStats."""
-        stats.hallucination_filter_version = "v1"
-        stats.hallucination_dropped_count = 1
-        stats.hallucination_drop_reasons = {"training_phrase": 1}
+        stats.hallucination_filter_version = (
+            self.config.asr.hallucination_filter_version
+        )
+        stats.hallucination_dropped_count = int(
+            getattr(self, "_hallucination_dropped_count", 0)
+        )
+        stats.hallucination_drop_reasons = dict(
+            getattr(self, "_hallucination_drop_reasons", {}) or {}
+        )
 
     def _run_asr(
         self,
@@ -426,10 +453,8 @@ class PipelineStageMixin:
                     # 缓存命中后仍需应用文本规范化和幻觉过滤
                     self._apply_text_normalization(cached)
                     cached = self._dedup_overlapping_segments(cached)
-                    cached, _dropped = self._filter_asr_results(cached)
-                    self._hallucination_dropped_count = (
-                        getattr(self, "_hallucination_dropped_count", 0) + _dropped
-                    )
+                    cached, cached_drops = self._filter_asr_results(cached)
+                    self._record_hallucination_drops(cached_drops)
                     # A cached empty list can be the intentional result of
                     # filtering a previously successful recognition (for
                     # example a known hallucination phrase). It must not be
@@ -514,10 +539,8 @@ class PipelineStageMixin:
                 seg_results = self._dedup_overlapping_segments(seg_results)
 
                 # ★ 幻觉过滤：移除训练短语、重复模式等
-                seg_results, _dropped = self._filter_asr_results(seg_results)
-                self._hallucination_dropped_count = (
-                    getattr(self, "_hallucination_dropped_count", 0) + _dropped
-                )
+                seg_results, seg_drops = self._filter_asr_results(seg_results)
+                self._record_hallucination_drops(seg_drops)
 
                 results.append(seg_results)
 

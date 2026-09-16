@@ -39,7 +39,7 @@ def _matched(
     return classify_expected_match(expected, predicted)["matched"]
 
 
-def _rate(count: int, denominator: int) -> float:
+def _rate(count: float, denominator: float) -> float:
     return round(count / denominator, 6) if denominator else 0.0
 
 

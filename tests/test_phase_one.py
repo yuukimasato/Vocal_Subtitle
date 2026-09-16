@@ -76,7 +76,10 @@ def test_phase_one_cache_key_contains_filter_policy():
 
 def test_pipeline_records_filter_diagnostics():
     pipeline = Pipeline(PipelineConfig())
-    pipeline._filter_asr_results([TranscriptionSegment("感谢观看", 0.0, 1.0)])
+    _, drops = pipeline._filter_asr_results(
+        [TranscriptionSegment("感谢观看", 0.0, 1.0)]
+    )
+    pipeline._record_hallucination_drops(drops)
     stats = PipelineStats(input_path=Path("audio.wav"), duration_seconds=1.0)
 
     pipeline._apply_hallucination_stats(stats)
@@ -88,13 +91,13 @@ def test_pipeline_records_filter_diagnostics():
 
 
 def test_filter_collapses_fun_asr_unbounded_cjk_repetition():
-    segments, dropped = Pipeline._filter_asr_results(
+    segments, drops = Pipeline._filter_asr_results(
         [
             TranscriptionSegment("我 我 我 我 我 我", 0.0, 1.0),
         ]
     )
 
-    assert dropped == 0
+    assert drops == {}
     assert [segment.text for segment in segments] == ["我"]
 
 

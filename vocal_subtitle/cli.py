@@ -5,6 +5,7 @@
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -189,7 +190,7 @@ def run(
     config = loader.load_profile(profile)
 
     # 处理命令行覆盖参数
-    overrides = {}
+    overrides: dict[str, Any] = {}
     if separator:
         overrides["separator"] = separator
     if uvr_model:

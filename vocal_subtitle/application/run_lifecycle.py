@@ -582,6 +582,8 @@ class PipelineLifecycleMixin:
         """ASR 阶段（Task 3）：路由决策 + global/骨架/多块/legacy 各路径产出事件。"""
         stats = context.stats
         state = context.state
+        # 幻觉过滤计数按 run 归零，避免 Pipeline 实例跨任务复用时串值
+        self._reset_hallucination_counters()
         audio = state["audio"]
         sample_rate = state["sample_rate"]
         vocals_path = state["vocals_path"]
@@ -1155,3 +1157,4 @@ class PipelineLifecycleMixin:
         state["global_completed"] = global_completed
         state["quality_speech_intervals"] = quality_speech_intervals
         state["global_transcript"] = global_transcript
+        self._apply_hallucination_stats(stats)
