@@ -3,6 +3,7 @@
 import pytest
 from click.testing import CliRunner
 
+from vocal_subtitle import __version__
 from vocal_subtitle.cli import main
 
 
@@ -17,7 +18,7 @@ class TestCLI:
         """--version 选项"""
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.2.0" in result.output
+        assert __version__ in result.output
 
     def test_profiles(self, runner):
         """profiles 命令"""

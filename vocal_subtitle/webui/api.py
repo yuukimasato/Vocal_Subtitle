@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from .. import __version__
 from ..application.pipeline_result import PipelineStats
 from ..asr.funasr_manager import FunASRPrepareError
 from ..config import ConfigLoader, PipelineConfig
@@ -175,7 +176,7 @@ router.include_router(subtitles_router)
 @router.get("/health")
 async def health_check():
     """健康检查端点"""
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status": "ok", "version": __version__}
 
 
 # Compatibility exports used by integrations and historical tests.

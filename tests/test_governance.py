@@ -463,7 +463,9 @@ def test_verify_item_persists(tmp_path):
 
 
 def test_current_state(tmp_path):
+    from vocal_subtitle import __version__
+
     mgr = ReleaseManager(storage_dir=tmp_path)
     state = mgr.current_state()
-    assert state["current_version"] == "0.2.0"
+    assert state["current_version"] == __version__
     assert state["status"] == "development"

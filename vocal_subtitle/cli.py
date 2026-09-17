@@ -9,6 +9,7 @@ from typing import Any
 
 import click
 
+from . import __version__
 from .application.pipeline_result import PipelineStats
 from .cli_commands.administration import register as register_administration
 from .cli_commands.common import (
@@ -36,7 +37,7 @@ from .pipeline import Pipeline
 
 
 @click.group()
-@click.version_option(version="0.2.0", prog_name="vocal-subtitle")
+@click.version_option(version=__version__, prog_name="vocal-subtitle")
 def main():
     """人声分离 + 字幕生成全链路工具
 

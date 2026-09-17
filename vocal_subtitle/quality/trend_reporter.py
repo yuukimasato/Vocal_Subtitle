@@ -127,7 +127,7 @@ class TrendReporter:
     使用示例:
         reporter = TrendReporter()
         report = reporter.build_report(
-            version="0.2.0", baseline="0.1.0",
+            version="0.3.0", baseline="0.2.0",
             date="2026-08-15",
             trends={"D0_engineering": {"test_pass_rate": 0.98, ...}}
         )

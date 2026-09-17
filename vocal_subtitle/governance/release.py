@@ -152,9 +152,9 @@ class ReleaseManager:
     使用示例:
         mgr = ReleaseManager()
         status, blockers = mgr.classify(production_criteria)
-        checklist = mgr.check_pre_release("0.2.0")
+        checklist = mgr.check_pre_release("0.3.0")
         mgr.verify_item(checklist.version, "dependencies", "lock_files", True)
-        notes = mgr.release_notes(version="0.2.0", status=ReleaseStatus.PRODUCTION_USABLE,
+        notes = mgr.release_notes(version="0.3.0", status=ReleaseStatus.PRODUCTION_USABLE,
                                    changes={...}, upgrades=[...])
     """
 
@@ -822,8 +822,11 @@ class ReleaseManager:
         """获取当前发布状态摘要。"""
         records = self._load_releases()
         if not records:
+            # 延迟导入：包 __init__ 会装载本模块，顶层反向导入成环
+            from .. import __version__
+
             return {
-                "current_version": "0.2.0",
+                "current_version": __version__,
                 "status": "development",
                 "target": "production-usable",
                 "blockers": [

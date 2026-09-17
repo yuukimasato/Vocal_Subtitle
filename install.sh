@@ -899,7 +899,7 @@ fi
 
 # 6b. CLI 可用性验证
 if command -v vocal-subtitle &> /dev/null; then
-    CLI_VER=$(vocal-subtitle --version 2>&1 || echo "0.2.0")
+    CLI_VER=$(vocal-subtitle --version 2>&1 || echo "0.3.0")
     ok "CLI 命令可用: vocal-subtitle ($CLI_VER)"
 else
     warn "CLI 命令不在 PATH 中，确认虚拟环境已激活"

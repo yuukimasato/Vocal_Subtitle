@@ -45,6 +45,14 @@
 
 ## 快速开始
 
+### 从 Release 安装 (Debian)
+
+```bash
+# 从 GitHub Releases 下载最新 deb 包
+sudo apt install ./vocal-subtitle_0.3.0_all.deb
+vocal-subtitle-gui              # 安装后脚本会自动准备环境并启动 Web GUI
+```
+
 ### 一键部署 (推荐)
 
 ```bash
@@ -637,6 +645,15 @@ python scripts/run_benchmarks.py
 # 字幕时间轴对比
 python scripts/compare_timeline.py --auto output.srt --ground-truth test/中文多人员测试音频字幕.ass
 ```
+
+## 版本与变更日志
+
+当前版本：**v0.3.0**（2026-09-18）。
+
+- 完整变更列表见 [CHANGELOG.md](CHANGELOG.md)
+- 各版本下载与发布说明见 [GitHub Releases](https://github.com/yuukimasato/Vocal_Subtitle/releases)
+
+v0.3.0 重点：高精度生产链（门控 profile + 骨架分段主干）、说话人身份主干与时间轴仲裁层、四场景反馈学习闭环、结构化流水线错误与阶段质量报告、自动 ASR 路由与多引擎复核。
 
 ## 协议
 

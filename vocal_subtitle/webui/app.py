@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from .. import __version__
 from .api import router as api_router
 from .websocket import router as ws_router
 
@@ -51,7 +52,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Vocal Subtitle",
         description="人声分离 + 字幕生成全链路工具 — Web GUI",
-        version="0.2.0",
+        version=__version__,
         lifespan=_lifespan,
     )
 
